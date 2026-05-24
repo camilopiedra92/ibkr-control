@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FlexQueryResponse queryName="YTD" type="AF">
+  <FlexStatements count="1">
+    <FlexStatement accountId="U99999001" fromDate="2025-01-01" toDate="2025-12-31"
+                   period="YearToDate" whenGenerated="2026-05-24;10:00:00">
+      <AccountInformation accountId="U99999001" currency="USD"
+                          acctAlias="Test Account" name="E2E Test User"/>
+      <Trades>
+        <Trade accountId="U99999001" currency="USD" assetCategory="STK"
+               symbol="AAPL" description="APPLE INC" conid="265598"
+               tradeID="111111111" reportDate="2025-03-15" tradeDate="2025-03-15"
+               settleDateTarget="2025-03-18" transactionType="ExchTrade"
+               exchange="NASDAQ" quantity="10" tradePrice="175.00"
+               tradeMoney="1750.00" proceeds="-1750.00" taxes="0"
+               ibCommission="-1.00" ibCommissionCurrency="USD"
+               netCash="-1751.00" closePrice="175.50" openCloseIndicator="O"
+               cost="-1751.00" fifoPnlRealized="0" fxPnl="0" mtmPnl="5.00"
+               buySell="BUY" ibOrderID="222222222" isAPIOrder="N"
+               levelOfDetail="EXECUTION" />
+      </Trades>
+      <ClosedLots/>
+      <OpenPositions>
+        <OpenPosition accountId="U99999001" currency="USD" assetCategory="STK"
+                      symbol="AAPL" description="APPLE INC" conid="265598"
+                      reportDate="2025-03-15" position="10"
+                      markPrice="175.50" positionValue="1755.00"
+                      openPrice="175.10" costBasisPrice="175.10"
+                      costBasisMoney="1751.00" percentOfNAV="5.0"
+                      fifoPnlUnrealized="4.00" side="Long"
+                      openDateTime="2025-03-15;09:30:00"
+                      levelOfDetail="LOT" />
+      </OpenPositions>
+      <CashTransactions/>
+      <Transfers/>
+    </FlexStatement>
+  </FlexStatements>
+</FlexQueryResponse>
