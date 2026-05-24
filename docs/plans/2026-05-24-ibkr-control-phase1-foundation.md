@@ -2263,7 +2263,7 @@ git commit -m "test(e2e): Playwright covering register → login → settings �
 **Files:**
 - Create: `.github/workflows/ci.yml`
 
-- [ ] **Step 1: Crear workflow CI**
+- [x] **Step 1: Crear workflow CI**
 
 `/Users/owner/Development/ibkr-control/.github/workflows/ci.yml`:
 
@@ -2318,7 +2318,7 @@ jobs:
           pnpm build
 ```
 
-- [ ] **Step 2: Commit (E2E queda fuera del CI por requerir Postgres + servicios; corre local)**
+- [x] **Step 2: Commit (E2E queda fuera del CI por requerir Postgres + servicios; corre local)**
 
 ```bash
 git add .github/
