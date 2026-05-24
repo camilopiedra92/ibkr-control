@@ -27,9 +27,11 @@ export function FlexCredentialsSection() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function handleRotateSuccess(updated: FlexCredentialsRead) {
-    setCreds(updated);
+  function handleRotateSuccess() {
+    // PUT /api/credentials/flex returns {"ok": true}, not the updated credentials.
+    // Refetch the metadata to get the updated query_id and last_rotated_at.
     setShowModal(false);
+    fetchCreds();
   }
 
   function formatDate(iso: string | null | undefined): string {

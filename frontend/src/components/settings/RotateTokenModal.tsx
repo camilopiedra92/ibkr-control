@@ -7,13 +7,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   updateFlexCredentialsApiCredentialsFlexPut,
-  FlexCredentialsRead,
   FlexCredentialsUpdate,
 } from "@/lib/api";
 
 interface RotateTokenModalProps {
   currentQueryId: string;
-  onSuccess: (updated: FlexCredentialsRead) => void;
+  // The PUT /api/credentials/flex endpoint returns {"ok": true}, not FlexCredentialsRead.
+  // The caller is responsible for refetching updated credentials after success.
+  onSuccess: () => void;
   onCancel: () => void;
 }
 
@@ -29,8 +30,9 @@ export function RotateTokenModal({
   const { mutate: updateCreds, isPending } = useMutation({
     mutationFn: (payload: FlexCredentialsUpdate) =>
       updateFlexCredentialsApiCredentialsFlexPut(payload),
-    onSuccess: (data) => {
-      onSuccess(data as unknown as FlexCredentialsRead);
+    onSuccess: () => {
+      // The endpoint returns {"ok": true}. Caller refetches credentials metadata.
+      onSuccess();
     },
     onError: (err: unknown) => {
       const e = err as { response?: { data?: { detail?: string } } };
