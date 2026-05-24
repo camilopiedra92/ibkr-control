@@ -2038,7 +2038,7 @@ git commit -m "feat(phase2): Flex token AES-GCM encrypt/decrypt"
 
 **Referencia renta:** `documentos/ibkr_flex/loader.py` (parser ~600 LOC), `_known_tags.py`, `_audit.py`. Reimplementar. NO importar.
 
-- [ ] **Step 1: Crear `_known_tags.py` con catálogo de tags válidos**
+- [x] **Step 1: Crear `_known_tags.py` con catálogo de tags válidos**
 
 Crear `backend/src/ibkr_control/ingest/flex/_known_tags.py`:
 
@@ -2101,7 +2101,7 @@ EXPLICITLY_IGNORED: frozenset[str] = frozenset({
 })
 ```
 
-- [ ] **Step 2: Crear `_models.py` (dataclasses parsed)**
+- [x] **Step 2: Crear `_models.py` (dataclasses parsed)**
 
 Crear `backend/src/ibkr_control/ingest/flex/_models.py`:
 
@@ -2217,7 +2217,7 @@ class UnknownFlexTagError(RuntimeError):
         )
 ```
 
-- [ ] **Step 3: Escribir tests del parser (failing)**
+- [x] **Step 3: Escribir tests del parser (failing)**
 
 Crear `backend/tests/ingest/flex/test_parser.py`:
 
@@ -2338,7 +2338,7 @@ def test_raw_attrs_preserved():
         assert isinstance(first.raw_attrs, dict)
 ```
 
-- [ ] **Step 4: Correr tests (deben fallar — parser no existe)**
+- [x] **Step 4: Correr tests (deben fallar — parser no existe)**
 
 ```bash
 cd backend && uv run pytest tests/ingest/flex/test_parser.py -v
@@ -2346,7 +2346,7 @@ cd backend && uv run pytest tests/ingest/flex/test_parser.py -v
 
 Expected: ImportError sobre `parse`.
 
-- [ ] **Step 5: Implementar el parser**
+- [x] **Step 5: Implementar el parser**
 
 Crear `backend/src/ibkr_control/ingest/flex/parser.py`:
 
@@ -2570,7 +2570,7 @@ def _parse_transfers(elem) -> list[ParsedTransfer]:
     return out
 ```
 
-- [ ] **Step 6: Correr tests del parser**
+- [x] **Step 6: Correr tests del parser**
 
 ```bash
 cd backend && uv run pytest tests/ingest/flex/test_parser.py -v
@@ -2578,7 +2578,7 @@ cd backend && uv run pytest tests/ingest/flex/test_parser.py -v
 
 Expected: ~11/11 PASS. Si algún test del fixture real falla, leer el XML para entender el formato exacto y ajustar el getter (e.g. `openDateTime` vs `openDate`). El catálogo `_known_tags.py` puede necesitar ajustes según los tags reales que tenga el XML — si aparece `UnknownFlexTagError` sobre un tag legítimo, agregarlo a `KNOWN_TOP_LEVEL_TAGS` y `EXPLICITLY_IGNORED` si corresponde.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/src/ibkr_control/ingest/flex/parser.py \
