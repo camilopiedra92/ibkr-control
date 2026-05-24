@@ -1,4 +1,5 @@
-"""Tablas crudas del Flex XML: flex_imports + trades + lots + transfers + cash_transactions.
+"""Tablas crudas del Flex XML: flex_imports + trades + lots + transfers + cash_transactions
++ dividend accruals.
 
 Estas tablas se pueblan tal-cual del XML, sin transformaciones fiscales.
 La capa de classification (lot_classifications) vive en Phase 3.
@@ -187,3 +188,81 @@ class CashTransaction(Base):
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     date: Mapped[date] = mapped_column(Date, nullable=False)
     symbol: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class ChangeInDividendAccrual(Base):
+    __tablename__ = "change_in_dividend_accruals"
+    __table_args__ = (
+        Index("change_in_dividend_accruals_report_date_idx", "report_date"),
+        Index("change_in_dividend_accruals_account_symbol_idx", "account_id", "symbol"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    flex_import_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("flex_imports.id", ondelete="CASCADE"), nullable=False
+    )
+    account_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("accounts.id"), nullable=False
+    )
+    symbol: Mapped[str] = mapped_column(String, nullable=False)
+    conid: Mapped[str | None] = mapped_column(String, nullable=True)
+    isin: Mapped[str | None] = mapped_column(String, nullable=True)
+    issuer_country: Mapped[str | None] = mapped_column(String, nullable=True)
+    currency: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'USD'")
+    )
+    ex_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    pay_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    report_date: Mapped[date] = mapped_column(Date, nullable=False)
+    accrual_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    gross_rate_per_share: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    gross_amount_usd: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    tax_usd: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    fee_usd: Mapped[Decimal | None] = mapped_column(Numeric(20, 2), nullable=True)
+    net_amount_usd: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    action_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    asset_category: Mapped[str | None] = mapped_column(String, nullable=True)
+    sub_category: Mapped[str | None] = mapped_column(String, nullable=True)
+    level_of_detail: Mapped[str | None] = mapped_column(String, nullable=True)
+    raw_attrs: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+
+
+class OpenDividendAccrual(Base):
+    __tablename__ = "open_dividend_accruals"
+    __table_args__ = (
+        Index("open_dividend_accruals_report_date_idx", "report_date"),
+        Index("open_dividend_accruals_account_symbol_idx", "account_id", "symbol"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    flex_import_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("flex_imports.id", ondelete="CASCADE"), nullable=False
+    )
+    account_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("accounts.id"), nullable=False
+    )
+    symbol: Mapped[str] = mapped_column(String, nullable=False)
+    conid: Mapped[str | None] = mapped_column(String, nullable=True)
+    isin: Mapped[str | None] = mapped_column(String, nullable=True)
+    issuer_country: Mapped[str | None] = mapped_column(String, nullable=True)
+    currency: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'USD'")
+    )
+    ex_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    pay_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    report_date: Mapped[date] = mapped_column(Date, nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    gross_rate_per_share: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    gross_amount_usd: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    tax_usd: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    fee_usd: Mapped[Decimal | None] = mapped_column(Numeric(20, 2), nullable=True)
+    net_amount_usd: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    action_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    asset_category: Mapped[str | None] = mapped_column(String, nullable=True)
+    sub_category: Mapped[str | None] = mapped_column(String, nullable=True)
+    raw_attrs: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )

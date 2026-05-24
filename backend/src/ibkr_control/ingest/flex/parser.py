@@ -22,6 +22,7 @@ from ibkr_control.ingest.flex._known_tags import KNOWN_TOP_LEVEL_TAGS, EXPLICITL
 from ibkr_control.ingest.flex._models import (
     ParsedAccount, ParsedTrade, ParsedClosedLot, ParsedOpenPositionLot,
     ParsedCashTransaction, ParsedTransfer, ParsedTransferLot, ParsedXML,
+    ParsedDividendAccrual, ParsedOpenDividendAccrual,
     UnknownFlexTagError,
 )
 
@@ -84,6 +85,8 @@ def parse(xml_bytes: bytes) -> ParsedXML:
     open_position_lots: list[ParsedOpenPositionLot] = []
     cash_transactions: list[ParsedCashTransaction] = []
     transfers: list[ParsedTransfer] = []
+    change_in_dividend_accruals: list[ParsedDividendAccrual] = []
+    open_dividend_accruals: list[ParsedOpenDividendAccrual] = []
 
     period_from_list: list[date] = []
     period_to_list: list[date] = []
@@ -119,6 +122,10 @@ def parse(xml_bytes: bytes) -> ParsedXML:
                 # TransferLots can appear as a standalone top-level section;
                 # when nested inside a Transfer they are handled in _parse_transfers.
                 pass
+            elif tag == "ChangeInDividendAccruals":
+                _parse_change_in_dividend_accruals(child, change_in_dividend_accruals)
+            elif tag == "OpenDividendAccruals":
+                _parse_open_dividend_accruals(child, open_dividend_accruals)
 
     period_from = min(period_from_list)
     period_to = max(period_to_list)
@@ -134,6 +141,8 @@ def parse(xml_bytes: bytes) -> ParsedXML:
         open_position_lots=open_position_lots,
         cash_transactions=cash_transactions,
         transfers=transfers,
+        change_in_dividend_accruals=change_in_dividend_accruals,
+        open_dividend_accruals=open_dividend_accruals,
     )
 
 
@@ -338,6 +347,111 @@ def _parse_cash_transactions(elem) -> list[ParsedCashTransaction]:
             symbol=tx.get("symbol") or None,
         ))
     return out
+
+
+# Schema fijo de ChangeInDividendAccrual (atributos que mapean a columnas tipadas).
+# Cualquier otro atributo va a raw_attrs.
+_DIV_ACCRUAL_TYPED_ATTRS: frozenset[str] = frozenset({
+    "accountId", "symbol", "conid", "isin", "issuerCountryCode", "currency",
+    "exDate", "payDate", "reportDate", "date", "quantity", "grossRate",
+    "grossAmount", "tax", "fee", "netAmount", "actionID",
+    "assetCategory", "subCategory", "levelOfDetail",
+})
+
+# Schema fijo de OpenDividendAccrual.
+_OPEN_DIV_ACCRUAL_TYPED_ATTRS: frozenset[str] = frozenset({
+    "accountId", "symbol", "conid", "isin", "issuerCountryCode", "currency",
+    "exDate", "payDate", "reportDate", "quantity", "grossRate",
+    "grossAmount", "tax", "fee", "netAmount", "actionID",
+    "assetCategory", "subCategory",
+})
+
+
+def _parse_change_in_dividend_accruals(
+    elem,
+    out: list[ParsedDividendAccrual],
+) -> None:
+    """Parse <ChangeInDividendAccruals> wrapper.
+
+    Skips rows where accountId is None or '-' (SUMMARY-level rollups).
+    In the V1 2025 fixture ALL 97 rows are SUMMARY with accountId='-',
+    so the result will be 0 rows. Future Flex queries with DETAIL-level
+    accruals will populate this list.
+    """
+    for row in elem.iterchildren("ChangeInDividendAccrual"):
+        acct = row.get("accountId") or ""
+        if not acct or acct == "-":
+            continue
+        rd = _parse_date(row.get("reportDate"))
+        if rd is None:
+            continue
+        raw_attrs = {k: v for k, v in row.attrib.items() if k not in _DIV_ACCRUAL_TYPED_ATTRS}
+        fee_raw = row.get("fee")
+        gross_rate_raw = row.get("grossRate")
+        out.append(ParsedDividendAccrual(
+            ibkr_account_id=acct,
+            symbol=row.get("symbol") or "",
+            conid=_attr(row, "conid"),
+            isin=_attr(row, "isin"),
+            issuer_country=_attr(row, "issuerCountryCode"),
+            currency=row.get("currency") or "USD",
+            ex_date=_parse_date(row.get("exDate")),
+            pay_date=_parse_date(row.get("payDate")),
+            report_date=rd,
+            accrual_date=_parse_date(row.get("date")),
+            quantity=_dec(row.get("quantity")),
+            gross_rate_per_share=_dec(gross_rate_raw) if gross_rate_raw else None,
+            gross_amount_usd=_dec(row.get("grossAmount")),
+            tax_usd=_dec(row.get("tax")),
+            fee_usd=_dec(fee_raw) if fee_raw else None,
+            net_amount_usd=_dec(row.get("netAmount")),
+            action_id=_attr(row, "actionID"),
+            asset_category=_attr(row, "assetCategory"),
+            sub_category=_attr(row, "subCategory"),
+            level_of_detail=_attr(row, "levelOfDetail"),
+            raw_attrs=raw_attrs,
+        ))
+
+
+def _parse_open_dividend_accruals(
+    elem,
+    out: list[ParsedOpenDividendAccrual],
+) -> None:
+    """Parse <OpenDividendAccruals> wrapper.
+
+    Skips rows where accountId is None or '-' (SUMMARY-level rollups).
+    """
+    for row in elem.iterchildren("OpenDividendAccrual"):
+        acct = row.get("accountId") or ""
+        if not acct or acct == "-":
+            continue
+        rd = _parse_date(row.get("reportDate"))
+        if rd is None:
+            continue
+        raw_attrs = {k: v for k, v in row.attrib.items() if k not in _OPEN_DIV_ACCRUAL_TYPED_ATTRS}
+        fee_raw = row.get("fee")
+        gross_rate_raw = row.get("grossRate")
+        out.append(ParsedOpenDividendAccrual(
+            ibkr_account_id=acct,
+            symbol=row.get("symbol") or "",
+            conid=_attr(row, "conid"),
+            isin=_attr(row, "isin"),
+            issuer_country=_attr(row, "issuerCountryCode"),
+            currency=row.get("currency") or "USD",
+            ex_date=_parse_date(row.get("exDate")),
+            pay_date=_parse_date(row.get("payDate")),
+            report_date=rd,
+            quantity=_dec(row.get("quantity")),
+            gross_rate_per_share=_dec(gross_rate_raw) if gross_rate_raw else None,
+            gross_amount_usd=_dec(row.get("grossAmount")),
+            tax_usd=_dec(row.get("tax")),
+            fee_usd=_dec(fee_raw) if fee_raw else None,
+            net_amount_usd=_dec(row.get("netAmount")),
+            action_id=_attr(row, "actionID"),
+            asset_category=_attr(row, "assetCategory"),
+            sub_category=_attr(row, "subCategory"),
+            raw_attrs=raw_attrs,
+        ))
 
 
 def _parse_transfers(elem) -> list[ParsedTransfer]:

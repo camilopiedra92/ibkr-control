@@ -15,8 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ibkr_control.db.models.accounts import Account
 from ibkr_control.db.models.flex_raw import (
     CashTransaction,
+    ChangeInDividendAccrual,
     ClosedLot,
     FlexImport,
+    OpenDividendAccrual,
     OpenPositionLot,
     Trade,
     Transfer,
@@ -66,6 +68,10 @@ async def persist(
             all_account_ids.add(tr.src_ibkr_account_id)
         if tr.dst_ibkr_account_id:
             all_account_ids.add(tr.dst_ibkr_account_id)
+    for da in parsed.change_in_dividend_accruals:
+        all_account_ids.add(da.ibkr_account_id)
+    for oda in parsed.open_dividend_accruals:
+        all_account_ids.add(oda.ibkr_account_id)
 
     accounts_map = await _ensure_accounts(session, list(all_account_ids))
 
@@ -195,6 +201,56 @@ async def persist(
                 qty=lot.qty,
                 cost_basis_usd=lot.cost_basis_usd,
             ))
+
+    for da in parsed.change_in_dividend_accruals:
+        session.add(ChangeInDividendAccrual(
+            flex_import_id=fi.id,
+            account_id=accounts_map[da.ibkr_account_id],
+            symbol=da.symbol,
+            conid=da.conid,
+            isin=da.isin,
+            issuer_country=da.issuer_country,
+            currency=da.currency,
+            ex_date=da.ex_date,
+            pay_date=da.pay_date,
+            report_date=da.report_date,
+            accrual_date=da.accrual_date,
+            quantity=da.quantity,
+            gross_rate_per_share=da.gross_rate_per_share,
+            gross_amount_usd=da.gross_amount_usd,
+            tax_usd=da.tax_usd,
+            fee_usd=da.fee_usd,
+            net_amount_usd=da.net_amount_usd,
+            action_id=da.action_id,
+            asset_category=da.asset_category,
+            sub_category=da.sub_category,
+            level_of_detail=da.level_of_detail,
+            raw_attrs=da.raw_attrs,
+        ))
+
+    for oda in parsed.open_dividend_accruals:
+        session.add(OpenDividendAccrual(
+            flex_import_id=fi.id,
+            account_id=accounts_map[oda.ibkr_account_id],
+            symbol=oda.symbol,
+            conid=oda.conid,
+            isin=oda.isin,
+            issuer_country=oda.issuer_country,
+            currency=oda.currency,
+            ex_date=oda.ex_date,
+            pay_date=oda.pay_date,
+            report_date=oda.report_date,
+            quantity=oda.quantity,
+            gross_rate_per_share=oda.gross_rate_per_share,
+            gross_amount_usd=oda.gross_amount_usd,
+            tax_usd=oda.tax_usd,
+            fee_usd=oda.fee_usd,
+            net_amount_usd=oda.net_amount_usd,
+            action_id=oda.action_id,
+            asset_category=oda.asset_category,
+            sub_category=oda.sub_category,
+            raw_attrs=oda.raw_attrs,
+        ))
 
     await session.flush()
     return fi.id

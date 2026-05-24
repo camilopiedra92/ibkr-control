@@ -10,6 +10,7 @@ from ibkr_control.ingest.flex.persister import persist
 from ibkr_control.ingest.flex._models import (
     ParsedAccount, ParsedTrade, ParsedClosedLot, ParsedOpenPositionLot,
     ParsedCashTransaction, ParsedTransfer, ParsedTransferLot, ParsedXML,
+    ParsedDividendAccrual, ParsedOpenDividendAccrual,
 )
 
 FIXTURE_DIR = __import__("pathlib").Path(__file__).parent.parent.parent / "fixtures" / "xml"
@@ -43,6 +44,8 @@ def _make_parsed(account_id: str = "U99999001", n_trades: int = 2) -> ParsedXML:
         open_position_lots=[],
         cash_transactions=[],
         transfers=[],
+        change_in_dividend_accruals=[],
+        open_dividend_accruals=[],
     )
 
 
@@ -234,3 +237,62 @@ async def test_persist_links_closed_lots_to_source_trades(
         f"Expected at least some closed lots to have source_trade_id populated, "
         f"got 0 out of {n_total}"
     )
+
+
+@pytest.mark.asyncio
+async def test_persist_dividend_accruals_from_2025_fixture(
+    db_session: AsyncSession, sample_user
+):
+    """After persisting the 2025 fixture:
+    - change_in_dividend_accruals: 51 rows (DETAIL-level rows; 46 SUMMARY rows skipped)
+    - open_dividend_accruals: 1 row (NKE Q4 2025, account U99999001)
+
+    Note: The sanitized fixture preserves DETAIL rows with anonymized account IDs,
+    so 51 real rows are persisted (not 0 as the raw fixture would yield).
+    """
+    xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
+    from ibkr_control.ingest.flex.parser import parse
+
+    parsed = parse(xml)
+    assert len(parsed.change_in_dividend_accruals) == 51, \
+        f"Expected 51 DETAIL ChangeInDividendAccrual rows, got {len(parsed.change_in_dividend_accruals)}"
+    assert len(parsed.open_dividend_accruals) == 1, \
+        "Expected exactly 1 OpenDividendAccrual row in 2025 fixture"
+
+    fi_id = await persist(
+        db_session,
+        parsed=parsed,
+        user_id=sample_user.id,
+        xml_bytes=xml,
+        source="manual_upload",
+    )
+
+    from ibkr_control.db.models.flex_raw import ChangeInDividendAccrual, OpenDividendAccrual
+
+    n_chg = await db_session.scalar(
+        select(func.count(ChangeInDividendAccrual.id)).where(
+            ChangeInDividendAccrual.flex_import_id == fi_id
+        )
+    )
+    assert n_chg == 51, f"Expected 51 change_in_dividend_accruals, got {n_chg}"
+
+    n_open = await db_session.scalar(
+        select(func.count(OpenDividendAccrual.id)).where(
+            OpenDividendAccrual.flex_import_id == fi_id
+        )
+    )
+    assert n_open == 1, f"Expected 1 open_dividend_accruals, got {n_open}"
+
+    # Verify the NKE row's data
+    from sqlalchemy.orm import selectinload
+    row = await db_session.scalar(
+        select(OpenDividendAccrual).where(OpenDividendAccrual.flex_import_id == fi_id)
+    )
+    assert row is not None
+    assert row.symbol == "NKE"
+    assert row.report_date == date(2025, 12, 31)
+    assert row.quantity == Decimal("31.013")
+    assert row.gross_amount_usd == Decimal("12.72")
+    assert row.tax_usd == Decimal("3.82")
+    assert row.net_amount_usd == Decimal("8.90")
+    assert row.account_id is not None  # resolves to the joint account

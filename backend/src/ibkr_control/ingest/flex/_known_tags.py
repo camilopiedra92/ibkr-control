@@ -24,7 +24,7 @@ KNOWN_TOP_LEVEL_TAGS: frozenset[str] = frozenset({
     "AccruedDividends",             # Dividend accruals (Phase 5+)
     "CFDCharges",                   # CFD-specific charges; no CFD activity in our accounts
     "CashReport",                   # Cash report wrapper (StatementOfFundsLine rows inside)
-    "ChangeInDividendAccruals",     # Dividend accrual changes
+    "ChangeInDividendAccruals",     # Wrapper for ChangeInDividendAccrual rows (actively parsed)
     "ChangeInNAV",                  # NAV changes over period
     "ChangeInPositionValues",       # Position value changes
     "CommissionCredits",            # Commission credits/rebates
@@ -52,7 +52,7 @@ KNOWN_TOP_LEVEL_TAGS: frozenset[str] = frozenset({
     "MutualFundDividendDetails",    # Mutual fund dividend details
     "NetAssetValue",                # NAV (plan alias)
     "NetStockPositionSummary",      # Net stock position summary
-    "OpenDividendAccruals",         # Open dividend accruals (Phase 5+)
+    "OpenDividendAccruals",         # Wrapper for OpenDividendAccrual rows (actively parsed)
     "OptionEAE",                    # Options Exercise/Assignment/Expiration
     "PendingExcercises",            # Pending option exercises (typo from IBKR)
     "PriorPeriodPositions",         # Prior period positions
@@ -86,7 +86,6 @@ EXPLICITLY_IGNORED: frozenset[str] = frozenset({
     "AccruedDividends",
     "CFDCharges",
     "CashReport",
-    "ChangeInDividendAccruals",
     "ChangeInNAV",
     "ChangeInPositionValues",
     "CommissionCredits",
@@ -114,7 +113,6 @@ EXPLICITLY_IGNORED: frozenset[str] = frozenset({
     "MutualFundDividendDetails",
     "NetAssetValue",
     "NetStockPositionSummary",
-    "OpenDividendAccruals",
     "OptionEAE",
     "PendingExcercises",
     "PriorPeriodPositions",

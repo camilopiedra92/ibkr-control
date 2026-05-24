@@ -134,3 +134,39 @@ def test_closed_lots_capture_transaction_id():
         with_id = [c for c in parsed.closed_lots if c.transaction_id is not None]
         assert len(with_id) > 0, \
             "Expected transaction_id to be populated from real Activity XML Lot elements"
+
+
+def test_parses_change_in_dividend_accruals_skips_summary_rows():
+    """Parser skips ChangeInDividendAccrual rows with accountId='-' (SUMMARY-level rollups).
+
+    The 2025 sanitized fixture has 97 total rows: 46 SUMMARY (accountId='-') + 51 DETAIL
+    (accountId='U999...') with real data. Parser keeps the 51 DETAIL rows, skipping the
+    46 SUMMARY-only rollups. All kept rows must have non-empty account IDs.
+
+    Note: The raw (pre-sanitized) fixture had all 97 as SUMMARY; the sanitized fixture
+    correctly preserves DETAIL rows with anonymized account IDs.
+    """
+    xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
+    parsed = parse(xml)
+    # 46 SUMMARY rows skipped, 51 DETAIL rows kept
+    assert len(parsed.change_in_dividend_accruals) == 51
+    # All kept rows must have real account IDs
+    for row in parsed.change_in_dividend_accruals:
+        assert row.ibkr_account_id != "-", \
+            f"SUMMARY row leaked into output (accountId='-'): {row}"
+        assert row.level_of_detail == "DETAIL"
+
+
+def test_parses_open_dividend_accruals():
+    """The 2025 fixture has 1 OpenDividendAccrual row with a real accountId."""
+    xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
+    parsed = parse(xml)
+    assert len(parsed.open_dividend_accruals) == 1
+    row = parsed.open_dividend_accruals[0]
+    assert row.symbol == "NKE"
+    assert row.ibkr_account_id != "-"  # filter worked
+    assert row.report_date == date(2025, 12, 31)
+    assert row.quantity == Decimal("31.013")
+    assert row.gross_amount_usd == Decimal("12.72")
+    assert row.tax_usd == Decimal("3.82")
+    assert row.net_amount_usd == Decimal("8.9")

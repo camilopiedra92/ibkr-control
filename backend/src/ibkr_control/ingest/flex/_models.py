@@ -83,6 +83,54 @@ class ParsedTransferLot:
 
 
 @dataclass
+class ParsedDividendAccrual:
+    ibkr_account_id: str
+    symbol: str
+    conid: str | None
+    isin: str | None
+    issuer_country: str | None
+    currency: str
+    ex_date: date | None
+    pay_date: date | None
+    report_date: date
+    accrual_date: date | None
+    quantity: Decimal
+    gross_rate_per_share: Decimal | None
+    gross_amount_usd: Decimal
+    tax_usd: Decimal
+    fee_usd: Decimal | None
+    net_amount_usd: Decimal
+    action_id: str | None
+    asset_category: str | None
+    sub_category: str | None
+    level_of_detail: str | None
+    raw_attrs: dict
+
+
+@dataclass
+class ParsedOpenDividendAccrual:
+    ibkr_account_id: str
+    symbol: str
+    conid: str | None
+    isin: str | None
+    issuer_country: str | None
+    currency: str
+    ex_date: date | None
+    pay_date: date | None
+    report_date: date
+    quantity: Decimal
+    gross_rate_per_share: Decimal | None
+    gross_amount_usd: Decimal
+    tax_usd: Decimal
+    fee_usd: Decimal | None
+    net_amount_usd: Decimal
+    action_id: str | None
+    asset_category: str | None
+    sub_category: str | None
+    raw_attrs: dict
+
+
+@dataclass
 class ParsedXML:
     anyo: int
     period_from: date
@@ -93,6 +141,8 @@ class ParsedXML:
     open_position_lots: list[ParsedOpenPositionLot]
     cash_transactions: list[ParsedCashTransaction]
     transfers: list[ParsedTransfer]
+    change_in_dividend_accruals: list[ParsedDividendAccrual]
+    open_dividend_accruals: list[ParsedOpenDividendAccrual]
 
 
 class UnknownFlexTagError(RuntimeError):

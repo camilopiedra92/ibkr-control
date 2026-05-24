@@ -137,6 +137,8 @@ async def test_ingest_xml_rolls_back_persister_on_failure(db_session: AsyncSessi
             open_position_lots=[],
             cash_transactions=[],
             transfers=[],
+            change_in_dividend_accruals=[],
+            open_dividend_accruals=[],
         )
 
     # Patch parse to return our bad ParsedXML
