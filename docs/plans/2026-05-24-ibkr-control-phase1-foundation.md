@@ -1879,7 +1879,7 @@ git commit -m "feat(frontend): login + register pages con JWT en localStorage"
 - Create: `frontend/src/components/sidebar.tsx`
 - Create: `frontend/src/components/auth-gate.tsx`
 
-- [ ] **Step 1: Crear AuthGate (client guard que redirige a /login si no hay token)**
+- [x] **Step 1: Crear AuthGate (client guard que redirige a /login si no hay token)**
 
 `frontend/src/components/auth-gate.tsx`:
 
@@ -1907,7 +1907,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
 }
 ```
 
-- [ ] **Step 2: Crear sidebar component**
+- [x] **Step 2: Crear sidebar component**
 
 `frontend/src/components/sidebar.tsx`:
 
@@ -1971,7 +1971,7 @@ export function Sidebar() {
 }
 ```
 
-- [ ] **Step 3: Crear layout protegido**
+- [x] **Step 3: Crear layout protegido**
 
 `frontend/src/app/(app)/layout.tsx`:
 
@@ -1992,7 +1992,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 }
 ```
 
-- [ ] **Step 4: Crear 10 páginas placeholder (mismo patrón)**
+- [x] **Step 4: Crear 10 páginas placeholder (mismo patrón)**
 
 Para cada una de las 10 páginas (dashboard, lots, closed, alerts, simulator, dividends, patrimonio, form160, report, settings), crear el archivo `frontend/src/app/(app)/<slug>/page.tsx`:
 
@@ -2013,7 +2013,7 @@ Reemplazar `{/* nombre humano */}` con: `Dashboard`, `Lotes abiertos`, `Cerrados
 
 (Settings se sobreescribe en Task 11 con contenido real.)
 
-- [ ] **Step 5: Smoke test full flow**
+- [x] **Step 5: Smoke test full flow**
 
 ```bash
 cd /Users/owner/Development/ibkr-control
@@ -2027,7 +2027,7 @@ open http://localhost:3000/register
 # 5. Click "Salir" → vuelve a /login
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 docker compose down
