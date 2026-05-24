@@ -2979,7 +2979,7 @@ git commit -m "feat(phase2): Flex Web Service client (SendRequest + Poll with ba
 - Create: `backend/tests/ingest/flex/test_persister.py`
 - Create: `backend/tests/ingest/flex/test_job.py`
 
-- [ ] **Step 1: Escribir tests del persister (failing)**
+- [x] **Step 1: Escribir tests del persister (failing)**
 
 Crear `backend/tests/ingest/flex/test_persister.py`:
 
@@ -3118,7 +3118,7 @@ async def test_persist_rolls_back_on_partial_failure(db_session: AsyncSession, s
         assert n_for_this == 0
 ```
 
-- [ ] **Step 2: Implementar el persister**
+- [x] **Step 2: Implementar el persister**
 
 Crear `backend/src/ibkr_control/ingest/flex/persister.py`:
 
@@ -3280,7 +3280,7 @@ async def _ensure_accounts(session: AsyncSession, ibkr_ids: list[str]) -> dict[s
     return existing
 ```
 
-- [ ] **Step 3: Correr tests del persister**
+- [x] **Step 3: Correr tests del persister**
 
 ```bash
 cd backend && uv run pytest tests/ingest/flex/test_persister.py -v
@@ -3288,7 +3288,7 @@ cd backend && uv run pytest tests/ingest/flex/test_persister.py -v
 
 Expected: 6/6 PASS.
 
-- [ ] **Step 4: Escribir tests del job orchestrator (failing)**
+- [x] **Step 4: Escribir tests del job orchestrator (failing)**
 
 Crear `backend/tests/ingest/flex/test_job.py`:
 
@@ -3359,7 +3359,7 @@ async def test_ingest_xml_logs_failure_on_parse_error(db_session: AsyncSession, 
     # Verificar en log.py que el commit del log es separado.
 ```
 
-- [ ] **Step 5: Implementar el job orchestrator**
+- [x] **Step 5: Implementar el job orchestrator**
 
 Crear `backend/src/ibkr_control/ingest/flex/job.py`:
 
@@ -3471,7 +3471,7 @@ async def run(
                 return flex_import_id
 ```
 
-- [ ] **Step 6: Correr tests del job**
+- [x] **Step 6: Correr tests del job**
 
 ```bash
 cd backend && uv run pytest tests/ingest/flex/test_job.py -v
@@ -3479,7 +3479,7 @@ cd backend && uv run pytest tests/ingest/flex/test_job.py -v
 
 Expected: 3/3 PASS.
 
-- [ ] **Step 7: Correr toda la suite Flex**
+- [x] **Step 7: Correr toda la suite Flex**
 
 ```bash
 cd backend && uv run pytest tests/ingest/flex/ -v
@@ -3487,7 +3487,7 @@ cd backend && uv run pytest tests/ingest/flex/ -v
 
 Expected: ~28/28 PASS (8 crypto + 11 parser + 5 client + 6 persister + 3 job).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add backend/src/ibkr_control/ingest/flex/persister.py \
