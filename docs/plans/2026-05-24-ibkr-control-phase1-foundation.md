@@ -79,7 +79,7 @@ Expected: 1 commit con ≥5 archivos.
 - Create: `backend/tests/test_health.py`
 - Create: `backend/uv.lock` (generado por `uv lock`)
 
-- [ ] **Step 1: Verificar que uv está instalado, si no instalar**
+- [x] **Step 1: Verificar que uv está instalado, si no instalar**
 
 Run:
 
@@ -93,7 +93,7 @@ Si falla:
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-- [ ] **Step 2: Crear backend/pyproject.toml**
+- [x] **Step 2: Crear backend/pyproject.toml**
 
 Contenido completo:
 
@@ -139,7 +139,7 @@ build-backend = "hatchling.build"
 packages = ["src/ibkr_control"]
 ```
 
-- [ ] **Step 3: Crear estructura de directorios y __init__.py vacíos**
+- [x] **Step 3: Crear estructura de directorios y __init__.py vacíos**
 
 ```bash
 cd /Users/owner/Development/ibkr-control
@@ -148,7 +148,7 @@ touch backend/src/ibkr_control/__init__.py
 touch backend/tests/__init__.py
 ```
 
-- [ ] **Step 4: Escribir test del health endpoint (TDD failing test)**
+- [x] **Step 4: Escribir test del health endpoint (TDD failing test)**
 
 `backend/tests/test_health.py`:
 
@@ -166,7 +166,7 @@ async def test_health_returns_ok():
     assert response.json() == {"status": "ok"}
 ```
 
-- [ ] **Step 5: Crear conftest.py mínimo**
+- [x] **Step 5: Crear conftest.py mínimo**
 
 `backend/tests/conftest.py`:
 
@@ -179,7 +179,7 @@ def anyio_backend():
     return "asyncio"
 ```
 
-- [ ] **Step 6: Instalar deps + correr test (debe fallar — ImportError)**
+- [x] **Step 6: Instalar deps + correr test (debe fallar — ImportError)**
 
 ```bash
 cd /Users/owner/Development/ibkr-control/backend
@@ -189,7 +189,7 @@ uv run pytest tests/test_health.py -v
 
 Expected: ERROR — `ModuleNotFoundError: No module named 'ibkr_control.main'` (o el FastAPI app no existe).
 
-- [ ] **Step 7: Implementar main.py mínimo para pasar el test**
+- [x] **Step 7: Implementar main.py mínimo para pasar el test**
 
 `backend/src/ibkr_control/main.py`:
 
@@ -210,7 +210,7 @@ def create_app() -> FastAPI:
 app = create_app()
 ```
 
-- [ ] **Step 8: Correr test, verificar que pasa**
+- [x] **Step 8: Correr test, verificar que pasa**
 
 ```bash
 uv run pytest tests/test_health.py -v
@@ -218,7 +218,7 @@ uv run pytest tests/test_health.py -v
 
 Expected: `1 passed`.
 
-- [ ] **Step 9: Verificar que el server arranca local**
+- [x] **Step 9: Verificar que el server arranca local**
 
 ```bash
 uv run uvicorn ibkr_control.main:app --reload --port 8000 &
@@ -229,7 +229,7 @@ kill %1
 
 Expected: `{"status":"ok"}`.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 cd /Users/owner/Development/ibkr-control
