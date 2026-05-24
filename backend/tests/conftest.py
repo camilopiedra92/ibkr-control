@@ -101,3 +101,23 @@ async def db_session(postgres_container, monkeypatch):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
+
+
+@pytest.fixture
+async def sample_user(db_session: AsyncSession):
+    from ibkr_control.auth.models import User
+    u = User(email='fixture@t.com', hashed_password='x', is_active=True, name='Fixture User')
+    db_session.add(u)
+    await db_session.commit()
+    await db_session.refresh(u)
+    return u
+
+
+@pytest.fixture
+async def sample_account(db_session: AsyncSession):
+    from ibkr_control.db.models.accounts import Account
+    a = Account(ibkr_account_id='U99999999', alias='fixture-acc', currency='USD')
+    db_session.add(a)
+    await db_session.commit()
+    await db_session.refresh(a)
+    return a
