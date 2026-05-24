@@ -2,9 +2,10 @@
 
 ## ⏯ Cómo continuar (próxima sesión)
 
-**Phase 2 está 100% completa.** Branch `phase2/ingestion` ya mergeado a `main` (commit `6b97e46`).
+**Phase 2 está 100% completa + post-polish persistent state (D5+D2 fixed).**
+Branch `phase2/ingestion` ya mergeado a `main` (commit `6b97e46`).
 Polish backlog post-merge cerrado (10 items, ver `docs/plans/2026-05-24-phase2-polish-backlog.md`).
-Tag `v0.2.0-ingest` apunta al commit final de polish (`a606be2`). **186/186 backend tests pasan, frontend builds clean.**
+Tag `v0.2.0-ingest` apunta al cierre original de polish (`a606be2`). Tag `v0.2.1-persistent-state` apunta al head actual (`8b823f8`) — incluye SQLAlchemyJobStore + DB-backed rate limit. **192/192 backend tests pasan, frontend builds clean.**
 
 La próxima sesión decide entre dos caminos. NO son excluyentes — podés hacer A y B en paralelo.
 
@@ -13,7 +14,7 @@ La próxima sesión decide entre dos caminos. NO son excluyentes — podés hace
 Phase 3 = domain layer + 3 pantallas (Lotes Abiertos/Cerrados/Alertas 730d). Spec maestro §6 + §4.2. Phase 3 NO requiere prod deploy ni datos reales — desarrolla 100% contra testcontainer + fixtures sanitizadas.
 
 ```
-1. Verificar Phase 2 cerrada: git tag -l "v0.2*" → debe mostrar v0.2.0-ingest
+1. Verificar Phase 2 cerrada: git tag -l "v0.2*" → debe mostrar v0.2.0-ingest + v0.2.1-persistent-state
 2. Leer este CLAUDE.md (lo cargás automáticamente)
 3. Leer docs/plans/2026-05-24-phase2-polish-backlog.md (entender deuda conocida D1-D11)
 4. Invocar `superpowers:brainstorming` con prompt:
@@ -33,7 +34,7 @@ Independiente de Phase 3. La sesión Claude no puede hacer estos pasos (UI inter
 ```
 1. Push de Phase 2 a remote (~30s):
    git push origin main --follow-tags
-   # Esto sube main + tag v0.2.0-ingest a GitHub
+   # Esto sube main + tags v0.2.0-ingest + v0.2.1-persistent-state a GitHub
 
 2. Configurar TOKEN_ENCRYPTION_KEY en Coolify (1 min):
    openssl rand -base64 32  # generar key
@@ -58,8 +59,8 @@ Independiente de Phase 3. La sesión Claude no puede hacer estos pasos (UI inter
 ### Pre-Phase-3 checklist (verificar al arrancar la próxima sesión)
 
 - [ ] `git status` limpio en `main`
-- [ ] `git tag -l "v0.2*"` muestra `v0.2.0-ingest`
-- [ ] `cd backend && uv run pytest -q` → 186 passed
+- [ ] `git tag -l "v0.2*"` muestra `v0.2.0-ingest` + `v0.2.1-persistent-state`
+- [ ] `cd backend && uv run pytest -q` → 192 passed
 - [ ] `cd frontend && pnpm build` → exit 0
 - [ ] Leer `docs/plans/2026-05-24-phase2-polish-backlog.md` § "Deuda conocida (D1-D11)"
 - [ ] (Opcional) `docker compose ps` para confirmar postgres + backend healthy si vas a smoke test
@@ -103,7 +104,7 @@ Ver `docs/plans/2026-05-24-phase2-polish-backlog.md` § "Deuda conocida" para de
 
 **Spec maestro (12 decisiones):** ver "Decisiones arquitectónicas" abajo. Acordadas en la sesión de brainstorming del 2026-05-24.
 
-**Phase 2 spec (17 decisiones D1-D17):** ver `docs/specs/2026-05-24-phase2-ingestion-design.md` §3. Cubren scope, UX del wizard, testing strategy, advisory locks, APScheduler in-memory, AES-GCM, validación XML, organización per-source folders, SSE para progress, etc.
+**Phase 2 spec (17 decisiones D1-D17):** ver `docs/specs/2026-05-24-phase2-ingestion-design.md` §3. Cubren scope, UX del wizard, testing strategy, advisory locks, AES-GCM, validación XML, organización per-source folders, SSE para progress, etc. (D6 APScheduler in-memory + `_LAST_TRIGGER` in-memory rate limit fueron SUPERSEDED post-Phase-2 — ver commits `70f9bd0` + `45127f1` y notas en el spec).
 
 Si surge una pregunta cuya respuesta ya está en cualquiera de estos specs, NO re-hacer la pregunta al usuario — referenciá el spec/CLAUDE.md y avanzá.
 
@@ -119,6 +120,7 @@ Detalles útiles para evitar re-depurar en fases futuras:
 - **Dividend accruals — addendum post-Phase-2** — el plan original de Phase 2 no incluía `ChangeInDividendAccrual` / `OpenDividendAccrual`. Al comparar con el sibling renta (que SÍ los ingiere), se detectó gap antes del merge. Task 21 agregó Migration E con 2 tablas (`change_in_dividend_accruals`, `open_dividend_accruals`) + parser + persister filtrando rows con `accountId="-"` (matching renta's `_ingest_dividends.py`). En el fixture 2025: 51 rows DETAIL persistidas en change_in + 1 row en open. Fixture 2024 no tiene accruals (Flex Query distinta).
 - **Polish backlog post-merge (10 items)** — audit post-Phase-2 detectó bugs + tech debt resueltos antes del cierre oficial: (1) DoS upload sin streaming size check, (2) IDs de cuentas reales leakeados a frontend defaults, (3) double-cast `as unknown as` en RotateTokenModal, (4) `except Exception` genéricos en scheduler/jobs, (5) `_is_summary_row` helper extraído, (6) `JobTracker.cleanup_old()` + cron job horario nuevo, (7) `MAX_XML_SIZE_BYTES` + `_COOLDOWN` movidos a Settings, (8) docstring de race condition `_ensure_accounts`, (9) coverage `api/credentials.py` 39%→100% + `api/setup.py` 34%→73%, (10) Migration F: widening precision `Numeric(20,2)→(20,4)` USD totals + `(20,6)→(20,8)` quantities (matches IBKR XML source + sub-cent FIFO room para Phase 3). Total: 186 tests (era 151, +35), coverage overall 88% (era 83%). Ver `docs/plans/2026-05-24-phase2-polish-backlog.md` para detalle + deuda conocida documentada (D1-D11).
 - **Formato de datos numéricos — decisión locked** — Phase 2 polish llegó a `Numeric(20,4)` para totales USD, `Numeric(20,8)` para quantities, `Numeric(20,6)` para prices, `Numeric(12,4)` para TRM. Rechazado integer minor units (Stripe-style) por (a) volumen bajo, (b) multi-currency USD/COP/TRM hace error-prone trackear scale por columna, (c) Python `Decimal` interop más limpio con NUMERIC. Match precisión del XML IBKR source + DIAN TRM.
+- **Post-Phase-2 persistent state migration (D5+D2 RESOLVED)** — sesión 2026-05-24 mergeó 5 commits (deps `c86e308` + D5 scheduler `70f9bd0` + D2 rate limit `45127f1` + docs `27f9442` + plan `8b823f8`) reabriendo dos decisiones "locked" del spec Phase 2: (a) APScheduler ahora usa `SQLAlchemyJobStore` persistente — tabla `apscheduler_jobs` auto-creada al boot, `misfire_grace_time=21600` (6h) en los 3 crons para recuperar runs perdidos por container restart; (b) rate limit del endpoint `POST /api/ingest/trigger` movido de dict in-memory `_LAST_TRIGGER` a columna `users.last_ingest_trigger_at` (Migration G) + UPDATE atómico condicional (`WHERE last_ingest_trigger_at IS NULL OR < now() - cooldown`) sin race TOCTOU. Nueva dep: `psycopg[binary]>=3.1` (driver sync que APScheduler 3.x requiere — el app sigue usando `asyncpg` para todo lo demás). APScheduler pinned a `==3.11.*` para evitar drift de schema del jobstore. Lecciones: (1) las decisiones "locked" pueden re-abrirse si el lift es chico y el upside es real — el patrón es documentar el cambio de criterio en commit + spec note "SUPERSEDED", no editar la decisión vieja; (2) APScheduler 3.x SQLAlchemyJobStore es sync incluso bajo `AsyncIOScheduler` (corre las ops del jobstore en el thread del scheduler, no en el event loop) — por eso necesitamos un driver sync separado del asyncpg de la app. Tests: 186 → 192. Ver `docs/plans/2026-05-24-d5-d2-persistent-state.md`.
 
 ---
 
@@ -145,7 +147,7 @@ Globant, AFC, leasing, etc. Esta app es el **centro de control IBKR-only**.
 | Phase | Status | Plan | Spec | Tag al completar |
 |---|---|---|---|---|
 | 1. Foundation | ✅ código completo (Tasks 1-14) + polish backlog cerrado (6/6) + tag `v0.1.0-foundation` ✓ · Task 15 (deploy manual a Coolify) pendiente del usuario | `docs/plans/2026-05-24-ibkr-control-phase1-foundation.md` + `docs/plans/2026-05-24-phase1-polish-backlog.md` | spec maestro §3, §5.1 | `v0.1.0-foundation` ✓ |
-| 2. Data ingestion (Flex WS + TRM Socrata + scheduler + upload XML + setup wizard) | ✅ completado · 20 tasks + polish backlog (10 items) cerrado · 186 tests · tag `v0.2.0-ingest` ✓ | `docs/plans/2026-05-24-ibkr-control-phase2-ingestion.md` + `docs/plans/2026-05-24-phase2-polish-backlog.md` | `docs/specs/2026-05-24-phase2-ingestion-design.md` (D1-D17 locked) | `v0.2.0-ingest` ✓ |
+| 2. Data ingestion (Flex WS + TRM Socrata + scheduler + upload XML + setup wizard) | ✅ completado · 20 tasks + polish backlog (10 items) + post-merge persistent state D5+D2 cerrado · 192 tests · tags `v0.2.0-ingest` + `v0.2.1-persistent-state` ✓ | `docs/plans/2026-05-24-ibkr-control-phase2-ingestion.md` + `docs/plans/2026-05-24-phase2-polish-backlog.md` + `docs/plans/2026-05-24-d5-d2-persistent-state.md` | `docs/specs/2026-05-24-phase2-ingestion-design.md` (D1-D17 — D6 SUPERSEDED) | `v0.2.1-persistent-state` ✓ |
 | 3. Domain layer + lotes (FIFO, classification, lotes abiertos/cerrados/alertas) | ⏳ por brainstormear + planificar — ver §Roadmap Phase 3 abajo | — | spec maestro §6 (domain) + §4.2 (Lotes Abiertos/Cerrados/Alertas) + `renta/docs/flex_fifo_loader_spec.md` | `v0.3.0-lotes` |
 | 4. Simulador (STK + FUT con neteo YTD) | ⏳ por planificar | — | spec maestro §4.2 (Simulador) + `renta2025.py` § A.5 régimen DUAL | `v0.4.0-simulator` |
 | 5. Dividendos + Patrimonio + Form 160 + Reporte Form 210 | ⏳ por planificar | — | spec maestro §4.2 (Dividendos/Patrimonio/Form 160/Reporte) + §6.1 reglas D-E | `v0.5.0-reports` |
@@ -200,7 +202,7 @@ Phase 3 = **domain layer + 3 pantallas**: convertir los datos crudos que dejó P
 ### Entry point para próxima sesión que arme Phase 3
 
 ```
-1. Verificar Phase 2 cerrada (tag v0.2.0-ingest)
+1. Verificar Phase 2 cerrada (tags v0.2.0-ingest + v0.2.1-persistent-state)
 2. Invocar `superpowers:brainstorming` con prompt:
    "Phase 3 = domain layer + lotes. Decisiones abiertas listadas en
     CLAUDE.md §Roadmap Phase 3. Resolver, luego escribir spec en
