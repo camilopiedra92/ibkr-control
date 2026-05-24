@@ -1,17 +1,16 @@
-from fastapi_users.authentication import AuthenticationBackend, BearerTransport, JWTStrategy
 from fastapi_users import FastAPIUsers
+from fastapi_users.authentication import AuthenticationBackend, BearerTransport, JWTStrategy
 
-from ibkr_control.config import get_settings
 from ibkr_control.auth.manager import get_user_manager
 from ibkr_control.auth.models import User
-
-settings = get_settings()
+from ibkr_control.config import get_settings
 
 bearer_transport = BearerTransport(tokenUrl="auth/jwt/login")
 
 
 def get_jwt_strategy() -> JWTStrategy:
-    return JWTStrategy(secret=settings.jwt_secret, lifetime_seconds=settings.jwt_lifetime_seconds)
+    s = get_settings()
+    return JWTStrategy(secret=s.jwt_secret, lifetime_seconds=s.jwt_lifetime_seconds)
 
 
 auth_backend = AuthenticationBackend(
