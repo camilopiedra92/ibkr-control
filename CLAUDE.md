@@ -61,7 +61,7 @@ Globant, AFC, leasing, etc. Esta app es el **centro de control IBKR-only**.
 
 | Phase | Status | Plan | Tag al completar |
 |---|---|---|---|
-| 1. Foundation | ⚙ ejecutando · task 5/15 | `docs/plans/2026-05-24-ibkr-control-phase1-foundation.md` | `v0.1.0-foundation` |
+| 1. Foundation | ⚙ ejecutando · task 6/15 | `docs/plans/2026-05-24-ibkr-control-phase1-foundation.md` | `v0.1.0-foundation` |
 | 2. Data ingestion (Flex WS + TRM Socrata + scheduler + upload XML + setup wizard) | ⏳ por planificar | — | `v0.2.0-ingest` |
 | 3. Domain layer + lotes (FIFO, classification, lotes abiertos/cerrados/alertas) | ⏳ por planificar | — | `v0.3.0-lotes` |
 | 4. Simulador (STK + FUT con neteo YTD) | ⏳ por planificar | — | `v0.4.0-simulator` |

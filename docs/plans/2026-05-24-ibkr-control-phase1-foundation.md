@@ -621,7 +621,7 @@ git commit -m "feat(backend): alembic + async DB session + settings"
 - Modify: `backend/src/ibkr_control/main.py`
 - Create: `backend/tests/test_auth.py`
 
-- [ ] **Step 1: Crear User model usando fastapi-users**
+- [x] **Step 1: Crear User model usando fastapi-users**
 
 `backend/src/ibkr_control/auth/__init__.py`: vacío.
 
@@ -645,7 +645,7 @@ class User(SQLAlchemyBaseUserTable[int], Base):
     )
 ```
 
-- [ ] **Step 2: Crear schemas Pydantic para User**
+- [x] **Step 2: Crear schemas Pydantic para User**
 
 `backend/src/ibkr_control/auth/schemas.py`:
 
@@ -665,7 +665,7 @@ class UserUpdate(schemas.BaseUserUpdate):
     name: str | None = None
 ```
 
-- [ ] **Step 3: Crear UserManager**
+- [x] **Step 3: Crear UserManager**
 
 `backend/src/ibkr_control/auth/manager.py`:
 
@@ -700,7 +700,7 @@ async def get_user_manager(
     yield UserManager(user_db)
 ```
 
-- [ ] **Step 4: Crear backend de auth con JWT**
+- [x] **Step 4: Crear backend de auth con JWT**
 
 `backend/src/ibkr_control/auth/backend.py`:
 
@@ -733,7 +733,7 @@ fastapi_users = FastAPIUsers[User, int](get_user_manager, [auth_backend])
 current_active_user = fastapi_users.current_user(active=True)
 ```
 
-- [ ] **Step 5: Crear router con endpoints auth**
+- [x] **Step 5: Crear router con endpoints auth**
 
 `backend/src/ibkr_control/auth/router.py`:
 
@@ -761,7 +761,7 @@ router.include_router(
 )
 ```
 
-- [ ] **Step 6: Wire router en main.py**
+- [x] **Step 6: Wire router en main.py**
 
 `backend/src/ibkr_control/main.py` (reemplazar):
 
@@ -797,7 +797,7 @@ def create_app() -> FastAPI:
 app = create_app()
 ```
 
-- [ ] **Step 7: Asegurar que Base.metadata vea User (importarlo en algún módulo cargado por Alembic env)**
+- [x] **Step 7: Asegurar que Base.metadata vea User (importarlo en algún módulo cargado por Alembic env)**
 
 Editar `backend/src/ibkr_control/db/__init__.py`:
 
@@ -813,7 +813,7 @@ Y en `backend/alembic/env.py`, antes de `target_metadata = Base.metadata`, agreg
 import ibkr_control.db  # noqa: F401  (carga modelos)
 ```
 
-- [ ] **Step 8: Generar migración initial users**
+- [x] **Step 8: Generar migración initial users**
 
 Con Postgres corriendo:
 
@@ -832,7 +832,7 @@ mv backend/alembic/versions/*001_initial_users.py backend/alembic/versions/001_i
 
 Revisar que el archivo contenga `op.create_table('users', ...)`.
 
-- [ ] **Step 9: Aplicar migración**
+- [x] **Step 9: Aplicar migración**
 
 ```bash
 uv run alembic upgrade head
@@ -848,7 +848,7 @@ docker compose exec postgres psql -U ibkr -d ibkr_control -c "\d users"
 
 Expected: Salida con columnas `id`, `email`, `hashed_password`, `is_active`, `is_superuser`, `is_verified`, `name`, `created_at`.
 
-- [ ] **Step 10: Escribir tests de auth (register + login + protected)**
+- [x] **Step 10: Escribir tests de auth (register + login + protected)**
 
 `backend/tests/test_auth.py`:
 
@@ -953,7 +953,7 @@ async def test_me_without_token_is_401(client):
     assert response.status_code == 401
 ```
 
-- [ ] **Step 11: Correr tests**
+- [x] **Step 11: Correr tests**
 
 ```bash
 cd /Users/owner/Development/ibkr-control/backend
@@ -962,7 +962,7 @@ uv run pytest tests/test_auth.py -v
 
 Expected: `4 passed`.
 
-- [ ] **Step 12: Commit**
+- [x] **Step 12: Commit**
 
 ```bash
 cd /Users/owner/Development/ibkr-control
