@@ -12,15 +12,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=ghcr.io/astral-sh/uv:0.5.4 /uv /uvx /usr/local/bin/
 
-WORKDIR /app
+RUN groupadd --system --gid 1001 appuser \
+    && useradd --system --uid 1001 --gid appuser --create-home \
+       --home-dir /home/appuser --shell /usr/sbin/nologin appuser
 
-COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,target=/root/.cache/uv \
+WORKDIR /app
+RUN chown appuser:appuser /app
+
+USER appuser
+
+COPY --chown=appuser:appuser pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=1001,gid=1001 \
     uv sync --frozen --no-install-project --no-dev
 
-COPY src/ ./src/
+COPY --chown=appuser:appuser src/ ./src/
 
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=1001,gid=1001 \
     uv sync --frozen --no-dev
 
 EXPOSE 8000
