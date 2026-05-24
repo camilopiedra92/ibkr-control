@@ -20,6 +20,7 @@ folder retoma así:
    - Guardar el nuevo plan en `docs/plans/2026-05-24-ibkr-control-phase{N+1}-{nombre}.md` (usar fecha del día)
    - Actualizar la tabla "Estado actual" abajo con el link al plan nuevo
 5. **Convenciones**: TDD, frequent commits (cada step termina en commit), no emojis en código, Decimal para dinero, Postgres-specific
+6. **Sibling project `renta` para referencia fiscal**: leer `docs/references/renta-cross-references.md` antes de implementar cualquier regla fiscal o lógica de ingest Flex. Reimplementar, NO importar.
 
 ### Datos que el usuario va a pegar durante setup wizard (Phase 2)
 
@@ -186,7 +187,7 @@ cd backend && uv run alembic revision --autogenerate -m "descripción"
 cd backend && uv run alembic upgrade head
 ```
 
-## Sibling project
+## Sibling project: `renta`
 
 `/Users/owner/Development/renta/` — generador del Form 210 completo
 de Test Owner. Sigue siendo el source of truth para:
@@ -199,3 +200,27 @@ de Test Owner. Sigue siendo el source of truth para:
 El proyecto `ibkr-control` produce el subset IBKR del Form 210; el output JSON
 (via "Exportar JSON" en la pantalla Reporte) se puede consumir desde `renta`
 para complementar la declaración completa.
+
+### Cómo consultar renta desde sesiones en ibkr-control
+
+**Lee `docs/references/renta-cross-references.md`** — ese doc lista archivos
+exactos en `/Users/owner/Development/renta/` que vale leer para cada
+área de implementación (reglas fiscales, FIFO, ingest Flex, TRM, validación
+de paridad). Tiene mapping regla → archivo de implementación referencia.
+
+**Patrón:**
+- `Read /Users/owner/Development/renta/<path>` cuando necesités contexto
+- Reimplementar la lógica en ibkr-control desde cero (decisión locked #1)
+- **NO** importar código de renta, **NO** copiar archivos enteros
+- **NO** modificar archivos de renta desde sesiones en ibkr-control (abrir sesión separada en renta si hay que cambiar algo allá)
+
+**Cuándo SÍ consultar renta:**
+- Implementando Phase 2 (ingest Flex/TRM) → `renta/documentos/ibkr_flex/`
+- Implementando Phase 3 (FIFO + clasificación) → `renta/docs/flex_fifo_loader_spec.md`
+- Implementando Phase 4 (simulador FUT con neteo) → `renta2025.py` § A.5 régimen DUAL
+- Implementando Phase 5 (Reporte Form 210) → validar paridad numérica con `renta/tests/_invariants.py`
+- Cualquier momento que aparezca duda fiscal → `renta/docs/tax_rules_co.md` + `renta/CLAUDE.md`
+
+**Cuándo NO:**
+- Si la sección de renta no menciona "IB", "IBKR", "Art.288" o "Decreto 1797",
+  probablemente no aplica a este proyecto. Ignorar.
