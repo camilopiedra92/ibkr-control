@@ -64,6 +64,10 @@ async def ingest_xml(
             )
             await sp.commit()
         except Exception:
+            # Must stay broad: the SAVEPOINT catch-all must roll back partial
+            # persister writes regardless of exception type (DB error, parse
+            # error, unexpected) so the outer ingest_log_entry context can still
+            # mark the log row as 'failed' and commit it cleanly.
             await sp.rollback()
             raise
 
@@ -127,6 +131,9 @@ async def run(
                     )
                     await sp.commit()
                 except Exception:
+                    # Must stay broad: same SAVEPOINT pattern as ingest_xml — must
+                    # rollback partial persister writes for any exception type so
+                    # ingest_log_entry can mark the row 'failed' and commit it.
                     await sp.rollback()
                     raise
 

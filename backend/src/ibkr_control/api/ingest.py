@@ -79,6 +79,9 @@ async def _run_manual(kind: str, user_id: int, job_id: int) -> None:
 
         tracker.emit(job_id, {"step": "done"})
     except Exception as e:
+        # Must stay broad: this is the SSE background task catch-all. Any
+        # unhandled exception (network, parse, DB, lock) must surface to the
+        # client via the tracker event so the UI can display the error message.
         tracker.emit(job_id, {"step": "error", "error": str(e)[:500]})
     finally:
         tracker.mark_done(job_id)
