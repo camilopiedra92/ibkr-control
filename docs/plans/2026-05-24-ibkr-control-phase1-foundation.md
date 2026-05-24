@@ -412,7 +412,7 @@ git commit -m "feat: docker-compose con postgres + backend"
 - Create: `backend/alembic/versions/.gitkeep`
 - Create: `backend/tests/test_db_connection.py`
 
-- [ ] **Step 1: Crear config.py con pydantic-settings**
+- [x] **Step 1: Crear config.py con pydantic-settings**
 
 `backend/src/ibkr_control/config.py`:
 
@@ -439,7 +439,7 @@ def get_settings() -> Settings:
     return Settings()  # type: ignore[call-arg]
 ```
 
-- [ ] **Step 2: Crear db/base.py con DeclarativeBase**
+- [x] **Step 2: Crear db/base.py con DeclarativeBase**
 
 `backend/src/ibkr_control/db/__init__.py`: vacío.
 
@@ -453,7 +453,7 @@ class Base(DeclarativeBase):
     pass
 ```
 
-- [ ] **Step 3: Crear db/session.py con AsyncSession**
+- [x] **Step 3: Crear db/session.py con AsyncSession**
 
 `backend/src/ibkr_control/db/session.py`:
 
@@ -473,7 +473,7 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
 ```
 
-- [ ] **Step 4: Inicializar Alembic**
+- [x] **Step 4: Inicializar Alembic**
 
 ```bash
 cd /Users/owner/Development/ibkr-control/backend
@@ -482,7 +482,7 @@ uv run alembic init -t async alembic
 
 Expected: Creates `alembic.ini` + `alembic/env.py` + `alembic/versions/`.
 
-- [ ] **Step 5: Editar alembic.ini (sacar URL hardcoded, leer de env)**
+- [x] **Step 5: Editar alembic.ini (sacar URL hardcoded, leer de env)**
 
 En `backend/alembic.ini`, comentar la línea `sqlalchemy.url = ...`:
 
@@ -490,7 +490,7 @@ En `backend/alembic.ini`, comentar la línea `sqlalchemy.url = ...`:
 # sqlalchemy.url = driver://user:pass@localhost/dbname
 ```
 
-- [ ] **Step 6: Reescribir alembic/env.py para usar settings y modelos async**
+- [x] **Step 6: Reescribir alembic/env.py para usar settings y modelos async**
 
 `backend/alembic/env.py` (reemplazar todo):
 
@@ -549,7 +549,7 @@ else:
     run_migrations_online()
 ```
 
-- [ ] **Step 7: Escribir test de conexión a DB (failing, no migrations todavía)**
+- [x] **Step 7: Escribir test de conexión a DB (failing, no migrations todavía)**
 
 `backend/tests/test_db_connection.py`:
 
@@ -575,7 +575,7 @@ async def test_db_connection_returns_one(postgres_container):
     await engine.dispose()
 ```
 
-- [ ] **Step 8: Correr test**
+- [x] **Step 8: Correr test**
 
 ```bash
 cd /Users/owner/Development/ibkr-control/backend
@@ -584,7 +584,7 @@ uv run pytest tests/test_db_connection.py -v
 
 Expected: `1 passed` (testcontainers levanta Postgres, conexión funciona).
 
-- [ ] **Step 9: Verificar que Alembic puede correr (sin migraciones aún)**
+- [x] **Step 9: Verificar que Alembic puede correr (sin migraciones aún)**
 
 Asegurar que el stack está corriendo:
 
@@ -597,7 +597,7 @@ uv run alembic current
 
 Expected: `(empty)` o `Current revision(s) for ...: <empty>`. Sin errores.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 cd /Users/owner/Development/ibkr-control
