@@ -1560,7 +1560,7 @@ git commit -m "feat(phase2): cross-cutting ingest helpers (hash_dedup + lock + l
 - Modify: `backend/pyproject.toml` (agregar vcrpy + respx)
 - Modify: `backend/tests/conftest.py` (agregar fixtures vcr + cassette_dir)
 
-- [ ] **Step 1: Agregar dependencies vcrpy + respx + lxml + cryptography + httpx**
+- [x] **Step 1: Agregar dependencies vcrpy + respx + lxml + cryptography + httpx**
 
 Modificar `backend/pyproject.toml` `[project.dependencies]`:
 
@@ -1583,13 +1583,13 @@ dev = [
 ]
 ```
 
-- [ ] **Step 2: Lock + install**
+- [x] **Step 2: Lock + install**
 
 ```bash
 cd backend && uv lock && uv sync
 ```
 
-- [ ] **Step 3: Crear script de sanitización XML**
+- [x] **Step 3: Crear script de sanitización XML**
 
 Crear `backend/scripts/__init__.py` vacío y `backend/scripts/sanitize_xml.py`:
 
@@ -1654,7 +1654,7 @@ if __name__ == "__main__":
     sys.exit(main(sys.argv))
 ```
 
-- [ ] **Step 4: Sanitizar XMLs del sibling renta**
+- [x] **Step 4: Sanitizar XMLs del sibling renta**
 
 ```bash
 mkdir -p backend/tests/fixtures/xml
@@ -1667,7 +1667,7 @@ uv run python -m scripts.sanitize_xml \
     tests/fixtures/xml/ACTIVITY_2025_sanitized.xml
 ```
 
-- [ ] **Step 5: Verificar sanitización**
+- [x] **Step 5: Verificar sanitización**
 
 ```bash
 cd backend && grep -E 'U[0-9]{8}' tests/fixtures/xml/ACTIVITY_2024_sanitized.xml | head -5
@@ -1681,7 +1681,7 @@ cd backend && grep -c '1234567890' tests/fixtures/xml/ACTIVITY_2024_sanitized.xm
 
 Expected: `0`.
 
-- [ ] **Step 6: Crear fixtures sintéticas chicas (empty + malformed + opt + fut)**
+- [x] **Step 6: Crear fixtures sintéticas chicas (empty + malformed + opt + fut)**
 
 Crear `backend/tests/fixtures/xml/empty_query_response.xml`:
 
@@ -1719,7 +1719,7 @@ Crear `backend/tests/fixtures/xml/not_a_flex_response.xml`:
 </SomeOtherRoot>
 ```
 
-- [ ] **Step 7: Configurar VCR en conftest.py**
+- [x] **Step 7: Configurar VCR en conftest.py**
 
 Modificar `backend/tests/conftest.py` (agregar al final):
 
@@ -1743,7 +1743,7 @@ def vcr_config():
     }
 ```
 
-- [ ] **Step 8: Crear script de sanitización de cassettes**
+- [x] **Step 8: Crear script de sanitización de cassettes**
 
 Crear `backend/scripts/sanitize_cassette.py`:
 
@@ -1784,7 +1784,7 @@ if __name__ == "__main__":
     sys.exit(main(sys.argv))
 ```
 
-- [ ] **Step 9: Verificar setup con un test smoke del fixture**
+- [x] **Step 9: Verificar setup con un test smoke del fixture**
 
 Crear `backend/tests/fixtures/test_fixtures_smoke.py`:
 
@@ -1835,7 +1835,7 @@ def test_empty_response_fixture():
     assert tree.getroot().tag == "FlexQueryResponse"
 ```
 
-- [ ] **Step 10: Correr smoke tests**
+- [x] **Step 10: Correr smoke tests**
 
 ```bash
 cd backend && uv run pytest tests/fixtures/test_fixtures_smoke.py -v
@@ -1843,14 +1843,14 @@ cd backend && uv run pytest tests/fixtures/test_fixtures_smoke.py -v
 
 Expected: 5/5 PASS.
 
-- [ ] **Step 11: Crear directorio de cassettes (vacío por ahora, se popula en Tasks 7-11)**
+- [x] **Step 11: Crear directorio de cassettes (vacío por ahora, se popula en Tasks 7-11)**
 
 ```bash
 mkdir -p backend/tests/fixtures/cassettes/flex backend/tests/fixtures/cassettes/trm
 touch backend/tests/fixtures/cassettes/.gitkeep
 ```
 
-- [ ] **Step 12: Commit**
+- [x] **Step 12: Commit**
 
 ```bash
 git add backend/pyproject.toml backend/uv.lock \
