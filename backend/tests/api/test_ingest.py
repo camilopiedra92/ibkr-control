@@ -12,8 +12,7 @@ async def test_get_logs_empty_when_no_runs(client: AsyncClient, auth_headers: di
 
 
 async def test_trigger_rate_limit_429(client: AsyncClient, auth_headers: dict, monkeypatch):
-    """Llamadas seguidas devuelven 429 despues de la primera."""
-    monkeypatch.setattr("ibkr_control.api.ingest._LAST_TRIGGER", {})
+    """Llamadas seguidas devuelven 429. Estado vive en DB (users.last_ingest_trigger_at)."""
 
     async def noop(*args, **kwargs) -> int:
         return 999
@@ -64,3 +63,37 @@ async def test_stream_emits_done_event(client: AsyncClient, auth_headers: dict):
     body = await asyncio.wait_for(_consume_stream(), timeout=10.0)
     assert "test" in body
     assert "done" in body
+
+
+async def test_trigger_persists_timestamp_in_user_row(
+    client: AsyncClient, auth_headers: dict, monkeypatch
+):
+    """POST /api/ingest/trigger debe actualizar users.last_ingest_trigger_at."""
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from ibkr_control.auth.models import User
+    from ibkr_control.config import get_settings
+
+    async def noop(*args, **kwargs) -> int:
+        return 999
+
+    monkeypatch.setattr("ibkr_control.api.ingest._launch_manual_job", noop)
+
+    r = await client.post("/api/ingest/trigger", json={"kind": "trm"}, headers=auth_headers)
+    assert r.status_code == 200
+
+    # Verify the column was updated using a fresh engine on the same DB
+    settings = get_settings()
+    engine = create_async_engine(settings.database_url, echo=False)
+    session_local = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with session_local() as s:
+            user = (
+                await s.scalars(select(User).where(User.email == "api_test@test.com"))
+            ).one()
+            assert user.last_ingest_trigger_at is not None, (
+                "trigger endpoint did not persist last_ingest_trigger_at"
+            )
+    finally:
+        await engine.dispose()

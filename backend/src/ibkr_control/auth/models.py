@@ -21,3 +21,6 @@ class User(SQLAlchemyBaseUserTable[int], Base):
     setup_progress: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
+    last_ingest_trigger_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )

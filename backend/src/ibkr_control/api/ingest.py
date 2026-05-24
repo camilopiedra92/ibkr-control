@@ -22,32 +22,53 @@ except ImportError:
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 
-# Rate limit: module-level dict tracks last trigger time per user.
-# V1: in-process, single replica. Container restart resets cooldown.
-# Cooldown duration is config-driven via settings.ingest_trigger_cooldown_seconds.
-_LAST_TRIGGER: dict[int, datetime] = {}
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
-
-
 @router.post("/trigger", response_model=IngestJobStarted)
 async def trigger_manual_refresh(
     payload: IngestTrigger,
     background: BackgroundTasks,
     user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_async_session),
 ) -> IngestJobStarted:
+    """Trigger manual del ingest. Rate-limited via UPDATE atomico condicional.
+
+    El UPDATE solo afecta una fila si el cooldown ya pasó; rowcount=0 indica
+    rate-limited y devolvemos 429 con el tiempo restante. Esto elimina el
+    race condition TOCTOU del patron check-then-set y persiste el estado en
+    DB (sobrevive container restart, multi-replica safe).
+    """
+    from sqlalchemy import or_, select, update
+
+    from ibkr_control.auth.models import User as UserModel
+
     settings = get_settings()
     cooldown = timedelta(seconds=settings.ingest_trigger_cooldown_seconds)
-    last = _LAST_TRIGGER.get(user.id)
-    if last and (_utcnow() - last) < cooldown:
-        wait = cooldown - (_utcnow() - last)
+    now = datetime.now(timezone.utc)
+    cutoff = now - cooldown
+
+    result = await session.execute(
+        update(UserModel)
+        .where(UserModel.id == user.id)
+        .where(
+            or_(
+                UserModel.last_ingest_trigger_at.is_(None),
+                UserModel.last_ingest_trigger_at < cutoff,
+            )
+        )
+        .values(last_ingest_trigger_at=now)
+    )
+    await session.commit()
+
+    if result.rowcount == 0:
+        current = await session.scalar(
+            select(UserModel.last_ingest_trigger_at).where(UserModel.id == user.id)
+        )
+        wait_seconds = (
+            int((cooldown - (now - current)).total_seconds()) if current else int(cooldown.total_seconds())
+        )
         raise HTTPException(
             status_code=429,
-            detail=f"Espera {int(wait.total_seconds())}s antes de reintentar",
+            detail=f"Espera {wait_seconds}s antes de reintentar",
         )
-    _LAST_TRIGGER[user.id] = _utcnow()
 
     job_id = await _launch_manual_job(payload.kind, user.id, background)
     return IngestJobStarted(job_id=job_id)
