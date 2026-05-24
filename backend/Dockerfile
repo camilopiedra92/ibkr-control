@@ -26,10 +26,14 @@ RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=1001,gid=1001 \
     uv sync --frozen --no-install-project --no-dev
 
 COPY --chown=appuser:appuser src/ ./src/
+COPY --chown=appuser:appuser alembic.ini ./
+COPY --chown=appuser:appuser alembic/ ./alembic/
 
 RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=1001,gid=1001 \
     uv sync --frozen --no-dev
 
 EXPOSE 8000
 
-CMD ["uv", "run", "uvicorn", "ibkr_control.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run alembic migrations before starting uvicorn. Idempotent: noop if schema is current.
+# Fails container start if a migration is broken — preferred over silently serving stale schema.
+CMD ["sh", "-c", "uv run alembic upgrade head && exec uv run uvicorn ibkr_control.main:app --host 0.0.0.0 --port 8000"]
