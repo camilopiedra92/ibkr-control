@@ -64,6 +64,17 @@ def _attr(elem, name: str) -> str | None:
     return val if val else None
 
 
+def _is_summary_row(elem) -> bool:
+    """Return True if this element is an IBKR SUMMARY-level rollup row.
+
+    IBKR Activity XML emits some elements twice: a SUMMARY rollup (aggregated
+    totals, often with accountId='-') and a DETAIL row with real per-account
+    data. Skip SUMMARY rows to avoid duplicate counts and FK violations on
+    the '-' placeholder account.
+    """
+    return elem.get("levelOfDetail") == "SUMMARY"
+
+
 def parse(xml_bytes: bytes) -> ParsedXML:
     """Punto de entrada. Recibe bytes, devuelve ParsedXML."""
     root = etree.fromstring(xml_bytes)
@@ -332,7 +343,7 @@ def _parse_cash_transactions(elem) -> list[ParsedCashTransaction]:
         # - levelOfDetail="DETAIL"  with the real accountId
         # We only want DETAIL rows. Skipping SUMMARY also avoids FK violations
         # on persistence (the "-" placeholder doesn't map to any accounts row).
-        if tx.get("levelOfDetail") == "SUMMARY":
+        if _is_summary_row(tx):
             continue
         tx_date = _parse_date(tx.get("dateTime") or tx.get("settleDate"))
         if tx_date is None:
