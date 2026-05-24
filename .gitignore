@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+.next/
+out/
+.pnpm-debug.log*
+playwright-report/
+test-results/
+.turbo/
+
+# Env
+.env
+.env.local
+.env.*.local
+*.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Postgres data
+postgres_data/
+
+# Coolify generated
+.coolify/
+
+# Brainstorm artifacts
+.superpowers/
