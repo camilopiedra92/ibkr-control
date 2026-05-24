@@ -35,7 +35,7 @@
 - Create: `backend/alembic/versions/2026xxxxxx_phase2_identity.py` (autogenerado)
 - Create: `backend/tests/test_phase2_identity_migration.py`
 
-- [ ] **Step 1: Escribir tests del schema de identity (failing tests)**
+- [x] **Step 1: Escribir tests del schema de identity (failing tests)**
 
 Crear `backend/tests/test_phase2_identity_migration.py`:
 
@@ -135,7 +135,7 @@ async def test_users_setup_columns_exist(db_session: AsyncSession):
     assert cols == {'setup_completed_at', 'setup_progress'}
 ```
 
-- [ ] **Step 2: Correr tests para verificar que fallan (modelos no existen aún)**
+- [x] **Step 2: Correr tests para verificar que fallan (modelos no existen aún)**
 
 ```bash
 cd backend && uv run pytest tests/test_phase2_identity_migration.py -v
@@ -143,7 +143,7 @@ cd backend && uv run pytest tests/test_phase2_identity_migration.py -v
 
 Expected: ImportError / NameError sobre `Account`, `Participation`, `FlexCredentials`.
 
-- [ ] **Step 3: Crear modelo `Account`**
+- [x] **Step 3: Crear modelo `Account`**
 
 Crear `backend/src/ibkr_control/db/models/accounts.py`:
 
@@ -168,7 +168,7 @@ class Account(Base):
     )
 ```
 
-- [ ] **Step 4: Crear modelo `Participation`**
+- [x] **Step 4: Crear modelo `Participation`**
 
 Crear `backend/src/ibkr_control/db/models/participations.py`:
 
@@ -197,7 +197,7 @@ class Participation(Base):
     valid_to: Mapped[date | None] = mapped_column(Date, nullable=True)
 ```
 
-- [ ] **Step 5: Crear modelo `FlexCredentials`**
+- [x] **Step 5: Crear modelo `FlexCredentials`**
 
 Crear `backend/src/ibkr_control/db/models/flex_credentials.py`:
 
@@ -223,7 +223,7 @@ class FlexCredentials(Base):
     )
 ```
 
-- [ ] **Step 6: Extender `User` model con `setup_completed_at` + `setup_progress`**
+- [x] **Step 6: Extender `User` model con `setup_completed_at` + `setup_progress`**
 
 Modificar `backend/src/ibkr_control/db/models/user.py`. Agregar imports + columnas:
 
@@ -243,7 +243,7 @@ from sqlalchemy.orm import Mapped, mapped_column
     )
 ```
 
-- [ ] **Step 7: Re-exportar nuevos modelos en `db/__init__.py`**
+- [x] **Step 7: Re-exportar nuevos modelos en `db/__init__.py`**
 
 Modificar `backend/src/ibkr_control/db/__init__.py` para importar los 3 modelos nuevos (así Alembic los detecta en autogenerate):
 
@@ -257,7 +257,7 @@ from ibkr_control.db.models.flex_credentials import FlexCredentials
 __all__ = ["User", "UserSettings", "Account", "Participation", "FlexCredentials"]
 ```
 
-- [ ] **Step 8: Generar migration con autogenerate**
+- [x] **Step 8: Generar migration con autogenerate**
 
 ```bash
 cd backend && uv run alembic revision --autogenerate -m "phase2_identity: accounts + participations + flex_credentials + users.setup_*"
@@ -265,7 +265,7 @@ cd backend && uv run alembic revision --autogenerate -m "phase2_identity: accoun
 
 Expected: crear `backend/alembic/versions/2026xxxxxx_phase2_identity.py` con `op.create_table('accounts'...)`, `op.create_table('participations'...)`, `op.create_table('flex_credentials'...)`, `op.add_column('users', 'setup_completed_at'...)`, `op.add_column('users', 'setup_progress'...)`.
 
-- [ ] **Step 9: Revisar manualmente la migration**
+- [x] **Step 9: Revisar manualmente la migration**
 
 Abrir el archivo generado y verificar:
 - Constraints en `participations` quedaron (`CHECK pct >= 0 AND pct <= 1`, `CHECK valid_to IS NULL OR valid_to > valid_from`)
@@ -275,7 +275,7 @@ Abrir el archivo generado y verificar:
 
 Si algo falta, agregarlo manualmente (autogenerate a veces se pierde server_defaults).
 
-- [ ] **Step 10: Aplicar migration**
+- [x] **Step 10: Aplicar migration**
 
 ```bash
 cd backend && uv run alembic upgrade head
@@ -283,7 +283,7 @@ cd backend && uv run alembic upgrade head
 
 Expected: "Running upgrade abc123 -> def456, phase2_identity..."
 
-- [ ] **Step 11: Correr tests, verificar que pasan**
+- [x] **Step 11: Correr tests, verificar que pasan**
 
 ```bash
 cd backend && uv run pytest tests/test_phase2_identity_migration.py -v
@@ -291,7 +291,7 @@ cd backend && uv run pytest tests/test_phase2_identity_migration.py -v
 
 Expected: 6/6 PASS.
 
-- [ ] **Step 12: Correr el test de migrations vs metadata (existente de Phase 1)**
+- [x] **Step 12: Correr el test de migrations vs metadata (existente de Phase 1)**
 
 ```bash
 cd backend && uv run pytest tests/test_migrations.py -v
@@ -299,7 +299,7 @@ cd backend && uv run pytest tests/test_migrations.py -v
 
 Expected: PASS (sin drift entre `alembic upgrade head` y `Base.metadata`).
 
-- [ ] **Step 13: Commit**
+- [x] **Step 13: Commit**
 
 ```bash
 cd /Users/owner/Development/ibkr-control
@@ -323,7 +323,7 @@ git commit -m "feat(phase2): migration A — identity schema (accounts, particip
 - Create: `backend/alembic/versions/2026xxxxxx_phase2_trm.py`
 - Create: `backend/tests/test_phase2_trm_migration.py`
 
-- [ ] **Step 1: Escribir tests TRM schema (failing)**
+- [x] **Step 1: Escribir tests TRM schema (failing)**
 
 Crear `backend/tests/test_phase2_trm_migration.py`:
 
@@ -385,7 +385,7 @@ async def test_trm_days_value_precision(db_session: AsyncSession):
     await db_session.commit()
 ```
 
-- [ ] **Step 2: Correr tests (deben fallar)**
+- [x] **Step 2: Correr tests (deben fallar)**
 
 ```bash
 cd backend && uv run pytest tests/test_phase2_trm_migration.py -v
@@ -393,7 +393,7 @@ cd backend && uv run pytest tests/test_phase2_trm_migration.py -v
 
 Expected: ImportError sobre `TrmDay`.
 
-- [ ] **Step 3: Crear modelos TRM**
+- [x] **Step 3: Crear modelos TRM**
 
 Crear `backend/src/ibkr_control/db/models/trm.py`:
 
@@ -436,7 +436,7 @@ class TrmImport(Base):
     )
 ```
 
-- [ ] **Step 4: Re-exportar en `db/__init__.py`**
+- [x] **Step 4: Re-exportar en `db/__init__.py`**
 
 Modificar `backend/src/ibkr_control/db/__init__.py`:
 
@@ -445,13 +445,13 @@ from ibkr_control.db.models.trm import TrmDay, TrmImport
 # y agregar a __all__
 ```
 
-- [ ] **Step 5: Generar migration**
+- [x] **Step 5: Generar migration**
 
 ```bash
 cd backend && uv run alembic revision --autogenerate -m "phase2_trm: trm_days + trm_imports"
 ```
 
-- [ ] **Step 6: Revisar manualmente la migration**
+- [x] **Step 6: Revisar manualmente la migration**
 
 Verificar que el index `trm_days_date_idx` esté en la up function. Si falta, agregarlo:
 
@@ -459,13 +459,13 @@ Verificar que el index `trm_days_date_idx` esté en la up function. Si falta, ag
 op.create_index('trm_days_date_idx', 'trm_days', ['date'])
 ```
 
-- [ ] **Step 7: Aplicar migration**
+- [x] **Step 7: Aplicar migration**
 
 ```bash
 cd backend && uv run alembic upgrade head
 ```
 
-- [ ] **Step 8: Correr tests**
+- [x] **Step 8: Correr tests**
 
 ```bash
 cd backend && uv run pytest tests/test_phase2_trm_migration.py tests/test_migrations.py -v
@@ -473,7 +473,7 @@ cd backend && uv run pytest tests/test_phase2_trm_migration.py tests/test_migrat
 
 Expected: 5/5 PASS (4 TRM + 1 migrations consistency).
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add backend/src/ibkr_control/db/models/trm.py \
@@ -493,7 +493,7 @@ git commit -m "feat(phase2): migration B — TRM schema (trm_days + trm_imports)
 - Create: `backend/alembic/versions/2026xxxxxx_phase2_flex_raw.py`
 - Create: `backend/tests/test_phase2_flex_raw_migration.py`
 
-- [ ] **Step 1: Escribir tests del schema flex_raw (failing)**
+- [x] **Step 1: Escribir tests del schema flex_raw (failing)**
 
 Crear `backend/tests/test_phase2_flex_raw_migration.py`:
 
@@ -624,7 +624,7 @@ async def test_cascade_delete_flex_import_removes_children(db_session: AsyncSess
     assert result.scalar() == 0
 ```
 
-- [ ] **Step 2: Agregar fixtures `sample_user` y `sample_account` a `conftest.py`**
+- [x] **Step 2: Agregar fixtures `sample_user` y `sample_account` a `conftest.py`**
 
 Modificar `backend/tests/conftest.py` (agregar al final):
 
@@ -654,7 +654,7 @@ async def sample_account(db_session: AsyncSession):
     return a
 ```
 
-- [ ] **Step 3: Correr tests (deben fallar)**
+- [x] **Step 3: Correr tests (deben fallar)**
 
 ```bash
 cd backend && uv run pytest tests/test_phase2_flex_raw_migration.py -v
@@ -662,7 +662,7 @@ cd backend && uv run pytest tests/test_phase2_flex_raw_migration.py -v
 
 Expected: ImportError sobre `FlexImport`, `Trade`, etc.
 
-- [ ] **Step 4: Crear modelos flex_raw**
+- [x] **Step 4: Crear modelos flex_raw**
 
 Crear `backend/src/ibkr_control/db/models/flex_raw.py`:
 
@@ -820,7 +820,7 @@ class CashTransaction(Base):
     symbol: Mapped[str | None] = mapped_column(String, nullable=True)
 ```
 
-- [ ] **Step 5: Re-exportar en `db/__init__.py`**
+- [x] **Step 5: Re-exportar en `db/__init__.py`**
 
 ```python
 from ibkr_control.db.models.flex_raw import (
@@ -829,13 +829,13 @@ from ibkr_control.db.models.flex_raw import (
 # y agregar a __all__
 ```
 
-- [ ] **Step 6: Generar migration**
+- [x] **Step 6: Generar migration**
 
 ```bash
 cd backend && uv run alembic revision --autogenerate -m "phase2_flex_raw: flex_imports + trades + lots + transfers + cash_transactions"
 ```
 
-- [ ] **Step 7: Revisar manualmente**
+- [x] **Step 7: Revisar manualmente**
 
 Verificar:
 - Todos los CheckConstraints
@@ -843,13 +843,13 @@ Verificar:
 - ON DELETE CASCADE en FKs hacia `flex_imports.id` y `transfers.id`
 - `raw_attrs JSONB` con default `'{}'::jsonb`
 
-- [ ] **Step 8: Aplicar migration**
+- [x] **Step 8: Aplicar migration**
 
 ```bash
 cd backend && uv run alembic upgrade head
 ```
 
-- [ ] **Step 9: Correr tests**
+- [x] **Step 9: Correr tests**
 
 ```bash
 cd backend && uv run pytest tests/test_phase2_flex_raw_migration.py tests/test_migrations.py -v
@@ -857,7 +857,7 @@ cd backend && uv run pytest tests/test_phase2_flex_raw_migration.py tests/test_m
 
 Expected: 6/6 PASS.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add backend/src/ibkr_control/db/models/flex_raw.py \
@@ -878,7 +878,7 @@ git commit -m "feat(phase2): migration C — flex_raw schema (7 tables: flex_imp
 - Create: `backend/alembic/versions/2026xxxxxx_phase2_ingest_log.py`
 - Create: `backend/tests/test_phase2_ingest_log_migration.py`
 
-- [ ] **Step 1: Escribir tests (failing)**
+- [x] **Step 1: Escribir tests (failing)**
 
 Crear `backend/tests/test_phase2_ingest_log_migration.py`:
 
@@ -937,13 +937,13 @@ async def test_ingest_log_user_started_idx(db_session: AsyncSession):
     assert result.scalar() == 'ingest_log_user_started_idx'
 ```
 
-- [ ] **Step 2: Correr tests (deben fallar)**
+- [x] **Step 2: Correr tests (deben fallar)**
 
 ```bash
 cd backend && uv run pytest tests/test_phase2_ingest_log_migration.py -v
 ```
 
-- [ ] **Step 3: Crear modelo `IngestLog`**
+- [x] **Step 3: Crear modelo `IngestLog`**
 
 Crear `backend/src/ibkr_control/db/models/ingest_log.py`:
 
@@ -985,20 +985,20 @@ class IngestLog(Base):
     trigger: Mapped[str] = mapped_column(String, nullable=False)
 ```
 
-- [ ] **Step 4: Re-exportar en `db/__init__.py`**
+- [x] **Step 4: Re-exportar en `db/__init__.py`**
 
 ```python
 from ibkr_control.db.models.ingest_log import IngestLog
 # y agregar a __all__
 ```
 
-- [ ] **Step 5: Generar migration**
+- [x] **Step 5: Generar migration**
 
 ```bash
 cd backend && uv run alembic revision --autogenerate -m "phase2_ingest_log: ingest_log table"
 ```
 
-- [ ] **Step 6: Revisar manualmente**
+- [x] **Step 6: Revisar manualmente**
 
 Verificar: index DESC en `started_at` (`Index("...", "user_id", "started_at")` — Alembic puede que no preserve DESC en autogenerate; si falta, ajustar manualmente con `text("started_at DESC")`).
 
@@ -1012,7 +1012,7 @@ op.create_index(
 )
 ```
 
-- [ ] **Step 7: Aplicar + correr tests**
+- [x] **Step 7: Aplicar + correr tests**
 
 ```bash
 cd backend && uv run alembic upgrade head
@@ -1021,7 +1021,7 @@ cd backend && uv run pytest tests/test_phase2_ingest_log_migration.py tests/test
 
 Expected: 5/5 PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add backend/src/ibkr_control/db/models/ingest_log.py \
@@ -1047,14 +1047,14 @@ git commit -m "feat(phase2): migration D — ingest_log schema (observability fo
 - Create: `backend/tests/ingest/test_log.py`
 - Create: `backend/tests/ingest/test_job_tracker.py`
 
-- [ ] **Step 1: Crear estructura de directorios + __init__.py vacíos**
+- [x] **Step 1: Crear estructura de directorios + __init__.py vacíos**
 
 ```bash
 mkdir -p backend/src/ibkr_control/ingest backend/tests/ingest
 touch backend/src/ibkr_control/ingest/__init__.py backend/tests/ingest/__init__.py
 ```
 
-- [ ] **Step 2: Escribir tests de `hash_dedup.py` (failing)**
+- [x] **Step 2: Escribir tests de `hash_dedup.py` (failing)**
 
 Crear `backend/tests/ingest/test_hash_dedup.py`:
 
@@ -1100,7 +1100,7 @@ async def test_is_known_hash_true_when_exists(db_session: AsyncSession, sample_u
     assert await is_known_hash(db_session, h) is True
 ```
 
-- [ ] **Step 3: Implementar `hash_dedup.py`**
+- [x] **Step 3: Implementar `hash_dedup.py`**
 
 Crear `backend/src/ibkr_control/ingest/hash_dedup.py`:
 
@@ -1126,7 +1126,7 @@ async def is_known_hash(session: AsyncSession, hash_hex: str) -> bool:
     return result is not None
 ```
 
-- [ ] **Step 4: Correr tests de hash_dedup**
+- [x] **Step 4: Correr tests de hash_dedup**
 
 ```bash
 cd backend && uv run pytest tests/ingest/test_hash_dedup.py -v
@@ -1134,7 +1134,7 @@ cd backend && uv run pytest tests/ingest/test_hash_dedup.py -v
 
 Expected: 5/5 PASS.
 
-- [ ] **Step 5: Escribir tests de `lock.py` (failing)**
+- [x] **Step 5: Escribir tests de `lock.py` (failing)**
 
 Crear `backend/tests/ingest/test_lock.py`:
 
@@ -1192,7 +1192,7 @@ async def test_advisory_lock_different_sources_independent(db_engine):
                 pass  # ambos OK
 ```
 
-- [ ] **Step 6: Implementar `lock.py`**
+- [x] **Step 6: Implementar `lock.py`**
 
 Crear `backend/src/ibkr_control/ingest/lock.py`:
 
@@ -1245,7 +1245,7 @@ async def advisory_lock(session: AsyncSession, user_id: int | None, source: str)
         await session.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": key})
 ```
 
-- [ ] **Step 7: Agregar fixture `db_engine` a conftest.py si no existe**
+- [x] **Step 7: Agregar fixture `db_engine` a conftest.py si no existe**
 
 Verificar en `backend/tests/conftest.py` que exista un `db_engine` fixture (session-scoped). Si solo hay `db_session`, agregar:
 
@@ -1261,7 +1261,7 @@ async def db_engine():
     await engine.dispose()
 ```
 
-- [ ] **Step 8: Correr tests de lock**
+- [x] **Step 8: Correr tests de lock**
 
 ```bash
 cd backend && uv run pytest tests/ingest/test_lock.py -v
@@ -1269,7 +1269,7 @@ cd backend && uv run pytest tests/ingest/test_lock.py -v
 
 Expected: 4/4 PASS.
 
-- [ ] **Step 9: Escribir tests de `log.py` (failing)**
+- [x] **Step 9: Escribir tests de `log.py` (failing)**
 
 Crear `backend/tests/ingest/test_log.py`:
 
@@ -1340,7 +1340,7 @@ async def test_log_items_processed_settable(db_session: AsyncSession, sample_use
     assert result.scalar() == 42
 ```
 
-- [ ] **Step 10: Implementar `log.py`**
+- [x] **Step 10: Implementar `log.py`**
 
 Crear `backend/src/ibkr_control/ingest/log.py`:
 
@@ -1397,7 +1397,7 @@ async def ingest_log_entry(
         await session.commit()
 ```
 
-- [ ] **Step 11: Correr tests de log**
+- [x] **Step 11: Correr tests de log**
 
 ```bash
 cd backend && uv run pytest tests/ingest/test_log.py -v
@@ -1405,7 +1405,7 @@ cd backend && uv run pytest tests/ingest/test_log.py -v
 
 Expected: 4/4 PASS.
 
-- [ ] **Step 12: Escribir tests de `job_tracker.py` (failing)**
+- [x] **Step 12: Escribir tests de `job_tracker.py` (failing)**
 
 Crear `backend/tests/ingest/test_job_tracker.py`:
 
@@ -1458,7 +1458,7 @@ def test_unknown_job_returns_empty():
     assert tracker.is_done(99999) is False
 ```
 
-- [ ] **Step 13: Implementar `job_tracker.py`**
+- [x] **Step 13: Implementar `job_tracker.py`**
 
 Crear `backend/src/ibkr_control/ingest/job_tracker.py`:
 
@@ -1530,7 +1530,7 @@ def get_tracker() -> JobTracker:
     return _tracker_instance
 ```
 
-- [ ] **Step 14: Correr todos los tests del task**
+- [x] **Step 14: Correr todos los tests del task**
 
 ```bash
 cd backend && uv run pytest tests/ingest/ -v
@@ -1538,7 +1538,7 @@ cd backend && uv run pytest tests/ingest/ -v
 
 Expected: 18/18 PASS (5 hash + 4 lock + 4 log + 5 tracker).
 
-- [ ] **Step 15: Commit**
+- [x] **Step 15: Commit**
 
 ```bash
 git add backend/src/ibkr_control/ingest/ backend/tests/ingest/ backend/tests/conftest.py
