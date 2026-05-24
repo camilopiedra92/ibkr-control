@@ -7,6 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from ibkr_control.config import get_settings
 from ibkr_control.api.credentials import router as credentials_router
+from ibkr_control.api.imports import router as imports_router
+from ibkr_control.api.ingest import router as ingest_router
 from ibkr_control.api.setup import router as setup_router
 from ibkr_control.auth.router import router as auth_router
 from ibkr_control.settings.router import router as settings_router
@@ -46,6 +48,8 @@ def create_app() -> FastAPI:
     app.include_router(settings_router, prefix="/api")
     app.include_router(credentials_router, prefix="/api")
     app.include_router(setup_router, prefix="/api")
+    app.include_router(imports_router, prefix="/api")
+    app.include_router(ingest_router, prefix="/api")
     return app
 
 

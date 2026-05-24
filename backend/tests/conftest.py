@@ -131,6 +131,21 @@ async def sample_user(db_session: AsyncSession):
 
 
 @pytest.fixture
+async def auth_headers(client: AsyncClient) -> dict:
+    """Registra un usuario de test y devuelve headers de autorizacion JWT."""
+    await client.post(
+        "/api/auth/register",
+        json={"email": "api_test@test.com", "password": "supersecret123", "name": "API Test User"},
+    )
+    login = await client.post(
+        "/api/auth/jwt/login",
+        data={"username": "api_test@test.com", "password": "supersecret123"},
+    )
+    token = login.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
 async def sample_account(db_session: AsyncSession):
     from ibkr_control.db.models.accounts import Account
     a = Account(ibkr_account_id='U99999999', alias='fixture-acc', currency='USD')

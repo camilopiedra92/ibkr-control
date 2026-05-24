@@ -59,6 +59,10 @@ class JobTracker:
     def is_done(self, job_id: int) -> bool:
         return job_id in self._jobs and self._jobs[job_id].done
 
+    def has_job(self, job_id: int) -> bool:
+        """True si el job_id existe en el tracker (independientemente de si esta done)."""
+        return job_id in self._jobs
+
     def cleanup(self, job_id: int) -> None:
         """Remueve el job del tracker (llamar despues de N minutos de done)."""
         self._jobs.pop(job_id, None)
