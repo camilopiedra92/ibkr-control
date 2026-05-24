@@ -54,6 +54,13 @@ Tributario, no es Phase 2.
 
 ## 3. Decisiones de diseño (locked)
 
+> **SUPERSEDED 2026-05-24** — see commits 70f9bd0 + 45127f1.
+> Decision revisited post-Phase-2 polish: persistent SQLAlchemyJobStore
+> (D5) + DB-backed rate limit (D2) implemented because (a) Postgres was
+> already a dependency, (b) the lift was small (~30 LOC + 4 tests),
+> (c) restart-safety upside justified re-opening the locked decision.
+> Original rationale preserved below for historical context.
+
 | # | Decisión | Valor |
 |---|---|---|
 | D1 | Scope de Phase 2 | Solo raw ingest + TRM (sin classification, sin domain) |
@@ -677,6 +684,13 @@ Reject si:
 - Hash SHA-256 ya existe → 409 con `flex_import_id` existente + `fetched_at` del primer ingest
 
 ### 8.2 Manual refresh con rate limit
+
+> **SUPERSEDED 2026-05-24** — see commits 70f9bd0 + 45127f1.
+> Decision revisited post-Phase-2 polish: persistent SQLAlchemyJobStore
+> (D5) + DB-backed rate limit (D2) implemented because (a) Postgres was
+> already a dependency, (b) the lift was small (~30 LOC + 4 tests),
+> (c) restart-safety upside justified re-opening the locked decision.
+> Original rationale preserved below for historical context.
 
 ```python
 _LAST_TRIGGER: dict[int, datetime] = {}

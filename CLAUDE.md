@@ -89,16 +89,15 @@ Independiente de Phase 3. La sesión Claude no puede hacer estos pasos (UI inter
 Ver `docs/plans/2026-05-24-phase2-polish-backlog.md` § "Deuda conocida" para detalle completo + rationale. Highlights:
 
 - **D1** SSE endpoint no verifica ownership de `job_id` — V1 single-user OK
-- **D2** `_LAST_TRIGGER` in-memory rate limit — resetea con restart, V2=Redis
 - **D3** `proxy.ts` Next 16 no-op (auth client-side localStorage) — Phase 1 lock
 - **D4** E2E wizard "resume after browser close" test SKIPPED — necesita IBKR mocks
-- **D5** APScheduler in-memory jobstore — locked spec §D6
 - **D6** Cron times hardcoded (07:00/19:30 COT) — V1 acceptable
 - **D7** Paridad numérica con renta — trabajo de Phase 5
 - **D8** `_known_tags.py` fail-loud audit — diseño deliberado, no bug
 - **D9** Phase 1 Task 15: Coolify deploy — usuario
 - **D10** `auth_headers` fixture per-test overhead — V2 perf
 - **D11** Coverage gaps en imports/ingest/scheduler — requieren live infra para subir más
+- **D2 + D5 RESOLVED**: persistent state migration — ver commits 70f9bd0 + 45127f1
 
 ### Decisiones locked (no re-discutir)
 

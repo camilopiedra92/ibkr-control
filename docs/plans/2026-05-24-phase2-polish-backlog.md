@@ -250,7 +250,12 @@ agregue multi-user: `if job_id not in current_user.owned_jobs: raise 404`.
 **Quien hereda:** Phase 3 si activa multi-user. O fix oportunista cuando alguien
 toque ese endpoint.
 
-### D2 — `_LAST_TRIGGER` in-memory rate limit
+### D2 — `_LAST_TRIGGER` in-memory rate limit — RESOLVED 45127f1
+
+**Resolution:** Reemplazado por columna `users.last_ingest_trigger_at` +
+UPDATE atomico condicional. Ver commit 45127f1.
+
+**Original issue (preserved for context):**
 
 **Archivo:** `backend/src/ibkr_control/api/ingest.py:26`
 
@@ -297,7 +302,13 @@ del `setup_progress` JSONB. El gap es solo el path end-to-end UI.
 
 **Quien hereda:** Phase 3 o Phase 6 polish.
 
-### D5 — APScheduler in-memory jobstore (decisión locked spec #D6)
+### D5 — APScheduler in-memory jobstore — RESOLVED 70f9bd0
+
+**Resolution:** Migrado a SQLAlchemyJobStore (jobs persisten en tabla
+`apscheduler_jobs` auto-creada por APScheduler) + `misfire_grace_time=21600`
+en los 3 crons. Ver commit 70f9bd0.
+
+**Original issue (preserved for context):**
 
 **Archivo:** `backend/src/ibkr_control/scheduler/jobs.py`
 
