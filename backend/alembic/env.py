@@ -15,6 +15,8 @@ if config.config_file_name is not None:
 settings = get_settings()
 config.set_main_option("sqlalchemy.url", settings.database_url)
 
+import ibkr_control.db  # noqa: F401  (carga modelos)
+
 target_metadata = Base.metadata
 
 
