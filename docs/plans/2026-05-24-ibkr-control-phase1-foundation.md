@@ -987,7 +987,7 @@ git commit -m "feat(auth): fastapi-users JWT + users table + register/login endp
 - Create: `backend/alembic/versions/002_user_settings.py`
 - Create: `backend/tests/test_settings.py`
 
-- [ ] **Step 1: Crear UserSettings model**
+- [x] **Step 1: Crear UserSettings model**
 
 `backend/src/ibkr_control/settings/__init__.py`: vacío.
 
@@ -1018,7 +1018,7 @@ class UserSettings(Base):
     )
 ```
 
-- [ ] **Step 2: Crear schemas para settings**
+- [x] **Step 2: Crear schemas para settings**
 
 `backend/src/ibkr_control/settings/schemas.py`:
 
@@ -1039,7 +1039,7 @@ class UserSettingsUpdate(BaseModel):
     timezone: str | None = None
 ```
 
-- [ ] **Step 3: Crear router de settings**
+- [x] **Step 3: Crear router de settings**
 
 `backend/src/ibkr_control/settings/router.py`:
 
@@ -1089,7 +1089,7 @@ async def update_settings(
     return row
 ```
 
-- [ ] **Step 4: Auto-crear UserSettings al registrar usuario**
+- [x] **Step 4: Auto-crear UserSettings al registrar usuario**
 
 Modificar `backend/src/ibkr_control/auth/manager.py` para sobreescribir `on_after_register`:
 
@@ -1130,7 +1130,7 @@ async def get_user_manager(
     yield UserManager(user_db)
 ```
 
-- [ ] **Step 5: Registrar UserSettings en `db/__init__.py`**
+- [x] **Step 5: Registrar UserSettings en `db/__init__.py`**
 
 Editar `backend/src/ibkr_control/db/__init__.py`:
 
@@ -1140,7 +1140,7 @@ from ibkr_control.settings.models import UserSettings  # noqa: F401
 from ibkr_control.db.base import Base  # noqa: F401
 ```
 
-- [ ] **Step 6: Incluir router en main.py**
+- [x] **Step 6: Incluir router en main.py**
 
 Editar `backend/src/ibkr_control/main.py` para agregar:
 
@@ -1152,7 +1152,7 @@ app.include_router(settings_router, prefix="/api")
 
 (Justo después del `app.include_router(auth_router, ...)`.)
 
-- [ ] **Step 7: Generar migración**
+- [x] **Step 7: Generar migración**
 
 ```bash
 cd /Users/owner/Development/ibkr-control/backend
@@ -1163,7 +1163,7 @@ uv run alembic upgrade head
 
 Verificar tabla `user_settings` creada.
 
-- [ ] **Step 8: Escribir tests de settings**
+- [x] **Step 8: Escribir tests de settings**
 
 `backend/tests/test_settings.py`:
 
@@ -1222,7 +1222,7 @@ async def test_settings_requires_auth(client):
     assert response.status_code == 401
 ```
 
-- [ ] **Step 9: Correr tests**
+- [x] **Step 9: Correr tests**
 
 ```bash
 cd /Users/owner/Development/ibkr-control/backend
@@ -1231,7 +1231,7 @@ uv run pytest tests/test_settings.py -v
 
 Expected: `4 passed`.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 cd /Users/owner/Development/ibkr-control
