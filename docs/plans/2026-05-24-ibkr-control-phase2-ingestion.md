@@ -4903,7 +4903,7 @@ git commit -m "feat(phase2): API endpoints — credentials (GET/PUT) + setup wiz
 - Create: `backend/tests/api/test_imports.py`
 - Create: `backend/tests/api/test_ingest.py`
 
-- [ ] **Step 1: Escribir tests del upload (failing)**
+- [x] **Step 1: Escribir tests del upload (failing)**
 
 Crear `backend/tests/api/test_imports.py`:
 
@@ -4963,7 +4963,7 @@ async def test_upload_requires_auth(client: AsyncClient):
     assert resp.status_code == 401
 ```
 
-- [ ] **Step 2: Implementar `api/imports.py`**
+- [x] **Step 2: Implementar `api/imports.py`**
 
 Crear `backend/src/ibkr_control/api/imports.py`:
 
@@ -5039,7 +5039,7 @@ async def upload_xml(
     }
 ```
 
-- [ ] **Step 3: Escribir tests del ingest router (failing)**
+- [x] **Step 3: Escribir tests del ingest router (failing)**
 
 Crear `backend/tests/api/test_ingest.py`:
 
@@ -5110,7 +5110,7 @@ async def test_stream_emits_done_event(client: AsyncClient, auth_headers: dict):
         assert "done" in body
 ```
 
-- [ ] **Step 4: Implementar `api/ingest.py`**
+- [x] **Step 4: Implementar `api/ingest.py`**
 
 Crear `backend/src/ibkr_control/api/ingest.py`:
 
@@ -5242,7 +5242,7 @@ async def list_logs(
     return [IngestLogRead.model_validate(r, from_attributes=True) for r in result.all()]
 ```
 
-- [ ] **Step 5: Wire routers en `main.py`**
+- [x] **Step 5: Wire routers en `main.py`**
 
 ```python
 from ibkr_control.api import imports as imports_router
@@ -5252,7 +5252,7 @@ app.include_router(imports_router.router)
 app.include_router(ingest_router.router)
 ```
 
-- [ ] **Step 6: Correr tests**
+- [x] **Step 6: Correr tests**
 
 ```bash
 cd backend && uv run pytest tests/api/test_imports.py tests/api/test_ingest.py -v
@@ -5260,7 +5260,7 @@ cd backend && uv run pytest tests/api/test_imports.py tests/api/test_ingest.py -
 
 Expected: 10/10 PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/src/ibkr_control/api/imports.py \
