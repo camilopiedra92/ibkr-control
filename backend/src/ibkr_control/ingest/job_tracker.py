@@ -3,6 +3,7 @@
 V1: in-process, single backend replica. V2: Redis pub/sub.
 """
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from itertools import count
 from typing import Any
 
@@ -18,6 +19,9 @@ class _JobState:
     events: list[TrackerEvent] = field(default_factory=list)
     done: bool = False
     next_event_id: int = 0
+    created_at: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
 
 
 class JobTracker:
@@ -66,6 +70,23 @@ class JobTracker:
     def cleanup(self, job_id: int) -> None:
         """Remueve el job del tracker (llamar despues de N minutos de done)."""
         self._jobs.pop(job_id, None)
+
+    def cleanup_old(self, older_than: timedelta = timedelta(hours=1)) -> int:
+        """Remove jobs that are done and whose created_at is older than `older_than`.
+
+        Returns the count of removed jobs. Called hourly by the scheduler to
+        prevent unbounded growth of the _jobs dict in long-running containers.
+        Only removes jobs that are marked done — in-progress jobs are kept
+        regardless of age.
+        """
+        cutoff = datetime.now(timezone.utc) - older_than
+        to_remove = [
+            jid for jid, s in self._jobs.items()
+            if s.done and s.created_at < cutoff
+        ]
+        for jid in to_remove:
+            del self._jobs[jid]
+        return len(to_remove)
 
 
 # Singleton global usado por endpoints + jobs

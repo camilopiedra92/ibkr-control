@@ -4,11 +4,11 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from ibkr_control.scheduler.jobs import register_jobs
 
 
-def test_register_creates_two_jobs():
+def test_register_creates_three_jobs():
     scheduler = AsyncIOScheduler()
     register_jobs(scheduler)
     ids = {j.id for j in scheduler.get_jobs()}
-    assert ids == {"flex_daily", "trm_daily"}
+    assert ids == {"flex_daily", "trm_daily", "cleanup_job_tracker"}
 
 
 def test_flex_daily_runs_at_12utc():

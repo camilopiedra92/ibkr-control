@@ -49,3 +49,47 @@ def test_unknown_job_returns_empty():
     tracker = JobTracker()
     assert tracker.events_since(99999, after_id=0) == []
     assert tracker.is_done(99999) is False
+
+
+def test_cleanup_old_removes_done_jobs_past_cutoff():
+    """cleanup_old removes jobs that are done and older than the cutoff."""
+    from datetime import datetime, timedelta, timezone
+
+    tracker = JobTracker()
+    job_id = tracker.create_job()
+    tracker.emit(job_id, {"step": "done"})
+    tracker.mark_done(job_id)
+
+    # Backdate created_at to 2 hours ago to ensure it exceeds the 1-hour cutoff
+    tracker._jobs[job_id].created_at = datetime.now(timezone.utc) - timedelta(hours=2)
+
+    removed = tracker.cleanup_old(older_than=timedelta(hours=1))
+    assert removed == 1
+    assert not tracker.has_job(job_id)
+
+
+def test_cleanup_old_keeps_jobs_not_yet_done():
+    """cleanup_old does NOT remove in-progress jobs even if old."""
+    from datetime import datetime, timedelta, timezone
+
+    tracker = JobTracker()
+    job_id = tracker.create_job()
+    tracker.emit(job_id, {"step": "running"})
+    # Backdate created_at to 2 hours ago
+    tracker._jobs[job_id].created_at = datetime.now(timezone.utc) - timedelta(hours=2)
+
+    removed = tracker.cleanup_old(older_than=timedelta(hours=1))
+    assert removed == 0
+    assert tracker.has_job(job_id)
+
+
+def test_cleanup_old_keeps_recent_done_jobs():
+    """cleanup_old does NOT remove done jobs younger than the cutoff."""
+    tracker = JobTracker()
+    job_id = tracker.create_job()
+    tracker.mark_done(job_id)
+    # created_at is just now (default), well within the 1-hour cutoff
+
+    removed = tracker.cleanup_old(older_than=timedelta(hours=1))
+    assert removed == 0
+    assert tracker.has_job(job_id)
