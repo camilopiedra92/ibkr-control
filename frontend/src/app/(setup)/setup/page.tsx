@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { Stepper } from "@/components/wizard/Stepper";
 import { Step1Credentials } from "@/components/wizard/Step1Credentials";
 import { Step2Accounts } from "@/components/wizard/Step2Accounts";
+import { Step3Xmls } from "@/components/wizard/Step3Xmls";
+import { Step4Initial } from "@/components/wizard/Step4Initial";
 import { useSetupState, currentStep } from "@/hooks/useSetupState";
 
 export default function SetupPage() {
@@ -37,6 +39,11 @@ export default function SetupPage() {
     setOverride(3);
   }
 
+  function handleStep3Complete() {
+    refetch();
+    setOverride(4);
+  }
+
   return (
     <div>
       <Stepper
@@ -54,20 +61,13 @@ export default function SetupPage() {
         />
       )}
       {active === 3 && (
-        <div className="text-center py-8 space-y-2">
-          <p className="font-medium">Paso 3: Carga de XMLs historicos</p>
-          <p className="text-sm text-muted-foreground">
-            Implementado en Task 17.
-          </p>
-        </div>
+        <Step3Xmls
+          onComplete={handleStep3Complete}
+          onBack={() => setOverride(2)}
+        />
       )}
       {active === 4 && (
-        <div className="text-center py-8 space-y-2">
-          <p className="font-medium">Paso 4: Iniciar backfill</p>
-          <p className="text-sm text-muted-foreground">
-            Implementado en Task 17.
-          </p>
-        </div>
+        <Step4Initial onBack={() => setOverride(3)} />
       )}
     </div>
   );
