@@ -1646,7 +1646,7 @@ git commit -m "feat(frontend): orval-generated API client + TanStack Query provi
 - Create: `frontend/src/app/(auth)/register/page.tsx`
 - Create: `frontend/src/lib/auth/storeToken.ts`
 
-- [ ] **Step 1: Crear helper para guardar token**
+- [x] **Step 1: Crear helper para guardar token**
 
 `frontend/src/lib/auth/storeToken.ts`:
 
@@ -1669,7 +1669,7 @@ export function clearToken() {
 }
 ```
 
-- [ ] **Step 2: Crear layout del grupo (auth)**
+- [x] **Step 2: Crear layout del grupo (auth)**
 
 `frontend/src/app/(auth)/layout.tsx`:
 
@@ -1687,7 +1687,7 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
 }
 ```
 
-- [ ] **Step 3: Crear página de login**
+- [x] **Step 3: Crear página de login**
 
 `frontend/src/app/(auth)/login/page.tsx`:
 
@@ -1764,7 +1764,7 @@ export default function LoginPage() {
 }
 ```
 
-- [ ] **Step 4: Crear página de register**
+- [x] **Step 4: Crear página de register**
 
 `frontend/src/app/(auth)/register/page.tsx`:
 
@@ -1840,7 +1840,7 @@ export default function RegisterPage() {
 }
 ```
 
-- [ ] **Step 5: Smoke test manual**
+- [x] **Step 5: Smoke test manual**
 
 ```bash
 cd /Users/owner/Development/ibkr-control
@@ -1852,7 +1852,7 @@ open http://localhost:3000/register
 
 Expected: Registro funciona, login devuelve token, queda guardado en localStorage (verificable en DevTools).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 docker compose down
