@@ -260,10 +260,17 @@ async def _ensure_accounts(
     session: AsyncSession,
     ibkr_ids: list[str],
 ) -> dict[str, int]:
-    """Garantiza que existan accounts para todos los ibkr_ids.
+    """Ensure DB rows exist for all given IBKR account IDs. Returns ibkr_id -> db id map.
 
-    Devuelve mapping ibkr_id → db id.
-    Solo inserta accounts que no existan; los existentes se devuelven tal cual.
+    Race condition note: this function uses SELECT-then-INSERT, not ON CONFLICT.
+    For the cron Flex flow, this is safe because flex_job.run() holds an
+    advisory_lock(source='flex', user_id=X) preventing concurrent ingests for
+    the same user. For manual uploads via /api/imports/upload, the spec (D9)
+    explicitly forgoes the advisory lock (different XML hashes = independent
+    work). In that case, two parallel uploads referencing the same NEW account
+    could race here — the second would either get the existing row (race lost
+    safely) or hit the UNIQUE(ibkr_account_id) constraint and fail. Acceptable
+    V1 trade-off; if it becomes a problem, wrap with ON CONFLICT DO NOTHING.
     """
     if not ibkr_ids:
         return {}

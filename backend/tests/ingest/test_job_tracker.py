@@ -85,6 +85,8 @@ def test_cleanup_old_keeps_jobs_not_yet_done():
 
 def test_cleanup_old_keeps_recent_done_jobs():
     """cleanup_old does NOT remove done jobs younger than the cutoff."""
+    from datetime import timedelta
+
     tracker = JobTracker()
     job_id = tracker.create_job()
     tracker.mark_done(job_id)
