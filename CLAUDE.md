@@ -80,7 +80,7 @@ Globant, AFC, leasing, etc. Esta app es el **centro de control IBKR-only**.
 | Capa | Tecnología |
 |---|---|
 | Backend | Python 3.12 + FastAPI + SQLAlchemy 2.x async + asyncpg + Alembic + fastapi-users + APScheduler + uvicorn |
-| Frontend | Next.js 14 (App Router) + TypeScript + Tailwind + shadcn/ui + TanStack Query + orval |
+| Frontend | Next.js 16 + React 19 + TypeScript + Tailwind v4 + shadcn/ui (`base-nova`, `neutral`) + TanStack Query + orval (plan dice "14" — el ecosistema avanzó; ver Notas frontend abajo) |
 | DB | Postgres 16 |
 | Hosting | Coolify self-hosted en Hetzner (Docker Compose) |
 | Tooling | uv (Python), pnpm (Node), Playwright, GitHub Actions |
@@ -124,6 +124,17 @@ Cobertura completa en `docs/specs/2026-05-24-ibkr-control-center-design.md` §6.
 - **Art. 115** — GMF, no aplica a operaciones US
 - **Conceptos DIAN 008706/2025, 003517/2025** — MGC BVC, no IBKR
 - **Art. 408** — IBKR no es agente retenedor colombiano
+
+## Notas frontend (drift del plan vs realidad post-Task 7)
+
+El plan fue escrito asumiendo Next 14 / Tailwind v3 / shadcn Slate. `pnpm create next-app@latest` en May 2026 instala Next 16 + React 19, y `pnpm dlx shadcn@latest init -d` configura `base-nova` con `neutral`. Cambios prácticos para Tasks 8-12:
+
+- **No existe `tailwind.config.ts`**. Tailwind v4 se configura via CSS: `@import "tailwindcss"` en `globals.css`. Ya está hecho.
+- **`next.config.ts`** (no `.mjs`). Mismo `output: "standalone"`.
+- **shadcn `form` no existe en `base-nova`** — usar `field` en su lugar para login/register/settings. La API es distinta: en vez de `<Form>{ <FormField name="x" render={...} />}</Form>` se usa `<Field>` primitive con `register()` de react-hook-form. Ver `frontend/src/components/ui/field.tsx`. Cuando un task del plan diga "shadcn add form", reemplazar mental por "field".
+- **Node 22** en Dockerfile (no 20) — pnpm@latest requiere `node:sqlite` builtin.
+- **`pnpm-workspace.yaml` committeado** con `onlyBuiltDependencies` (sharp, esbuild, msw). pnpm 10 requiere ese archivo para `--frozen-lockfile` cuando hay build scripts approved.
+- **Backend container tiene healthcheck** (Task 3 polish): `curl http://localhost:8000/health`. Frontend depende de backend pero NO espera health (no necesita — es estática).
 
 ## Decisiones arquitectónicas (locked, ver spec §2)
 
