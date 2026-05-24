@@ -2042,7 +2042,7 @@ git commit -m "feat(frontend): protected layout + sidebar + 10 placeholder pages
 **Files:**
 - Modify: `frontend/src/app/(app)/settings/page.tsx`
 
-- [ ] **Step 1: Reescribir settings/page.tsx con datos reales**
+- [x] **Step 1: Reescribir settings/page.tsx con datos reales**
 
 `frontend/src/app/(app)/settings/page.tsx` (reemplazar):
 
@@ -2124,7 +2124,7 @@ export default function SettingsPage() {
 }
 ```
 
-- [ ] **Step 2: Smoke test**
+- [x] **Step 2: Smoke test**
 
 ```bash
 cd /Users/owner/Development/ibkr-control
@@ -2134,7 +2134,7 @@ sleep 10
 # → refrescar la página → debe seguir mostrando 0.3300
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 docker compose down
