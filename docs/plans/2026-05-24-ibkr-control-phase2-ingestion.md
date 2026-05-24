@@ -3511,14 +3511,14 @@ git commit -m "feat(phase2): Flex persister + job orchestrator (dedup + advisory
 - Create: `backend/tests/fixtures/cassettes/trm/socrata_empty.yaml`
 - Create: `backend/tests/fixtures/cassettes/trm/socrata_three_rows.yaml`
 
-- [ ] **Step 1: Crear directorios**
+- [x] **Step 1: Crear directorios**
 
 ```bash
 mkdir -p backend/src/ibkr_control/ingest/trm backend/tests/ingest/trm
 touch backend/src/ibkr_control/ingest/trm/__init__.py backend/tests/ingest/trm/__init__.py
 ```
 
-- [ ] **Step 2: Escribir tests del parser TRM (failing)**
+- [x] **Step 2: Escribir tests del parser TRM (failing)**
 
 Crear `backend/tests/ingest/trm/test_parser.py`:
 
@@ -3592,7 +3592,7 @@ def test_expand_handles_date_only_format():
     assert out[0]["date"] == date(2026, 1, 15)
 ```
 
-- [ ] **Step 3: Implementar el parser**
+- [x] **Step 3: Implementar el parser**
 
 Crear `backend/src/ibkr_control/ingest/trm/parser.py`:
 
@@ -3646,7 +3646,7 @@ def expand_vigencias(rows: Iterable[dict]) -> Iterator[dict]:
             d += timedelta(days=1)
 ```
 
-- [ ] **Step 4: Correr tests del parser**
+- [x] **Step 4: Correr tests del parser**
 
 ```bash
 cd backend && uv run pytest tests/ingest/trm/test_parser.py -v
@@ -3654,7 +3654,7 @@ cd backend && uv run pytest tests/ingest/trm/test_parser.py -v
 
 Expected: 5/5 PASS.
 
-- [ ] **Step 5: Crear cassettes mínimas para TRM client tests**
+- [x] **Step 5: Crear cassettes mínimas para TRM client tests**
 
 Crear `backend/tests/fixtures/cassettes/trm/socrata_empty.yaml`:
 
@@ -3699,7 +3699,7 @@ interactions:
 version: 1
 ```
 
-- [ ] **Step 6: Escribir tests del client (failing)**
+- [x] **Step 6: Escribir tests del client (failing)**
 
 Crear `backend/tests/ingest/trm/test_client.py`:
 
@@ -3728,7 +3728,7 @@ async def test_fetch_three_rows():
     assert rows[0]["vigenciadesde"].startswith("2026-01-02")
 ```
 
-- [ ] **Step 7: Implementar el client**
+- [x] **Step 7: Implementar el client**
 
 Crear `backend/src/ibkr_control/ingest/trm/client.py`:
 
@@ -3769,7 +3769,7 @@ class TrmClient:
             return resp.json()
 ```
 
-- [ ] **Step 8: Correr tests del client**
+- [x] **Step 8: Correr tests del client**
 
 ```bash
 cd backend && uv run pytest tests/ingest/trm/test_client.py -v
@@ -3777,7 +3777,7 @@ cd backend && uv run pytest tests/ingest/trm/test_client.py -v
 
 Expected: 2/2 PASS.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add backend/src/ibkr_control/ingest/trm/ \
