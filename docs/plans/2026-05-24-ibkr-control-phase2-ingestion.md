@@ -1871,14 +1871,14 @@ git commit -m "feat(phase2): XML fixtures sanitizadas + VCR scaffolding + saniti
 - Create: `backend/tests/ingest/flex/test_crypto.py`
 - Modify: `.env.example` (agregar `TOKEN_ENCRYPTION_KEY`)
 
-- [ ] **Step 1: Crear directorios**
+- [x] **Step 1: Crear directorios**
 
 ```bash
 mkdir -p backend/src/ibkr_control/ingest/flex backend/tests/ingest/flex
 touch backend/src/ibkr_control/ingest/flex/__init__.py backend/tests/ingest/flex/__init__.py
 ```
 
-- [ ] **Step 2: Generar test key + agregar a .env.example**
+- [x] **Step 2: Generar test key + agregar a .env.example**
 
 Generar una key real para los tests + agregar al .env.example como placeholder:
 
@@ -1896,7 +1896,7 @@ Agregar al `.env` local (NO commit):
 echo "TOKEN_ENCRYPTION_KEY=<output del openssl rand>" >> .env
 ```
 
-- [ ] **Step 3: Escribir tests de crypto (failing)**
+- [x] **Step 3: Escribir tests de crypto (failing)**
 
 Crear `backend/tests/ingest/flex/test_crypto.py`:
 
@@ -1970,7 +1970,7 @@ def test_blob_structure_nonce_prepended():
     assert len(blob) == 32
 ```
 
-- [ ] **Step 4: Implementar `crypto.py`**
+- [x] **Step 4: Implementar `crypto.py`**
 
 Crear `backend/src/ibkr_control/ingest/flex/crypto.py`:
 
@@ -2009,7 +2009,7 @@ def decrypt_token(blob: bytes) -> str:
     return aes.decrypt(nonce, ct, associated_data=None).decode("utf-8")
 ```
 
-- [ ] **Step 5: Correr tests**
+- [x] **Step 5: Correr tests**
 
 ```bash
 cd backend && uv run pytest tests/ingest/flex/test_crypto.py -v
@@ -2017,7 +2017,7 @@ cd backend && uv run pytest tests/ingest/flex/test_crypto.py -v
 
 Expected: 8/8 PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/src/ibkr_control/ingest/flex/ \
