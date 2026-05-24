@@ -6147,7 +6147,7 @@ git commit -m "feat(phase2): frontend wizard steps 3 (XML upload) + 4 (SSE progr
 - Create: `frontend/src/components/settings/RotateTokenModal.tsx`
 - Create: `frontend/src/components/settings/ManualRefreshButton.tsx`
 
-- [ ] **Step 1: Crear `FlexCredentialsSection`**
+- [x] **Step 1: Crear `FlexCredentialsSection`**
 
 Crear `frontend/src/components/settings/FlexCredentialsSection.tsx`:
 
@@ -6184,7 +6184,7 @@ export function FlexCredentialsSection() {
 }
 ```
 
-- [ ] **Step 2: Crear `RotateTokenModal`**
+- [x] **Step 2: Crear `RotateTokenModal`**
 
 Crear `frontend/src/components/settings/RotateTokenModal.tsx`:
 
@@ -6244,7 +6244,7 @@ export function RotateTokenModal({ onClose }: Props) {
 }
 ```
 
-- [ ] **Step 3: Crear `XmlUploadSection`**
+- [x] **Step 3: Crear `XmlUploadSection`**
 
 Crear `frontend/src/components/settings/XmlUploadSection.tsx`:
 
@@ -6315,7 +6315,7 @@ export function XmlUploadSection() {
 }
 ```
 
-- [ ] **Step 4: Crear `IngestLogTable`**
+- [x] **Step 4: Crear `IngestLogTable`**
 
 Crear `frontend/src/components/settings/IngestLogTable.tsx`:
 
@@ -6363,7 +6363,7 @@ export function IngestLogTable() {
 }
 ```
 
-- [ ] **Step 5: Crear `ManualRefreshButton`**
+- [x] **Step 5: Crear `ManualRefreshButton`**
 
 Crear `frontend/src/components/settings/ManualRefreshButton.tsx`:
 
@@ -6410,7 +6410,7 @@ export function ManualRefreshButton() {
 }
 ```
 
-- [ ] **Step 6: Modificar `settings/page.tsx` para incluir las secciones nuevas**
+- [x] **Step 6: Modificar `settings/page.tsx` para incluir las secciones nuevas**
 
 Modificar `frontend/src/app/(app)/settings/page.tsx` (preservar lo existente del Phase 1 y agregar las nuevas secciones):
 
@@ -6443,7 +6443,7 @@ export default function SettingsPage() {
 }
 ```
 
-- [ ] **Step 7: Build + smoke test**
+- [x] **Step 7: Build + smoke test**
 
 ```bash
 cd frontend && pnpm build
@@ -6460,7 +6460,7 @@ Abrir `http://localhost:3000/settings` (después de loguearse + completar wizard
 docker compose down
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add frontend/src/components/settings/ \
