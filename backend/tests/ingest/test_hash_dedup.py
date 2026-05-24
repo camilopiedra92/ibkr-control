@@ -37,3 +37,9 @@ async def test_is_known_hash_true_when_exists(db_session: AsyncSession, sample_u
     ))
     await db_session.commit()
     assert await is_known_hash(db_session, h) is True
+
+
+def test_xml_hash_empty_bytes_pinned():
+    """SHA-256 of empty bytes is the well-known constant. Pin it to prevent
+    accidental hash function changes."""
+    assert xml_hash(b"") == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"

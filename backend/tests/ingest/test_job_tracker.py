@@ -9,7 +9,7 @@ def test_emit_and_read_events():
     tracker.emit(job_id, {"step": "trm_backfill", "status": "running"})
     tracker.emit(job_id, {"step": "trm_backfill", "status": "ok", "n_days": 12000})
 
-    events = tracker.events_since(job_id, after_id=0)
+    events = tracker.events_since(job_id, after_id=-1)  # all events from the start
     assert len(events) == 2
     assert events[0].payload == {"step": "trm_backfill", "status": "running"}
     assert events[1].payload["n_days"] == 12000
@@ -18,13 +18,18 @@ def test_emit_and_read_events():
 def test_events_since_filters_by_id():
     tracker = JobTracker()
     job_id = tracker.create_job()
-    tracker.emit(job_id, {"step": "a"})
-    tracker.emit(job_id, {"step": "b"})
-    tracker.emit(job_id, {"step": "c"})
+    tracker.emit(job_id, {"step": "a"})  # id=0
+    tracker.emit(job_id, {"step": "b"})  # id=1
+    tracker.emit(job_id, {"step": "c"})  # id=2
 
+    # after_id=1 → strictly greater than 1 → only event with id=2 ('c')
     events = tracker.events_since(job_id, after_id=1)
-    assert len(events) == 2
-    assert events[0].payload == {"step": "b"}
+    assert len(events) == 1
+    assert events[0].payload == {"step": "c"}
+
+    # after_id=-1 → all events
+    all_events = tracker.events_since(job_id, after_id=-1)
+    assert len(all_events) == 3
 
 
 def test_is_done_default_false():

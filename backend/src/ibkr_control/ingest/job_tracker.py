@@ -41,9 +41,16 @@ class JobTracker:
         state.next_event_id += 1
 
     def events_since(self, job_id: int, after_id: int) -> list[TrackerEvent]:
+        """Return events whose id is STRICTLY greater than after_id.
+
+        This matches the SSE Last-Event-ID convention: the client passes the id
+        of the last event it received, and the server returns subsequent events.
+        Pass after_id=-1 to get all events from the beginning (since the first
+        event has id=0).
+        """
         if job_id not in self._jobs:
             return []
-        return [e for e in self._jobs[job_id].events if e.id >= after_id]
+        return [e for e in self._jobs[job_id].events if e.id > after_id]
 
     def mark_done(self, job_id: int) -> None:
         if job_id in self._jobs:
