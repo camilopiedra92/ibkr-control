@@ -44,3 +44,6 @@ postgres_data/
 
 # Brainstorm artifacts
 .superpowers/
+
+# Claude Code personal overrides (settings.json sí se commitea)
+.claude/settings.local.json
