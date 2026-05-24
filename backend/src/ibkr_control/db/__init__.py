@@ -8,6 +8,7 @@ from ibkr_control.db.models.trm import TrmDay, TrmImport  # noqa: F401
 from ibkr_control.db.models.flex_raw import (  # noqa: F401
     FlexImport, Trade, ClosedLot, OpenPositionLot, Transfer, TransferLot, CashTransaction,
 )
+from ibkr_control.db.models.ingest_log import IngestLog  # noqa: F401
 from ibkr_control.db.base import Base  # noqa: F401
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "TrmDay", "TrmImport",
     "FlexImport", "Trade", "ClosedLot", "OpenPositionLot", "Transfer", "TransferLot",
     "CashTransaction",
+    "IngestLog",
     "Base",
 ]
