@@ -1442,7 +1442,7 @@ git commit -m "feat(frontend): Next.js + Tailwind + shadcn skeleton + Dockerfile
 - Create: `frontend/scripts/fetch-openapi.sh`
 - Create: `frontend/openapi.json` (generado, no commitear si querés, pero más simple commitearlo)
 
-- [ ] **Step 1: Levantar backend para bajar el schema**
+- [x] **Step 1: Levantar backend para bajar el schema**
 
 ```bash
 cd /Users/owner/Development/ibkr-control
@@ -1450,7 +1450,7 @@ docker compose up -d backend postgres
 sleep 5
 ```
 
-- [ ] **Step 2: Crear script para fetch del OpenAPI**
+- [x] **Step 2: Crear script para fetch del OpenAPI**
 
 `frontend/scripts/fetch-openapi.sh`:
 
@@ -1471,7 +1471,7 @@ chmod +x frontend/scripts/fetch-openapi.sh
 
 Expected: `Wrote .../frontend/openapi.json`.
 
-- [ ] **Step 3: Crear orval.config.ts**
+- [x] **Step 3: Crear orval.config.ts**
 
 `frontend/orval.config.ts`:
 
@@ -1501,7 +1501,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 4: Crear axios mutator (lee JWT del localStorage)**
+- [x] **Step 4: Crear axios mutator (lee JWT del localStorage)**
 
 `frontend/src/lib/api/mutator.ts`:
 
@@ -1530,7 +1530,7 @@ export const axiosMutator = <T>(config: AxiosRequestConfig): Promise<T> => {
 export default axiosMutator;
 ```
 
-- [ ] **Step 5: Correr orval**
+- [x] **Step 5: Correr orval**
 
 ```bash
 cd /Users/owner/Development/ibkr-control/frontend
@@ -1539,7 +1539,7 @@ pnpm orval
 
 Expected: `frontend/src/lib/api/generated.ts` creado, con hooks `useUsersUsersCurrentUser`, `useAuthJwtLoginAuthJwtLoginPost`, etc.
 
-- [ ] **Step 6: Crear queryClient + providers**
+- [x] **Step 6: Crear queryClient + providers**
 
 `frontend/src/lib/api/queryClient.ts`:
 
@@ -1567,7 +1567,7 @@ export function Providers({ children }: { children: ReactNode }) {
 }
 ```
 
-- [ ] **Step 7: Re-export del API en index.ts**
+- [x] **Step 7: Re-export del API en index.ts**
 
 `frontend/src/lib/api/index.ts`:
 
@@ -1577,7 +1577,7 @@ export { axiosInstance, axiosMutator } from "./mutator";
 export { queryClient } from "./queryClient";
 ```
 
-- [ ] **Step 8: Wire Providers en layout**
+- [x] **Step 8: Wire Providers en layout**
 
 `frontend/src/app/layout.tsx`:
 
@@ -1602,7 +1602,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 }
 ```
 
-- [ ] **Step 9: Agregar npm scripts**
+- [x] **Step 9: Agregar npm scripts**
 
 Editar `frontend/package.json`, sección `scripts`:
 
@@ -1617,7 +1617,7 @@ Editar `frontend/package.json`, sección `scripts`:
 }
 ```
 
-- [ ] **Step 10: Verificar build sin errores TS**
+- [x] **Step 10: Verificar build sin errores TS**
 
 ```bash
 cd /Users/owner/Development/ibkr-control/frontend
@@ -1626,7 +1626,7 @@ pnpm build
 
 Expected: Build OK, sin errores.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 cd /Users/owner/Development/ibkr-control
