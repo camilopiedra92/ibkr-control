@@ -3796,7 +3796,7 @@ git commit -m "feat(phase2): TRM Socrata client + vigencia expansion parser"
 - Create: `backend/tests/ingest/trm/test_persister.py`
 - Create: `backend/tests/ingest/trm/test_job.py`
 
-- [ ] **Step 1: Escribir tests del persister (failing)**
+- [x] **Step 1: Escribir tests del persister (failing)**
 
 Crear `backend/tests/ingest/trm/test_persister.py`:
 
@@ -3853,7 +3853,7 @@ async def test_bulk_handles_empty_list(db_session: AsyncSession):
     assert n == 0
 ```
 
-- [ ] **Step 2: Implementar el persister**
+- [x] **Step 2: Implementar el persister**
 
 Crear `backend/src/ibkr_control/ingest/trm/persister.py`:
 
@@ -3905,7 +3905,7 @@ async def record_import(
     return row.id
 ```
 
-- [ ] **Step 3: Correr tests del persister**
+- [x] **Step 3: Correr tests del persister**
 
 ```bash
 cd backend && uv run pytest tests/ingest/trm/test_persister.py -v
@@ -3913,7 +3913,7 @@ cd backend && uv run pytest tests/ingest/trm/test_persister.py -v
 
 Expected: 3/3 PASS.
 
-- [ ] **Step 4: Escribir tests del TRM job (failing)**
+- [x] **Step 4: Escribir tests del TRM job (failing)**
 
 Crear `backend/tests/ingest/trm/test_job.py`:
 
@@ -3982,7 +3982,7 @@ async def test_run_logs_failure_on_http_error(db_engine):
         assert log.error_message is not None
 ```
 
-- [ ] **Step 5: Implementar el TRM job**
+- [x] **Step 5: Implementar el TRM job**
 
 Crear `backend/src/ibkr_control/ingest/trm/job.py`:
 
@@ -4040,7 +4040,7 @@ async def run(
                 return {"status": "ok", "n_rows_api": len(rows), "n_days": n_days}
 ```
 
-- [ ] **Step 6: Correr todos los tests TRM**
+- [x] **Step 6: Correr todos los tests TRM**
 
 ```bash
 cd backend && uv run pytest tests/ingest/trm/ -v
@@ -4048,7 +4048,7 @@ cd backend && uv run pytest tests/ingest/trm/ -v
 
 Expected: 10/10 PASS (5 parser + 2 client + 3 persister + 3 job).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/src/ibkr_control/ingest/trm/persister.py \
