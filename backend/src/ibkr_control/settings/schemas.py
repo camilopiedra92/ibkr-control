@@ -10,5 +10,11 @@ class UserSettingsRead(BaseModel):
 
 
 class UserSettingsUpdate(BaseModel):
-    marginal_rate: Decimal | None = Field(default=None, gt=Decimal("0"), lt=Decimal("1"))
+    marginal_rate: Decimal | None = Field(
+        default=None,
+        gt=Decimal("0"),
+        lt=Decimal("1"),
+        max_digits=5,
+        decimal_places=4,
+    )
     timezone: str | None = None

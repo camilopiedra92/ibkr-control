@@ -53,6 +53,18 @@ async def test_settings_requires_auth(client):
     assert response.status_code == 401
 
 
+async def test_settings_patch_rejects_excess_decimal_places(client):
+    # max_digits=5, decimal_places=4 en el schema debe rechazar 5+ decimales
+    # antes de pegarle a Postgres, que de otro modo redondea silenciosamente.
+    token = await _register_and_login(client)
+    response = await client.patch(
+        "/api/settings",
+        json={"marginal_rate": "0.12345"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 422
+
+
 async def test_settings_get_recovers_when_row_missing(client, app_with_db):
     # Protege la deviation 1: _load es idempotente. Si on_after_register fallara
     # post-User.commit, el row de UserSettings no existiría. GET debe recrearlo
