@@ -2,27 +2,103 @@
 
 ## ⏯ Cómo continuar (próxima sesión)
 
-**Phase 2 está completa** (tag `v0.2.0-ingest` creado localmente, 141/141 tests pasan).
-La próxima sesión de Claude Code abierta en este folder planifica Phase 3:
+**Phase 2 está 100% completa.** Branch `phase2/ingestion` ya mergeado a `main` (commit `6b97e46`).
+Polish backlog post-merge cerrado (10 items, ver `docs/plans/2026-05-24-phase2-polish-backlog.md`).
+Tag `v0.2.0-ingest` apunta al commit final de polish (`a606be2`). **186/186 backend tests pasan, frontend builds clean.**
 
-1. **Leer este CLAUDE.md completo** (lo cargás automáticamente)
-2. **Mirar el estado actual** en la sección "Estado actual" abajo
-3. **Para planificar Phase 3** (domain layer + lotes):
-   - Verificar que el tag `v0.2.0-ingest` existe: `git tag -l "v0.2*"`
-   - Invocar `superpowers:brainstorming` PRIMERO (Phase 3 tiene decisiones abiertas no resueltas — ver §Roadmap Phase 3)
-   - Después `superpowers:writing-plans` para producir `docs/plans/YYYY-MM-DD-ibkr-control-phase3-lotes.md` (usar fecha del día)
-   - Actualizar la tabla "Estado actual" abajo con el link al plan nuevo
-4. **Si el usuario quiere deployar primero a Coolify** (pendiente del Phase 1 + Phase 2):
-   - La rama `phase2/ingestion` está lista para mergear a `main`
-   - Hacer merge + push a main + `git push --follow-tags` para subir el tag
-   - Después deployar desde Coolify apuntando a `main`
-   - `TOKEN_ENCRYPTION_KEY` debe estar seteado en Coolify env vars: `openssl rand -base64 32`
-5. **Convenciones**: TDD, frequent commits (cada step termina en commit), no emojis en código, Decimal para dinero, Postgres-specific
-6. **Sibling project `renta` para referencia fiscal**: leer `docs/references/renta-cross-references.md` antes de implementar cualquier regla fiscal o lógica de ingest Flex. Reimplementar, NO importar.
+La próxima sesión decide entre dos caminos. NO son excluyentes — podés hacer A y B en paralelo.
 
-### Open from Phase 1 (pendiente del usuario)
+### Camino A — Planificar Phase 3 (recomendado arrancar acá si querés seguir codeando)
 
-- **Task 15 del Phase 1 + Phase 2 completa**: deploy manual a Coolify. Pendiente del usuario, no del agente. Lo ideal es mergear `phase2/ingestion` a `main`, pushear el tag `v0.2.0-ingest`, y luego deployar desde Coolify.
+Phase 3 = domain layer + 3 pantallas (Lotes Abiertos/Cerrados/Alertas 730d). Spec maestro §6 + §4.2. Phase 3 NO requiere prod deploy ni datos reales — desarrolla 100% contra testcontainer + fixtures sanitizadas.
+
+```
+1. Verificar Phase 2 cerrada: git tag -l "v0.2*" → debe mostrar v0.2.0-ingest
+2. Leer este CLAUDE.md (lo cargás automáticamente)
+3. Leer docs/plans/2026-05-24-phase2-polish-backlog.md (entender deuda conocida D1-D11)
+4. Invocar `superpowers:brainstorming` con prompt:
+   "Phase 3 = domain layer + lotes. Decisiones abiertas listadas en
+    CLAUDE.md §Roadmap Phase 3. Resolver una a una, luego escribir spec
+    en docs/specs/YYYY-MM-DD-phase3-domain-design.md"
+5. Después `superpowers:writing-plans` → docs/plans/YYYY-MM-DD-ibkr-control-phase3-lotes.md
+6. Update tabla "Estado actual" con el link al plan nuevo
+7. Ejecución: superpowers:subagent-driven-development (mismo método que Phase 2)
+8. Branch: git checkout -b phase3/lotes main
+```
+
+### Camino B — Deploy a Coolify + smoke test (tarea del usuario, no del agente)
+
+Independiente de Phase 3. La sesión Claude no puede hacer estos pasos (UI interactiva + credenciales reales):
+
+```
+1. Push de Phase 2 a remote (~30s):
+   git push origin main --follow-tags
+   # Esto sube main + tag v0.2.0-ingest a GitHub
+
+2. Configurar TOKEN_ENCRYPTION_KEY en Coolify (1 min):
+   openssl rand -base64 32  # generar key
+   # Pegarla en Coolify env vars del backend container
+   # CRÍTICO: sin esta key, decrypt_token() crashea al primer fetch del cron
+
+3. Trigger redeploy desde Coolify UI apuntando a main (~3 min build):
+   # Verificar logs: "Registered 3 ingest jobs: flex_daily, trm_daily, cleanup_job_tracker"
+   # Si las 6 migrations no se aplican automáticamente:
+   docker exec <backend-container> uv run alembic upgrade head
+
+4. Smoke test end-to-end (~20-30 min):
+   - Abrir URL prod del frontend → registrarte
+   - Wizard step 1: pegar tu Flex Token + YTD Query ID reales
+   - Step 2: ajustar % de la cuenta conjunta U99999001 al 50%
+   - Step 3: subir XMLs históricos desde ../renta/fuentes/2024/2025/compartidos/ibkr/
+   - Step 4: "Iniciar carga" → ver SSE progress
+   - Verificar dashboard llega
+   - Settings → log table tiene entries, click "Actualizar ahora" funciona
+```
+
+### Pre-Phase-3 checklist (verificar al arrancar la próxima sesión)
+
+- [ ] `git status` limpio en `main`
+- [ ] `git tag -l "v0.2*"` muestra `v0.2.0-ingest`
+- [ ] `cd backend && uv run pytest -q` → 186 passed
+- [ ] `cd frontend && pnpm build` → exit 0
+- [ ] Leer `docs/plans/2026-05-24-phase2-polish-backlog.md` § "Deuda conocida (D1-D11)"
+- [ ] (Opcional) `docker compose ps` para confirmar postgres + backend healthy si vas a smoke test
+
+### Convenciones (heredadas)
+
+- TDD: failing test → minimal impl → passing test → commit
+- Frequent commits: cada step del plan termina en commit
+- No emojis en código (Unicode arrows ✓ ⚠ ✗ → como content UI sí)
+- `Decimal` para dinero, nunca float
+- Postgres-specific allowed (JSONB, ON CONFLICT, advisory locks)
+- No capturar `settings = get_settings()` a nivel módulo — llamar dentro de funciones
+- English identifiers en código, Spanish OK en UI strings + docstrings
+- Sibling `renta` para referencia fiscal: leer `docs/references/renta-cross-references.md` antes de implementar reglas fiscales. **Reimplementar, NO importar**.
+
+### Open items (pendientes — no bloquean Phase 3)
+
+| Item | Quién | Bloquea? |
+|---|---|---|
+| **Push main + tag a remote** (`git push origin main --follow-tags`) | Usuario | No bloquea Phase 3 dev local |
+| **Deploy a Coolify + setear `TOKEN_ENCRYPTION_KEY`** | Usuario | No bloquea Phase 3 dev local |
+| **Smoke test end-to-end con datos reales IBKR** | Usuario | No bloquea Phase 3 (testcontainer alcanza) |
+| **11 items de deuda conocida D1-D11** documentados en polish backlog | Aceptados como V1 | No bloquean — la mayoría tienen mitigation o son features (fail-loud audit, etc.) |
+
+### Deuda conocida heredada de Phase 2 (resumen)
+
+Ver `docs/plans/2026-05-24-phase2-polish-backlog.md` § "Deuda conocida" para detalle completo + rationale. Highlights:
+
+- **D1** SSE endpoint no verifica ownership de `job_id` — V1 single-user OK
+- **D2** `_LAST_TRIGGER` in-memory rate limit — resetea con restart, V2=Redis
+- **D3** `proxy.ts` Next 16 no-op (auth client-side localStorage) — Phase 1 lock
+- **D4** E2E wizard "resume after browser close" test SKIPPED — necesita IBKR mocks
+- **D5** APScheduler in-memory jobstore — locked spec §D6
+- **D6** Cron times hardcoded (07:00/19:30 COT) — V1 acceptable
+- **D7** Paridad numérica con renta — trabajo de Phase 5
+- **D8** `_known_tags.py` fail-loud audit — diseño deliberado, no bug
+- **D9** Phase 1 Task 15: Coolify deploy — usuario
+- **D10** `auth_headers` fixture per-test overhead — V2 perf
+- **D11** Coverage gaps en imports/ingest/scheduler — requieren live infra para subir más
 
 ### Decisiones locked (no re-discutir)
 
