@@ -2,43 +2,27 @@
 
 ## ⏯ Cómo continuar (próxima sesión)
 
-Esta sesión termina aquí. La próxima sesión de Claude Code abierta en este
-folder retoma así:
+**Phase 2 está completa** (tag `v0.2.0-ingest` creado localmente, 141/141 tests pasan).
+La próxima sesión de Claude Code abierta en este folder planifica Phase 3:
 
 1. **Leer este CLAUDE.md completo** (lo cargás automáticamente)
 2. **Mirar el estado actual** en la sección "Estado actual" abajo
-3. **Para ejecutar Phase 2** (plan vigente, sin ejecutar):
-   - Plan: `docs/plans/2026-05-24-ibkr-control-phase2-ingestion.md` (20 tasks, 174 steps, ~9-15 horas de trabajo)
-   - Spec asociado: `docs/specs/2026-05-24-phase2-ingestion-design.md` (17 decisiones locked D1-D17)
-   - Método elegido: **subagent-driven** (dispatch un subagent fresco por task, review entre tasks)
-   - Skill a invocar: `superpowers:subagent-driven-development`
-   - Pedirle al usuario: "¿Arrancamos con Task 1 (Migration A — identity schema) del Phase 2?" antes de ejecutar
-   - Cada task del plan tiene checkboxes `- [ ]` — marcarlos `- [x]` al completar y commitearlos
-   - Cada task termina en commit propio + (cuando aplica) los tests pasan antes de marcar done
-4. **Pre-requisitos para Phase 2** (cosas que el usuario debe tener listas antes/durante):
-   - **`TOKEN_ENCRYPTION_KEY`** (env var). Generar en el deploy: `openssl rand -base64 32 > .env-fragment` y setear en Coolify env vars + en `.env` local. Necesario desde Task 7.
-   - **Flex Token + YTD Query ID** reales — el usuario los pega en el wizard step 1. Si no los tiene aún, hay tiempo: solo se usan al ejecutar el wizard end-to-end (Tasks 16-17 + smoke test final).
-   - **XMLs históricos opcionales** — ya los tiene en `../renta/fuentes/2024/` y `../renta/fuentes/2025/`. El script `backend/scripts/sanitize_xml.py` (Task 6) los sanitiza automáticamente para usarlos como fixtures.
-   - **VCR cassettes reales (opcional)** — Task 9 Step 4 ofrece grabar cassettes con credencial real para tests más honestos. Si no, Step 5 da fallback con cassettes mínimas a mano. No bloquea.
-5. **Para planificar Phase 3** (cuando Phase 2 termine — ver §Roadmap Phase 3 abajo):
-   - Verificar que Phase 2 esté completa: todos los checkboxes marcados, tag `v0.2.0-ingest` creado, tabla "Estado actual" actualizada
-   - Invocar `superpowers:brainstorming` PRIMERO (Phase 3 tiene decisiones abiertas, no es deriva directa del spec — ver §Roadmap Phase 3)
-   - Después `superpowers:writing-plans` para producir `docs/plans/2026-05-24-ibkr-control-phase3-lotes.md` (usar fecha del día)
+3. **Para planificar Phase 3** (domain layer + lotes):
+   - Verificar que el tag `v0.2.0-ingest` existe: `git tag -l "v0.2*"`
+   - Invocar `superpowers:brainstorming` PRIMERO (Phase 3 tiene decisiones abiertas no resueltas — ver §Roadmap Phase 3)
+   - Después `superpowers:writing-plans` para producir `docs/plans/YYYY-MM-DD-ibkr-control-phase3-lotes.md` (usar fecha del día)
    - Actualizar la tabla "Estado actual" abajo con el link al plan nuevo
-6. **Convenciones**: TDD, frequent commits (cada step termina en commit), no emojis en código, Decimal para dinero, Postgres-specific
-7. **Sibling project `renta` para referencia fiscal**: leer `docs/references/renta-cross-references.md` antes de implementar cualquier regla fiscal o lógica de ingest Flex. Reimplementar, NO importar.
+4. **Si el usuario quiere deployar primero a Coolify** (pendiente del Phase 1 + Phase 2):
+   - La rama `phase2/ingestion` está lista para mergear a `main`
+   - Hacer merge + push a main + `git push --follow-tags` para subir el tag
+   - Después deployar desde Coolify apuntando a `main`
+   - `TOKEN_ENCRYPTION_KEY` debe estar seteado en Coolify env vars: `openssl rand -base64 32`
+5. **Convenciones**: TDD, frequent commits (cada step termina en commit), no emojis en código, Decimal para dinero, Postgres-specific
+6. **Sibling project `renta` para referencia fiscal**: leer `docs/references/renta-cross-references.md` antes de implementar cualquier regla fiscal o lógica de ingest Flex. Reimplementar, NO importar.
 
-### Datos que el usuario va a pegar durante setup wizard (Phase 2)
+### Open from Phase 1 (pendiente del usuario)
 
-- IBKR Flex Token (read-only, generado en Account Management → Flex Web Service)
-- IBKR Flex Query ID del "Year to Date" del año actual
-- Email + password para la cuenta del app
-- Marginal rate (default 0.39, el usuario puede cambiar después en Settings)
-- XMLs históricos opcionales — ya los tiene en `../renta/fuentes/2024/compartidos/ibkr/` y `../renta/fuentes/2025/compartidos/ibkr/` (subir vía UI en Settings → Importar XML histórico)
-
-### Open from Phase 1 (no bloquea Phase 2)
-
-- **Task 15 del Phase 1**: deploy manual a Coolify. Pendiente del usuario, no del agente. Se puede hacer cuando quiera — Phase 2 se desarrolla 100% local con `docker compose up`. Lo ideal es deployar después de tener Phase 2 lista para tener la app entera en prod de una.
+- **Task 15 del Phase 1 + Phase 2 completa**: deploy manual a Coolify. Pendiente del usuario, no del agente. Lo ideal es mergear `phase2/ingestion` a `main`, pushear el tag `v0.2.0-ingest`, y luego deployar desde Coolify.
 
 ### Decisiones locked (no re-discutir)
 
@@ -47,6 +31,16 @@ folder retoma así:
 **Phase 2 spec (17 decisiones D1-D17):** ver `docs/specs/2026-05-24-phase2-ingestion-design.md` §3. Cubren scope, UX del wizard, testing strategy, advisory locks, APScheduler in-memory, AES-GCM, validación XML, organización per-source folders, SSE para progress, etc.
 
 Si surge una pregunta cuya respuesta ya está en cualquiera de estos specs, NO re-hacer la pregunta al usuario — referenciá el spec/CLAUDE.md y avanzá.
+
+### Phase 2 — Retrospectiva (deviaciones del spec original)
+
+Detalles útiles para evitar re-depurar en fases futuras:
+
+- **Real Activity XMLs tienen 31+ top-level tags** — el spec asumía un catálogo más pequeño. Task 8 construyó `_known_tags.py` enumerando todos los tags reales encontrados. Si aparecen XMLs de cuentas nuevas, puede haber tags nuevos → el audit los detecta y aborta con error claro.
+- **CashTransaction SUMMARY/DETAIL duplication** — los XMLs reales tienen filas tanto de detalle individual como de subtotales SUMMARY para la misma transacción. Task 8 agregó lógica de filtro para excluir filas con `levelOfDetail != "DETAIL"` antes de parsear.
+- **`_lock_key` debe ser determinístico** — la primera implementación generaba la clave con `hash()` de Python, que varía entre procesos (PYTHONHASHSEED). Task 5 lo reemplazó con `zlib.crc32` para garantizar que el advisory lock sea el mismo en worker y cron.
+- **Next.js 16 renombró `middleware.ts` semántica** — el proxy de dev (`/api/*` → backend) se mueve a `src/lib/proxy.ts` o similar porque `middleware.ts` en Next 16 tiene restricciones de Edge Runtime que no permiten `http-proxy`. Task 16 resolvió esto con una API route handler en `app/api/[...path]/route.ts`.
+- **Orval genera POSTs como `useQuery` en algunos casos** — cuando el endpoint tiene `requestBody` pero Orval no puede inferir mutación, genera un hook `useQuery` en vez de `useMutation`. Workaround: usar `useMutation` de TanStack directamente con la función fetch generada por Orval, no el hook auto-generado.
 
 ---
 
@@ -73,7 +67,7 @@ Globant, AFC, leasing, etc. Esta app es el **centro de control IBKR-only**.
 | Phase | Status | Plan | Spec | Tag al completar |
 |---|---|---|---|---|
 | 1. Foundation | ✅ código completo (Tasks 1-14) + polish backlog cerrado (6/6) + tag `v0.1.0-foundation` ✓ · Task 15 (deploy manual a Coolify) pendiente del usuario | `docs/plans/2026-05-24-ibkr-control-phase1-foundation.md` + `docs/plans/2026-05-24-phase1-polish-backlog.md` | spec maestro §3, §5.1 | `v0.1.0-foundation` ✓ |
-| 2. Data ingestion (Flex WS + TRM Socrata + scheduler + upload XML + setup wizard) | 📋 **plan escrito (20 tasks, 174 steps), listo para ejecutar · subagent-driven recomendado** | `docs/plans/2026-05-24-ibkr-control-phase2-ingestion.md` | `docs/specs/2026-05-24-phase2-ingestion-design.md` (D1-D17 locked) | `v0.2.0-ingest` |
+| 2. Data ingestion (Flex WS + TRM Socrata + scheduler + upload XML + setup wizard) | ✅ completado · 20 tasks done · tag `v0.2.0-ingest` ✓ | `docs/plans/2026-05-24-ibkr-control-phase2-ingestion.md` | `docs/specs/2026-05-24-phase2-ingestion-design.md` (D1-D17 locked) | `v0.2.0-ingest` ✓ |
 | 3. Domain layer + lotes (FIFO, classification, lotes abiertos/cerrados/alertas) | ⏳ por brainstormear + planificar — ver §Roadmap Phase 3 abajo | — | spec maestro §6 (domain) + §4.2 (Lotes Abiertos/Cerrados/Alertas) + `renta/docs/flex_fifo_loader_spec.md` | `v0.3.0-lotes` |
 | 4. Simulador (STK + FUT con neteo YTD) | ⏳ por planificar | — | spec maestro §4.2 (Simulador) + `renta2025.py` § A.5 régimen DUAL | `v0.4.0-simulator` |
 | 5. Dividendos + Patrimonio + Form 160 + Reporte Form 210 | ⏳ por planificar | — | spec maestro §4.2 (Dividendos/Patrimonio/Form 160/Reporte) + §6.1 reglas D-E | `v0.5.0-reports` |
