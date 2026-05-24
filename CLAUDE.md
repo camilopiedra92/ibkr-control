@@ -61,7 +61,7 @@ Globant, AFC, leasing, etc. Esta app es el **centro de control IBKR-only**.
 
 | Phase | Status | Plan | Tag al completar |
 |---|---|---|---|
-| 1. Foundation | ⚙ código completo (Tasks 1-14) + tag `v0.1.0-foundation` ✓ · Task 15 (deploy manual a Coolify) pendiente del usuario | `docs/plans/2026-05-24-ibkr-control-phase1-foundation.md` | `v0.1.0-foundation` (tag puesto) |
+| 1. Foundation | ✅ código completo (Tasks 1-14) + polish backlog cerrado (6/6) + tag `v0.1.0-foundation` ✓ · Task 15 (deploy manual a Coolify) pendiente del usuario | `docs/plans/2026-05-24-ibkr-control-phase1-foundation.md` + `docs/plans/2026-05-24-phase1-polish-backlog.md` | `v0.1.0-foundation` ✓ |
 | 2. Data ingestion (Flex WS + TRM Socrata + scheduler + upload XML + setup wizard) | ⏳ por planificar | — | `v0.2.0-ingest` |
 | 3. Domain layer + lotes (FIFO, classification, lotes abiertos/cerrados/alertas) | ⏳ por planificar | — | `v0.3.0-lotes` |
 | 4. Simulador (STK + FUT con neteo YTD) | ⏳ por planificar | — | `v0.4.0-simulator` |
@@ -176,16 +176,16 @@ El plan fue escrito asumiendo Next 14 / Tailwind v3 / shadcn Slate. `pnpm create
 - **Dedup de imports por SHA-256** (mismo patrón que `renta/documentos/_hash.py`)
 - **No capturar `settings = get_settings()` a nivel módulo** — llamar `get_settings()` dentro de funciones/métodos. El patrón module-level cachea valores en cada módulo independientemente; cuando los tests hacen `monkeypatch.setenv` + `get_settings.cache_clear()`, los módulos ya cargados siguen viendo los settings viejos. (Code review de Task 5 detectó que los tests actuales pasan por coincidencia — los valores de conftest y fixture son idénticos.) Aplicar a código nuevo desde Task 6+; refactor de los 3 archivos existentes (`db/session.py`, `auth/manager.py`, `auth/backend.py`) está en el polish backlog.
 
-## Polish backlog (antes de tagear v0.1.0-foundation)
+## Polish backlog (cerrado, ver `docs/plans/2026-05-24-phase1-polish-backlog.md`)
 
-Issues detectados por code reviewers durante Phase 1 que se difirieron para no inflar tasks individuales:
+Los 6 items detectados durante Phase 1 fueron resueltos en el plan de polish del 2026-05-24:
 
-- **CORS wildcard guard** (`main.py`): rechazar `BACKEND_CORS_ORIGINS=*` explícitamente porque incompatible con `allow_credentials=True` (browsers fallan silenciosamente). Aplicar en Task 14 Coolify config.
-- **Test de migrations** (`backend/tests/`): agregar `test_migrations_apply_cleanly` que corre `alembic upgrade head` contra container fresh y verifica `Base.metadata` matchea schema reflejado. El plan Phase 1 dice "first migration applies cleanly" — actualmente solo verificado manual con `alembic current`. Aplicar antes de tagear v0.1.0.
-- **Refactor module-level settings capture** (`db/session.py`, `auth/manager.py`, `auth/backend.py`): mover `settings = get_settings()` adentro de funciones/factories. Ver convención nueva arriba. Tarea aislada, ~30 min.
-- **Dockerfile `USER` non-root + remove postgres host-port binding**: difer a Task 14 (Coolify deploy) per recomendación de code reviewer Task 3.
-- **`UserSettingsUpdate.timezone` zoneinfo validator** (`settings/schemas.py`): rechazar timezones inválidos con 422 en vez de persistir basura. Phase 2 APScheduler va a leer este campo para localizar el job de 07:00 — falla silenciosa en boot si es inválido. 4 líneas: `from zoneinfo import available_timezones` + `field_validator` que valida contra el set. Aplicar antes de Task 11 (Settings page).
-- **`UserSettingsUpdate.marginal_rate` `max_digits=5, decimal_places=4`**: actualmente `Numeric(5,4)` redondea silenciosamente `"0.123456"` a `"0.1235"` y el user ve un valor distinto al que escribió. Una línea en el `Field()`.
+- ✓ CORS wildcard guard (config-level via `field_validator`, falla al boot — `backend/src/ibkr_control/config.py`)
+- ✓ `test_migrations_apply_cleanly_and_match_metadata` (corre `alembic upgrade head` contra container fresh, verifica drift contra `Base.metadata` — `backend/tests/test_migrations.py`)
+- ✓ Refactor module-level `settings = get_settings()` (lazy factories `@lru_cache` en `db/session.py`, `@property` en `auth/manager.py`, inline en `auth/backend.py`)
+- ✓ Dockerfile `USER appuser` (UID 1001, /home/appuser) + remove `ports: 5432` de docker-compose.yml
+- ✓ `UserSettingsUpdate.timezone` validado contra `zoneinfo.available_timezones()` (devuelve 422 si TZ desconocido)
+- ✓ `UserSettingsUpdate.marginal_rate` con `max_digits=5, decimal_places=4` (devuelve 422 en vez de silent rounding a Numeric(5,4))
 
 ## Comandos comunes
 
