@@ -22,7 +22,7 @@ export default function LoginPage() {
     try {
       const body = new URLSearchParams({ username: email, password });
       const response = await axiosInstance.post<{ access_token: string }>(
-        "/auth/jwt/login",
+        "/api/auth/jwt/login",
         body,
         { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
       );

@@ -15,7 +15,7 @@ export function useSetupState(): SetupStateResult {
   const query = useQuery<ApiSetupState>({
     queryKey: ["setup-state"],
     queryFn: async () => {
-      const r = await axiosInstance.get<ApiSetupState>("/setup/state");
+      const r = await axiosInstance.get<ApiSetupState>("/api/setup/state");
       return r.data;
     },
     refetchOnWindowFocus: false,

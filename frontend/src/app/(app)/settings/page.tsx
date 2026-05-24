@@ -27,7 +27,7 @@ export default function SettingsPage() {
   const [logRefreshKey, setLogRefreshKey] = useState(0);
 
   useEffect(() => {
-    axiosInstance.get<Settings>("/settings").then((r) => {
+    axiosInstance.get<Settings>("/api/settings").then((r) => {
       setSettings(r.data);
       setRate(r.data.marginal_rate);
       setTz(r.data.timezone);
@@ -38,7 +38,7 @@ export default function SettingsPage() {
     setSaving(true);
     setMessage(null);
     try {
-      const r = await axiosInstance.patch<Settings>("/settings", {
+      const r = await axiosInstance.patch<Settings>("/api/settings", {
         marginal_rate: rate,
         timezone: tz,
       });

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
+import type { AxiosError } from "axios";
 import { Button } from "@/components/ui/button";
 import { getFlexCredentialsApiCredentialsFlexGet, FlexCredentialsRead } from "@/lib/api";
 import { RotateTokenModal } from "./RotateTokenModal";
@@ -17,7 +18,13 @@ export function FlexCredentialsSection() {
       setCreds(data as FlexCredentialsRead);
       setFetchError(null);
     },
-    onError: () => {
+    onError: (err) => {
+      // 404 = backend signals "no Flex credentials configured yet" — empty state, not an error.
+      if ((err as AxiosError).response?.status === 404) {
+        setCreds(null);
+        setFetchError(null);
+        return;
+      }
       setFetchError("No se pudo cargar las credenciales");
     },
   });
@@ -66,6 +73,12 @@ export function FlexCredentialsSection() {
 
       {fetchError && (
         <p className="text-sm text-red-600">{fetchError}</p>
+      )}
+
+      {!isPending && !fetchError && !creds && (
+        <p className="text-sm text-muted-foreground">
+          No hay credenciales configuradas. Usá &quot;Rotar token&quot; para configurar tu Flex Token y Query ID.
+        </p>
       )}
 
       {creds && !isPending && (

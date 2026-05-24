@@ -20,7 +20,7 @@ export default function RegisterPage() {
     setError(null);
     setLoading(true);
     try {
-      await axiosInstance.post("/auth/register", { email, password, name });
+      await axiosInstance.post("/api/auth/register", { email, password, name });
       router.push("/login");
     } catch {
       setError("No se pudo registrar (¿email ya existe?)");
