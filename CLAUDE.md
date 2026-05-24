@@ -7,20 +7,26 @@ folder retoma así:
 
 1. **Leer este CLAUDE.md completo** (lo cargás automáticamente)
 2. **Mirar el estado actual** en la sección "Estado actual" abajo
-3. **Para ejecutar el plan actual**:
-   - Plan vigente: `docs/plans/2026-05-24-ibkr-control-phase1-foundation.md`
+3. **Para ejecutar Phase 2** (plan vigente, sin ejecutar):
+   - Plan: `docs/plans/2026-05-24-ibkr-control-phase2-ingestion.md` (20 tasks, 174 steps, ~9-15 horas de trabajo)
+   - Spec asociado: `docs/specs/2026-05-24-phase2-ingestion-design.md` (17 decisiones locked D1-D17)
    - Método elegido: **subagent-driven** (dispatch un subagent fresco por task, review entre tasks)
    - Skill a invocar: `superpowers:subagent-driven-development`
-   - Pedirle al usuario: "¿Arrancamos con Task 1 del Phase 1?" antes de ejecutar
+   - Pedirle al usuario: "¿Arrancamos con Task 1 (Migration A — identity schema) del Phase 2?" antes de ejecutar
    - Cada task del plan tiene checkboxes `- [ ]` — marcarlos `- [x]` al completar y commitearlos
-4. **Para planificar la SIGUIENTE phase** (cuando Phase N termine):
-   - Verificar que Phase N esté completa: todos los checkboxes marcados + commits hechos + entregables del "Phase N entregables" tildados
-   - Invocar `superpowers:brainstorming` solo si hay decisiones abiertas para Phase N+1; si la phase es directa desde el spec, saltar a `superpowers:writing-plans`
-   - El spec maestro tiene TODO el contexto: `docs/specs/2026-05-24-ibkr-control-center-design.md`
-   - Guardar el nuevo plan en `docs/plans/2026-05-24-ibkr-control-phase{N+1}-{nombre}.md` (usar fecha del día)
+   - Cada task termina en commit propio + (cuando aplica) los tests pasan antes de marcar done
+4. **Pre-requisitos para Phase 2** (cosas que el usuario debe tener listas antes/durante):
+   - **`TOKEN_ENCRYPTION_KEY`** (env var). Generar en el deploy: `openssl rand -base64 32 > .env-fragment` y setear en Coolify env vars + en `.env` local. Necesario desde Task 7.
+   - **Flex Token + YTD Query ID** reales — el usuario los pega en el wizard step 1. Si no los tiene aún, hay tiempo: solo se usan al ejecutar el wizard end-to-end (Tasks 16-17 + smoke test final).
+   - **XMLs históricos opcionales** — ya los tiene en `../renta/fuentes/2024/` y `../renta/fuentes/2025/`. El script `backend/scripts/sanitize_xml.py` (Task 6) los sanitiza automáticamente para usarlos como fixtures.
+   - **VCR cassettes reales (opcional)** — Task 9 Step 4 ofrece grabar cassettes con credencial real para tests más honestos. Si no, Step 5 da fallback con cassettes mínimas a mano. No bloquea.
+5. **Para planificar Phase 3** (cuando Phase 2 termine — ver §Roadmap Phase 3 abajo):
+   - Verificar que Phase 2 esté completa: todos los checkboxes marcados, tag `v0.2.0-ingest` creado, tabla "Estado actual" actualizada
+   - Invocar `superpowers:brainstorming` PRIMERO (Phase 3 tiene decisiones abiertas, no es deriva directa del spec — ver §Roadmap Phase 3)
+   - Después `superpowers:writing-plans` para producir `docs/plans/2026-05-24-ibkr-control-phase3-lotes.md` (usar fecha del día)
    - Actualizar la tabla "Estado actual" abajo con el link al plan nuevo
-5. **Convenciones**: TDD, frequent commits (cada step termina en commit), no emojis en código, Decimal para dinero, Postgres-specific
-6. **Sibling project `renta` para referencia fiscal**: leer `docs/references/renta-cross-references.md` antes de implementar cualquier regla fiscal o lógica de ingest Flex. Reimplementar, NO importar.
+6. **Convenciones**: TDD, frequent commits (cada step termina en commit), no emojis en código, Decimal para dinero, Postgres-specific
+7. **Sibling project `renta` para referencia fiscal**: leer `docs/references/renta-cross-references.md` antes de implementar cualquier regla fiscal o lógica de ingest Flex. Reimplementar, NO importar.
 
 ### Datos que el usuario va a pegar durante setup wizard (Phase 2)
 
@@ -30,12 +36,17 @@ folder retoma así:
 - Marginal rate (default 0.39, el usuario puede cambiar después en Settings)
 - XMLs históricos opcionales — ya los tiene en `../renta/fuentes/2024/compartidos/ibkr/` y `../renta/fuentes/2025/compartidos/ibkr/` (subir vía UI en Settings → Importar XML histórico)
 
+### Open from Phase 1 (no bloquea Phase 2)
+
+- **Task 15 del Phase 1**: deploy manual a Coolify. Pendiente del usuario, no del agente. Se puede hacer cuando quiera — Phase 2 se desarrolla 100% local con `docker compose up`. Lo ideal es deployar después de tener Phase 2 lista para tener la app entera en prod de una.
+
 ### Decisiones locked (no re-discutir)
 
-Ver "Decisiones arquitectónicas" abajo. Las 12 decisiones fueron acordadas en la
-sesión de brainstorming del 2026-05-24. Si surge una pregunta cuya respuesta ya
-está en el spec o en estas decisiones, NO re-hacer la pregunta al usuario;
-referenciá el spec/CLAUDE.md y avanzá.
+**Spec maestro (12 decisiones):** ver "Decisiones arquitectónicas" abajo. Acordadas en la sesión de brainstorming del 2026-05-24.
+
+**Phase 2 spec (17 decisiones D1-D17):** ver `docs/specs/2026-05-24-phase2-ingestion-design.md` §3. Cubren scope, UX del wizard, testing strategy, advisory locks, APScheduler in-memory, AES-GCM, validación XML, organización per-source folders, SSE para progress, etc.
+
+Si surge una pregunta cuya respuesta ya está en cualquiera de estos specs, NO re-hacer la pregunta al usuario — referenciá el spec/CLAUDE.md y avanzá.
 
 ---
 
@@ -59,21 +70,73 @@ Globant, AFC, leasing, etc. Esta app es el **centro de control IBKR-only**.
 
 ## Estado actual
 
-| Phase | Status | Plan | Tag al completar |
-|---|---|---|---|
-| 1. Foundation | ✅ código completo (Tasks 1-14) + polish backlog cerrado (6/6) + tag `v0.1.0-foundation` ✓ · Task 15 (deploy manual a Coolify) pendiente del usuario | `docs/plans/2026-05-24-ibkr-control-phase1-foundation.md` + `docs/plans/2026-05-24-phase1-polish-backlog.md` | `v0.1.0-foundation` ✓ |
-| 2. Data ingestion (Flex WS + TRM Socrata + scheduler + upload XML + setup wizard) | ⏳ por planificar | — | `v0.2.0-ingest` |
-| 3. Domain layer + lotes (FIFO, classification, lotes abiertos/cerrados/alertas) | ⏳ por planificar | — | `v0.3.0-lotes` |
-| 4. Simulador (STK + FUT con neteo YTD) | ⏳ por planificar | — | `v0.4.0-simulator` |
-| 5. Dividendos + Patrimonio + Form 160 + Reporte Form 210 | ⏳ por planificar | — | `v0.5.0-reports` |
-| 6. Polish (yfinance + composición dashboard + multi-year report) | ⏳ por planificar | — | `v1.0.0` |
+| Phase | Status | Plan | Spec | Tag al completar |
+|---|---|---|---|---|
+| 1. Foundation | ✅ código completo (Tasks 1-14) + polish backlog cerrado (6/6) + tag `v0.1.0-foundation` ✓ · Task 15 (deploy manual a Coolify) pendiente del usuario | `docs/plans/2026-05-24-ibkr-control-phase1-foundation.md` + `docs/plans/2026-05-24-phase1-polish-backlog.md` | spec maestro §3, §5.1 | `v0.1.0-foundation` ✓ |
+| 2. Data ingestion (Flex WS + TRM Socrata + scheduler + upload XML + setup wizard) | 📋 **plan escrito (20 tasks, 174 steps), listo para ejecutar · subagent-driven recomendado** | `docs/plans/2026-05-24-ibkr-control-phase2-ingestion.md` | `docs/specs/2026-05-24-phase2-ingestion-design.md` (D1-D17 locked) | `v0.2.0-ingest` |
+| 3. Domain layer + lotes (FIFO, classification, lotes abiertos/cerrados/alertas) | ⏳ por brainstormear + planificar — ver §Roadmap Phase 3 abajo | — | spec maestro §6 (domain) + §4.2 (Lotes Abiertos/Cerrados/Alertas) + `renta/docs/flex_fifo_loader_spec.md` | `v0.3.0-lotes` |
+| 4. Simulador (STK + FUT con neteo YTD) | ⏳ por planificar | — | spec maestro §4.2 (Simulador) + `renta2025.py` § A.5 régimen DUAL | `v0.4.0-simulator` |
+| 5. Dividendos + Patrimonio + Form 160 + Reporte Form 210 | ⏳ por planificar | — | spec maestro §4.2 (Dividendos/Patrimonio/Form 160/Reporte) + §6.1 reglas D-E | `v0.5.0-reports` |
+| 6. Polish (yfinance + composición dashboard + multi-year report) | ⏳ por planificar | — | spec maestro §2 dec.#9 + §4.2 (Dashboard composición) | `v1.0.0` |
 
-**Spec maestro** (autoridad final sobre QUÉ se construye): `docs/specs/2026-05-24-ibkr-control-center-design.md`
+**Spec maestro** (autoridad final sobre QUÉ se construye, todas las phases): `docs/specs/2026-05-24-ibkr-control-center-design.md`
 
 ### Cómo actualizar esta tabla
 - Al iniciar una phase: cambiar status a `⚙ ejecutando · task N/M`
 - Al completar una phase: cambiar status a `✅ completado · <tag>` y tagear `git tag <tag>`
 - Al escribir el plan de phase N+1: status `📋 plan escrito, listo para ejecutar` + link al archivo
+
+## Roadmap Phase 3 (preview — planificar cuando Phase 2 termine)
+
+Phase 3 = **domain layer + 3 pantallas**: convertir los datos crudos que dejó Phase 2 en información fiscalmente útil + renderizarla en Lotes Abiertos, Cerrados, y Alertas 730d.
+
+### Scope IN
+
+- **Tabla derivada `lot_classifications`** + view `lot_status_v` (spec maestro §5.4) — pobladas por un recompute job que corre después de cada ingest Flex
+- **Módulos domain puros** (`backend/src/ibkr_control/domain/`):
+  - `fifo.py` — re-replay del lot book con override manual del trader (pool CLOSED_LOT del XML es autoritativo)
+  - `trm_lookup.py` — `get_trm(date) → Decimal` con fallback vía vigencia DB
+  - `regime.py` — `classify_asset(asset_class, symbol) → 'STK_ART288' | 'FUT_DEC1797'`
+  - `classification.py` — `compute_lot_status(lot) → ClassificationResult` (730d rule, GO/RO, days_held, days_until_go)
+  - `participation.py` — `apply_pct(amount, user_id, account_id, at_date)`
+- **API endpoints**: `GET /api/lots/open`, `GET /api/lots/closed`, `GET /api/lots/alerts` (filtros, sort, paginación)
+- **3 pantallas frontend**: Lotes Abiertos (tabla con semáforo 730d), Cerrados (historial GO/RO), Alertas 730d (subset urgente)
+- **Recompute job**: después de cada `flex_job.run()` o `flex_job.ingest_xml()`, disparar `domain.recompute_lot_classifications(user_id, anyo)` que reemplaza `lot_classifications` de ese año
+
+### Scope OUT (queda Phase 4+)
+
+- Simulador (Phase 4)
+- Dividendos / Patrimonio / Form 160 / Reporte (Phase 5)
+- yfinance + composición dashboard (Phase 6)
+
+### Decisiones abiertas (brainstormear antes del plan)
+
+1. **¿Recompute es síncrono dentro del flex_job o async post-commit?** — Síncrono es más simple pero alarga el ingest (~5-30s extra); async (vía background task o re-trigger del job_tracker) deja el ingest rápido pero agrega complejidad de coordinación
+2. **¿Cómo manejamos override manual de FIFO?** — el `flex_fifo_loader_spec.md` del sibling habla del pool CLOSED_LOT como autoridad. ¿Hacemos lo mismo? ¿Qué pasa si IBKR cambia retroactivamente?
+3. **¿Cuándo recomputar TODOS los años vs solo el año del ingest?** — un cambio de TRM histórico afecta cost_basis_cop de lotes viejos; ¿recompute selectivo o full?
+4. **Stale-while-revalidate en pantalla Lotes** — ¿mostramos clasificaciones cacheadas mientras recomputa, o esperamos?
+5. **`lot_status_v` view recomputa días_hasta_730 con CURRENT_DATE** — ¿alcanza para mostrar el semáforo en real-time, o necesitamos un materialized view + refresh diario?
+
+### Cross-references a renta (Phase 3 específicos)
+
+- `renta/docs/flex_fifo_loader_spec.md` — **spec completo** del FIFO. Leer ANTES de empezar
+- `renta/documentos/ibkr_flex/loader.py` — ~600 LOC de referencia
+- `renta/documentos/ibkr_flex/_fifo_replay.py` — lógica de replay durante backfill
+- `renta/tests/_invariants.py` — pinned values verificados manualmente. Phase 3 tests deben matchear: "58/58 cierres coinciden con pool CLOSED_LOT (0 diffs)" en 2025
+- `renta2025.py` buscar `_clasificar_dias_held` y `Art.300` — referencia de implementación de la regla 730 días
+
+### Entry point para próxima sesión que arme Phase 3
+
+```
+1. Verificar Phase 2 cerrada (tag v0.2.0-ingest)
+2. Invocar `superpowers:brainstorming` con prompt:
+   "Phase 3 = domain layer + lotes. Decisiones abiertas listadas en
+    CLAUDE.md §Roadmap Phase 3. Resolver, luego escribir spec en
+    docs/specs/YYYY-MM-DD-phase3-domain-design.md"
+3. Después `superpowers:writing-plans` → plan en
+   docs/plans/YYYY-MM-DD-ibkr-control-phase3-lotes.md
+4. Update tabla "Estado actual" arriba con link al plan
+```
 
 ## Tech stack
 
