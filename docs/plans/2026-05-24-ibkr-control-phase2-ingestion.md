@@ -4068,14 +4068,14 @@ git commit -m "feat(phase2): TRM persister (ON CONFLICT upsert) + job orchestrat
 - Modify: `backend/src/ibkr_control/main.py` (registrar scheduler en startup)
 - Create: `backend/tests/test_scheduler.py`
 
-- [ ] **Step 1: Crear directorio + __init__.py**
+- [x] **Step 1: Crear directorio + __init__.py**
 
 ```bash
 mkdir -p backend/src/ibkr_control/scheduler
 touch backend/src/ibkr_control/scheduler/__init__.py
 ```
 
-- [ ] **Step 2: Escribir tests del scheduler (failing)**
+- [x] **Step 2: Escribir tests del scheduler (failing)**
 
 Crear `backend/tests/test_scheduler.py`:
 
@@ -4126,7 +4126,7 @@ def test_jobs_have_max_instances_1_and_coalesce():
         assert j.coalesce is True
 ```
 
-- [ ] **Step 3: Implementar `scheduler/jobs.py`**
+- [x] **Step 3: Implementar `scheduler/jobs.py`**
 
 Crear `backend/src/ibkr_control/scheduler/jobs.py`:
 
@@ -4213,7 +4213,7 @@ def register_jobs(scheduler: AsyncIOScheduler) -> None:
     logger.info("Registered 2 ingest jobs: flex_daily, trm_daily")
 ```
 
-- [ ] **Step 4: Wire en main.py — startup event arranca scheduler**
+- [x] **Step 4: Wire en main.py — startup event arranca scheduler**
 
 Modificar `backend/src/ibkr_control/main.py`. Después del app = FastAPI(...) y antes de app.include_router(...):
 
@@ -4243,7 +4243,7 @@ async def lifespan(app: FastAPI):
 
 (Si `lifespan` ya existe del Phase 1, agregar las líneas del scheduler dentro.)
 
-- [ ] **Step 5: Correr tests**
+- [x] **Step 5: Correr tests**
 
 ```bash
 cd backend && uv run pytest tests/test_scheduler.py -v
@@ -4251,7 +4251,7 @@ cd backend && uv run pytest tests/test_scheduler.py -v
 
 Expected: 4/4 PASS.
 
-- [ ] **Step 6: Smoke test — arrancar backend, verificar log "Registered 2 ingest jobs"**
+- [x] **Step 6: Smoke test — arrancar backend, verificar log "Registered 2 ingest jobs"** (skipped per instructions — unit tests sufficient)
 
 ```bash
 docker compose up -d --build backend && sleep 5 && docker compose logs backend | grep "Registered"
@@ -4263,7 +4263,7 @@ Expected: línea `Registered 2 ingest jobs: flex_daily, trm_daily` visible.
 docker compose down
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/src/ibkr_control/scheduler/ \
