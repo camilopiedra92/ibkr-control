@@ -4,6 +4,16 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from ibkr_control.scheduler.jobs import register_jobs
 
 
+def _persistence_noop() -> None:
+    """Module-level noop so APScheduler SQLAlchemyJobStore can serialize the reference.
+
+    APScheduler stores a string-path reference like
+    'tests.test_scheduler:_persistence_noop' — anonymous lambdas would fail
+    to serialize via the jobstore.
+    """
+    pass
+
+
 def test_register_creates_three_jobs():
     scheduler = AsyncIOScheduler()
     register_jobs(scheduler)
@@ -41,3 +51,74 @@ def test_jobs_have_max_instances_1_and_coalesce():
     for j in scheduler.get_jobs():
         assert j.max_instances == 1
         assert j.coalesce is True
+
+
+def test_create_scheduler_uses_sqlalchemy_jobstore(monkeypatch):
+    """Factory returns AsyncIOScheduler configured with persistent jobstore."""
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://test:test@localhost/test")
+    monkeypatch.setenv("JWT_SECRET", "test-secret-32-chars-minimum-please-ok")
+
+    from ibkr_control.config import get_settings
+    get_settings.cache_clear()
+
+    from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+    from ibkr_control.scheduler import create_scheduler
+
+    scheduler = create_scheduler()
+    jobstore = scheduler._jobstores["default"]  # noqa: SLF001 (internal access intentional)
+    assert isinstance(jobstore, SQLAlchemyJobStore)
+
+
+def test_jobs_persist_across_scheduler_instances(postgres_container):
+    """SQLAlchemyJobStore actually persists jobs across separate scheduler instances.
+
+    Simulates the "container restart" scenario: scheduler A adds a job, shuts
+    down, scheduler B (new instance, same DB) recovers the job from the
+    persistent jobstore.
+
+    Uses BackgroundScheduler (not AsyncIO) to avoid event-loop complications
+    in a sync test — the jobstore behavior is identical regardless of
+    scheduler class.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+    from apscheduler.schedulers.background import BackgroundScheduler
+
+    async_url = postgres_container.get_connection_url()
+    sync_url = async_url.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1)
+    jobstore_kwargs = dict(url=sync_url, tablename="apscheduler_jobs_test_persist")
+
+    s1 = BackgroundScheduler(jobstores={"default": SQLAlchemyJobStore(**jobstore_kwargs)})
+    s1.start(paused=True)
+    try:
+        s1.add_job(
+            _persistence_noop,
+            trigger="date",
+            run_date=datetime.now(timezone.utc) + timedelta(days=365),
+            id="persist_test",
+            replace_existing=True,
+        )
+    finally:
+        s1.shutdown(wait=False)
+
+    # New scheduler, same DB → should recover the job
+    s2 = BackgroundScheduler(jobstores={"default": SQLAlchemyJobStore(**jobstore_kwargs)})
+    s2.start(paused=True)
+    try:
+        recovered = s2.get_job("persist_test")
+        assert recovered is not None, "Job was not persisted by SQLAlchemyJobStore"
+        assert recovered.id == "persist_test"
+        s2.remove_job("persist_test")
+    finally:
+        s2.shutdown(wait=False)
+
+
+def test_jobs_have_misfire_grace_time_set():
+    """Jobs configured with 6h grace so a restart between trigger and exec catches up."""
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+    scheduler = AsyncIOScheduler()
+    register_jobs(scheduler)
+    for j in scheduler.get_jobs():
+        assert j.misfire_grace_time == 21600, f"{j.id} missing misfire_grace_time=21600"

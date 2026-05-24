@@ -41,3 +41,27 @@ def test_settings_accepts_empty_cors(monkeypatch):
     get_settings.cache_clear()
     s = Settings()  # type: ignore[call-arg]
     assert s.cors_origins_list == []
+
+
+def test_database_url_sync_swaps_asyncpg_for_psycopg(monkeypatch):
+    """Sync URL replaces +asyncpg with +psycopg for APScheduler jobstore use."""
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@host:5432/db")
+    monkeypatch.setenv("JWT_SECRET", "test-secret-32-chars-minimum-please-ok")
+
+    from ibkr_control.config import Settings, get_settings
+    get_settings.cache_clear()
+
+    s = Settings()  # type: ignore[call-arg]
+    assert s.database_url_sync == "postgresql+psycopg://u:p@host:5432/db"
+
+
+def test_database_url_sync_idempotent_if_already_sync(monkeypatch):
+    """If DATABASE_URL is already a sync form, leave it alone."""
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@host:5432/db")
+    monkeypatch.setenv("JWT_SECRET", "test-secret-32-chars-minimum-please-ok")
+
+    from ibkr_control.config import Settings, get_settings
+    get_settings.cache_clear()
+
+    s = Settings()  # type: ignore[call-arg]
+    assert s.database_url_sync == "postgresql+psycopg://u:p@host:5432/db"

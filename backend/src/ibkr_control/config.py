@@ -38,6 +38,17 @@ class Settings(BaseSettings):
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.backend_cors_origins.split(",") if o.strip()]
 
+    @property
+    def database_url_sync(self) -> str:
+        """Sync DB URL for APScheduler jobstore (uses psycopg v3, not asyncpg).
+
+        APScheduler 3.x SQLAlchemyJobStore is sync-only; it issues blocking
+        SELECT/UPDATE/INSERT against `apscheduler_jobs` from within
+        AsyncIOScheduler's wake-up thread. We need a sync driver distinct
+        from the async one used by the app's request pipeline.
+        """
+        return self.database_url.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1)
+
 
 @lru_cache
 def get_settings() -> Settings:

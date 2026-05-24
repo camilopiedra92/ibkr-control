@@ -96,25 +96,24 @@ async def _cleanup_old_jobs() -> None:
 
 
 def register_jobs(scheduler: AsyncIOScheduler) -> None:
-    """Registra los 3 cron jobs en el scheduler. Idempotente — borra los existentes primero.
+    """Registra los 3 cron jobs en el scheduler. Idempotente — usa replace_existing=True.
 
     Flex    daily:   07:00 COT = 12:00 UTC (Bogota no tiene DST).
     TRM     daily:   19:30 COT = 00:30 UTC del dia siguiente.
     Cleanup hourly:  cada hora en :00 UTC para limpiar JobTracker stale entries.
-    Todos con max_instances=1 + coalesce=True para evitar solapamiento y backlog.
-    """
-    for job_id in ("flex_daily", "trm_daily", "cleanup_job_tracker"):
-        try:
-            scheduler.remove_job(job_id)
-        except Exception:
-            pass  # job no existia — OK
 
+    Todos con max_instances=1 + coalesce=True para evitar solapamiento y backlog.
+    misfire_grace_time=21600 (6h) para que un container restart en la ventana
+    del cron diario recupere el run perdido al boot (jobs son idempotentes).
+    """
     scheduler.add_job(
         _run_flex_for_all_users,
         CronTrigger(hour=12, minute=0, timezone="UTC"),
         id="flex_daily",
         max_instances=1,
         coalesce=True,
+        misfire_grace_time=21600,
+        replace_existing=True,
     )
 
     scheduler.add_job(
@@ -123,6 +122,8 @@ def register_jobs(scheduler: AsyncIOScheduler) -> None:
         id="trm_daily",
         max_instances=1,
         coalesce=True,
+        misfire_grace_time=21600,
+        replace_existing=True,
     )
 
     scheduler.add_job(
@@ -131,6 +132,8 @@ def register_jobs(scheduler: AsyncIOScheduler) -> None:
         id="cleanup_job_tracker",
         max_instances=1,
         coalesce=True,
+        misfire_grace_time=21600,
+        replace_existing=True,
     )
 
     logger.info("Registered 3 ingest jobs: flex_daily, trm_daily, cleanup_job_tracker")

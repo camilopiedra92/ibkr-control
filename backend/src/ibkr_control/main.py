@@ -1,7 +1,6 @@
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -12,13 +11,14 @@ from ibkr_control.api.ingest import router as ingest_router
 from ibkr_control.api.setup import router as setup_router
 from ibkr_control.auth.router import router as auth_router
 from ibkr_control.settings.router import router as settings_router
+from ibkr_control.scheduler import create_scheduler
 from ibkr_control.scheduler.jobs import register_jobs
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Startup: start APScheduler with daily ingest jobs. Shutdown: stop it."""
-    scheduler = AsyncIOScheduler()
+    scheduler = create_scheduler()
     register_jobs(scheduler)
     scheduler.start()
     try:
