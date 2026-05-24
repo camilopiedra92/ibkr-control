@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "openapi:fetch": "./scripts/fetch-openapi.sh",
-    "openapi:gen": "pnpm openapi:fetch && orval"
+    "openapi:gen": "pnpm openapi:fetch && orval",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
