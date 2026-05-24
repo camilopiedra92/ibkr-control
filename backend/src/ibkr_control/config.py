@@ -12,6 +12,12 @@ class Settings(BaseSettings):
     jwt_lifetime_seconds: int = 3600
     backend_cors_origins: str = ""
 
+    # Upload limits
+    max_xml_size_bytes: int = 50 * 1024 * 1024  # 50 MB
+
+    # Rate limiting
+    ingest_trigger_cooldown_seconds: int = 300  # 5 minutes
+
     @field_validator("backend_cors_origins")
     @classmethod
     def _no_cors_wildcard(cls, v: str) -> str:

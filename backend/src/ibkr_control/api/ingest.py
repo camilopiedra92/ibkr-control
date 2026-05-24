@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ibkr_control.api._schemas import IngestJobStarted, IngestLogRead, IngestTrigger
 from ibkr_control.auth.backend import current_active_user
 from ibkr_control.auth.models import User
+from ibkr_control.config import get_settings
 from ibkr_control.db.models.ingest_log import IngestLog
 from ibkr_control.db.session import get_async_session, get_engine
 from ibkr_control.ingest.job_tracker import get_tracker
@@ -21,10 +22,10 @@ except ImportError:
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 
-# Rate limit: un trigger manual por usuario cada 5 minutos.
-# V1: module-level state (single replica). Container restart limpia el cooldown.
+# Rate limit: module-level dict tracks last trigger time per user.
+# V1: in-process, single replica. Container restart resets cooldown.
+# Cooldown duration is config-driven via settings.ingest_trigger_cooldown_seconds.
 _LAST_TRIGGER: dict[int, datetime] = {}
-_COOLDOWN = timedelta(minutes=5)
 
 
 def _utcnow() -> datetime:
@@ -37,9 +38,11 @@ async def trigger_manual_refresh(
     background: BackgroundTasks,
     user: User = Depends(current_active_user),
 ) -> IngestJobStarted:
+    settings = get_settings()
+    cooldown = timedelta(seconds=settings.ingest_trigger_cooldown_seconds)
     last = _LAST_TRIGGER.get(user.id)
-    if last and (_utcnow() - last) < _COOLDOWN:
-        wait = _COOLDOWN - (_utcnow() - last)
+    if last and (_utcnow() - last) < cooldown:
+        wait = cooldown - (_utcnow() - last)
         raise HTTPException(
             status_code=429,
             detail=f"Espera {int(wait.total_seconds())}s antes de reintentar",
