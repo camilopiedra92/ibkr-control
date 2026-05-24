@@ -1,10 +1,12 @@
 """POST /api/imports/upload — multipart XML upload reusado por wizard step 3 + Settings."""
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from lxml.etree import XMLSyntaxError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ibkr_control.auth.backend import current_active_user
 from ibkr_control.auth.models import User
+from ibkr_control.config import get_settings
 from ibkr_control.db.models.flex_raw import FlexImport
 from ibkr_control.db.session import get_async_session
 from ibkr_control.ingest.flex import job as flex_job_mod
@@ -14,7 +16,7 @@ from ibkr_control.ingest.hash_dedup import xml_hash
 
 router = APIRouter(prefix="/imports", tags=["imports"])
 
-MAX_XML_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
+_CHUNK_SIZE = 64 * 1024  # 64 KB streaming chunks
 
 
 @router.post("/upload")
@@ -23,14 +25,39 @@ async def upload_xml(
     user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> dict:
-    xml_bytes = await file.read()
+    settings = get_settings()
+    max_size = settings.max_xml_size_bytes
+
+    # Check declared size first (cheap, before any I/O).
+    # UploadFile.size is populated from Content-Length by Starlette.
+    if file.size is not None:
+        if file.size == 0:
+            raise HTTPException(status_code=400, detail="Empty file")
+        if file.size > max_size:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large: {file.size} bytes (max {max_size})",
+            )
+
+    # Stream read with cumulative size cap — defense in depth: client may lie
+    # about Content-Length (or omit it entirely, leaving file.size as None).
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(_CHUNK_SIZE)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_size:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large during upload (>{max_size} bytes)",
+            )
+        chunks.append(chunk)
+    xml_bytes = b"".join(chunks)
+
     if len(xml_bytes) == 0:
         raise HTTPException(status_code=400, detail="Empty file")
-    if len(xml_bytes) > MAX_XML_SIZE_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File too large: {len(xml_bytes)} bytes (max {MAX_XML_SIZE_BYTES})",
-        )
 
     # Pre-check: hash duplicado -> 409 sin parsear
     h = xml_hash(xml_bytes)
@@ -54,7 +81,7 @@ async def upload_xml(
         raise HTTPException(status_code=400, detail=f"XML tiene tag desconocido: {e.tag}")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
+    except XMLSyntaxError as e:
         raise HTTPException(status_code=400, detail=f"XML invalido: {e}")
 
     # Ingest real
