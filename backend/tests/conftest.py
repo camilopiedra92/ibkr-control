@@ -70,3 +70,31 @@ async def client(app_with_db):
     transport = ASGITransport(app=app_with_db)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
+
+
+@pytest.fixture
+async def db_session(postgres_container, monkeypatch):
+    """Sesion de DB directa para tests de schema/modelos (sin HTTP layer).
+
+    Crea las tablas via Base.metadata.create_all (misma ruta que app_with_db),
+    pero expone la sesion directamente para hacer DML/DDL checks.
+    Cada test obtiene una sesion limpia; las tablas se recrean por test.
+    """
+    url = postgres_container.get_connection_url()
+    monkeypatch.setenv("DATABASE_URL", url)
+    monkeypatch.setenv("JWT_SECRET", "test-secret-32-chars-minimum-please-ok")
+
+    import ibkr_control.db  # noqa: F401 — registra todos los modelos en Base.metadata
+
+    engine = create_async_engine(url)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+    async with session_maker() as session:
+        yield session
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+    await engine.dispose()
