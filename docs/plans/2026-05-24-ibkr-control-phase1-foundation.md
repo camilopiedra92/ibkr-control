@@ -2150,14 +2150,14 @@ git commit -m "feat(frontend): pantalla Settings funcional con marginal_rate edi
 - Create: `frontend/playwright.config.ts`
 - Create: `frontend/e2e/auth-flow.spec.ts`
 
-- [ ] **Step 1: Instalar browsers Playwright**
+- [x] **Step 1: Instalar browsers Playwright**
 
 ```bash
 cd /Users/owner/Development/ibkr-control/frontend
 pnpm exec playwright install chromium
 ```
 
-- [ ] **Step 2: Crear playwright.config.ts**
+- [x] **Step 2: Crear playwright.config.ts**
 
 `frontend/playwright.config.ts`:
 
@@ -2178,7 +2178,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 3: Escribir test E2E del flow completo**
+- [x] **Step 3: Escribir test E2E del flow completo**
 
 `frontend/e2e/auth-flow.spec.ts`:
 
@@ -2227,7 +2227,7 @@ test("register → login → settings update → logout flow", async ({ page }) 
 });
 ```
 
-- [ ] **Step 4: Agregar npm script y correr**
+- [x] **Step 4: Agregar npm script y correr**
 
 Editar `frontend/package.json` scripts:
 
@@ -2247,7 +2247,7 @@ pnpm e2e
 
 Expected: `1 passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/owner/Development/ibkr-control
