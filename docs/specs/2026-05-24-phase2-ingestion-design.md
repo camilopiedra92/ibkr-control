@@ -251,9 +251,9 @@ CREATE TABLE trades (
   asset_class TEXT NOT NULL,
   trade_date DATE NOT NULL,
   settle_date DATE NULL,
-  qty NUMERIC(20,6) NOT NULL,
+  qty NUMERIC(20,8) NOT NULL,                  -- widened in Migration F
   price_usd NUMERIC(20,6) NOT NULL,
-  proceeds_usd NUMERIC(20,2) NOT NULL,
+  proceeds_usd NUMERIC(20,4) NOT NULL,         -- widened in Migration F
   commission_usd NUMERIC(20,4) NOT NULL,
   open_close TEXT NULL CHECK (open_close IS NULL OR open_close IN ('O', 'C')),
   buy_sell TEXT NOT NULL CHECK (buy_sell IN ('BUY', 'SELL')),
@@ -269,10 +269,10 @@ CREATE TABLE closed_lots (
   symbol TEXT NOT NULL,
   open_date DATE NOT NULL,
   close_date DATE NOT NULL,
-  qty NUMERIC(20,6) NOT NULL,
-  cost_basis_usd NUMERIC(20,2) NOT NULL,
-  proceeds_usd NUMERIC(20,2) NOT NULL,
-  fifo_pnl_usd NUMERIC(20,2) NOT NULL,
+  qty NUMERIC(20,8) NOT NULL,                  -- widened in Migration F
+  cost_basis_usd NUMERIC(20,4) NOT NULL,       -- widened in Migration F
+  proceeds_usd NUMERIC(20,4) NOT NULL,         -- widened in Migration F
+  fifo_pnl_usd NUMERIC(20,4) NOT NULL,         -- widened in Migration F
   source_trade_id BIGINT NULL REFERENCES trades(id)
 );
 CREATE INDEX closed_lots_account_symbol_idx ON closed_lots(account_id, symbol);
@@ -283,10 +283,10 @@ CREATE TABLE open_position_lots (
   account_id BIGINT NOT NULL REFERENCES accounts(id),
   symbol TEXT NOT NULL,
   open_date DATE NOT NULL,
-  qty NUMERIC(20,6) NOT NULL,
-  cost_basis_usd NUMERIC(20,2) NOT NULL,
+  qty NUMERIC(20,8) NOT NULL,                  -- widened in Migration F
+  cost_basis_usd NUMERIC(20,4) NOT NULL,       -- widened in Migration F
   mark_price_usd NUMERIC(20,6) NULL,
-  mark_value_usd NUMERIC(20,2) NULL,
+  mark_value_usd NUMERIC(20,4) NULL,           -- widened in Migration F
   snapshot_date DATE NOT NULL
 );
 CREATE INDEX open_position_lots_account_symbol_idx ON open_position_lots(account_id, symbol);
@@ -299,7 +299,7 @@ CREATE TABLE transfers (
   src_account_id BIGINT NULL REFERENCES accounts(id),
   dst_account_id BIGINT NULL REFERENCES accounts(id),
   symbol TEXT NOT NULL,
-  qty NUMERIC(20,6) NOT NULL,
+  qty NUMERIC(20,8) NOT NULL,                  -- widened in Migration F
   transfer_type TEXT NOT NULL
 );
 
@@ -307,8 +307,8 @@ CREATE TABLE transfer_lots (
   id BIGSERIAL PRIMARY KEY,
   transfer_id BIGINT NOT NULL REFERENCES transfers(id) ON DELETE CASCADE,
   original_open_date DATE NOT NULL,
-  qty NUMERIC(20,6) NOT NULL,
-  cost_basis_usd NUMERIC(20,2) NOT NULL
+  qty NUMERIC(20,8) NOT NULL,                  -- widened in Migration F
+  cost_basis_usd NUMERIC(20,4) NOT NULL        -- widened in Migration F
 );
 
 CREATE TABLE cash_transactions (
@@ -317,13 +317,24 @@ CREATE TABLE cash_transactions (
   account_id BIGINT NOT NULL REFERENCES accounts(id),
   type TEXT NOT NULL,
   currency TEXT NOT NULL DEFAULT 'USD',
-  amount_usd NUMERIC(20,2) NOT NULL,
+  amount_usd NUMERIC(20,4) NOT NULL,           -- widened in Migration F
   description TEXT NULL,
   date DATE NOT NULL,
   symbol TEXT NULL
 );
 CREATE INDEX cash_transactions_date_idx ON cash_transactions(date);
 ```
+
+**Migration F (precision widening — post-Phase 2 polish):** all monetary USD totals
+went from `NUMERIC(20,2)` to `NUMERIC(20,4)` for sub-cent precision in Phase 3 FIFO
+intermediate calculations. All quantities went from `NUMERIC(20,6)` to `NUMERIC(20,8)`
+to accommodate fractional shares (IBKR Fractional Shares Plus emits up to 8 decimals).
+Migration is metadata-only in Postgres — no rewrite, no data loss. Prices remain at
+`NUMERIC(20,6)` matching IBKR XML source precision. TRM at `NUMERIC(12,4)` matching
+DIAN. Decision rationale: standard for accounting/trading apps (Robinhood, IBKR,
+QuickBooks). Industry-standard alternative — integer minor units (Stripe-style) —
+rejected because (a) volume is low, (b) multi-currency USD/COP/TRM makes integer
+scale tracking error-prone, (c) Python `Decimal` interop is cleaner with `NUMERIC`.
 
 ### 5.4 Migration D — `phase2_ingest_log`
 
@@ -855,17 +866,23 @@ modificar archivos en renta desde sesión de ibkr-control (nunca — abrir sesi�
 
 Cuando todos estos se cumplen, Phase 2 se da por completa y se tagea `v0.2.0-ingest`:
 
-1. ✅ Las 4 migrations Alembic aplican limpio sobre Phase 1 (`alembic upgrade head`)
-2. ✅ Tests unitarios + integración pasan en CI (`uv run pytest -v`)
-3. ✅ Coverage targets de §9.4 se cumplen
+1. ✅ Las 4 migrations Alembic aplican limpio sobre Phase 1 (`alembic upgrade head`) — **6 migrations en total post-polish**: identity, trm, flex_raw, ingest_log + addenda E (dividend_accruals) y F (widen_precision)
+2. ✅ Tests unitarios + integración pasan en CI (`uv run pytest -v`) — **186 tests**
+3. ⚠ Coverage targets de §9.4 mostly cumplidos. Excepciones:
+   - `ingest/flex/parser.py`: 83% (target 95%) — gap por ramas de defensive parsing raras (e.g. tag con `accountId="-"` ya filtrado; resto solo cubible con XMLs ad-hoc no representativos)
+   - `api/setup.py`: 73% (target 85%) — gap es coverage.py / ASGI async-frame limitation: HTTP-level tests funcionan pero no son trazables. Funcionalmente cubierto vía 30 tests; literalmente medible solo con direct-handler calls que duplicarían escenarios
+   - `api/ingest.py`: 66% (target 85%) — gap por SSE generator paths que requieren live server loop (no testeable con httpx async client)
+   - `scheduler/jobs.py`: 41% (target 70%) — gap por cron handlers que requieren scheduler corriendo en event loop real; structural tests verifican registro pero no ejecución
+   - **Coverage real entregado: 88% total, 100% en módulos críticos** (crypto, lock, log, hash_dedup, persisters, TRM)
 4. ✅ Wizard 4 pasos completable de punta a punta en local con XMLs sanitizados
-5. ✅ Cron Flex 07:00 y TRM 19:30 quedan registrados en APScheduler al startup
+5. ✅ Cron Flex 07:00 y TRM 19:30 quedan registrados en APScheduler al startup (+ `cleanup_job_tracker` horario agregado en polish)
 6. ✅ Upload manual de XML desde Settings funciona + dedup correcto (test E2E)
 7. ✅ Botón "Actualizar ahora" respeta rate limit y muestra progress vía SSE
 8. ✅ Rotar token funciona + valida ping a IBKR antes de reemplazar
 9. ✅ Última fila de `ingest_log` muestra status correcto después de cada operación
 10. ✅ CLAUDE.md actualizado: tabla "Estado actual" refleja Phase 2 ✅ + link al plan
 11. ✅ Commit en main + tag `v0.2.0-ingest`
+12. ✅ Polish backlog post-merge cerrado — ver `docs/plans/2026-05-24-phase2-polish-backlog.md`
 
 **No criterios** (intencionalmente fuera de Phase 2):
 - Mostrar valores en COP en cualquier pantalla
