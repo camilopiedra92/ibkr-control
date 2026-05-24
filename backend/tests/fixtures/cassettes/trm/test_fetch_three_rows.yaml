@@ -1,0 +1,18 @@
+interactions:
+  - request:
+      method: GET
+      uri: https://www.datos.gov.co/resource/ceyp-9c7c.json?%24where=vigenciadesde+%3E+%272026-01-01T00%3A00%3A00.000%27&%24order=vigenciadesde+ASC&%24limit=50000
+      headers:
+        Host:
+          - www.datos.gov.co
+      body: null
+    response:
+      status:
+        code: 200
+        message: OK
+      headers:
+        content-type:
+          - application/json
+      body:
+        string: '[{"vigenciadesde":"2026-01-02T00:00:00.000","vigenciahasta":"2026-01-02T00:00:00.000","valor":"4100.50"},{"vigenciadesde":"2026-01-03T00:00:00.000","vigenciahasta":"2026-01-05T00:00:00.000","valor":"4115.75"},{"vigenciadesde":"2026-01-06T00:00:00.000","vigenciahasta":"2026-01-06T00:00:00.000","valor":"4108.00"}]'
+version: 1

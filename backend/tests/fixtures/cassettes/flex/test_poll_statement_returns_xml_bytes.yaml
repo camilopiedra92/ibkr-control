@@ -1,0 +1,23 @@
+interactions:
+  - request:
+      method: GET
+      uri: https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService.GetStatement
+      headers:
+        Host:
+          - gdcdyn.interactivebrokers.com
+      body: null
+    response:
+      status:
+        code: 200
+        message: OK
+      headers:
+        content-type:
+          - text/xml
+      body:
+        string: "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<FlexQueryResponse queryName=\"YTD\"
+          type=\"AF\">\n  <FlexStatements count=\"1\">\n    <FlexStatement accountId=\"U99999001\"
+          fromDate=\"2026-01-01\" toDate=\"2026-05-24\"\n                 period=\"YearToDate\"
+          whenGenerated=\"2026-05-24;10:00:00\">\n      <AccountInformation accountId=\"U99999001\"
+          currency=\"USD\"/>\n      <Trades/>\n      <ClosedLots/>\n      <OpenPositions/>\n
+          \     <CashTransactions/>\n      <Transfers/>\n    </FlexStatement>\n  </FlexStatements>\n</FlexQueryResponse>\n"
+version: 1

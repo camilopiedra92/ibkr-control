@@ -12,6 +12,11 @@ dependencies = [
     "fastapi-users[sqlalchemy]>=14.0.0",
     "pydantic-settings>=2.6.0",
     "python-multipart>=0.0.12",
+    "cryptography>=42.0",
+    "httpx>=0.27",
+    "lxml>=5.2",
+    "sse-starlette>=2.1",
+    "apscheduler>=3.10",
 ]
 
 [dependency-groups]
@@ -22,6 +27,10 @@ dev = [
     "testcontainers[postgres]>=4.8.0",
     "ruff>=0.8.0",
     "psycopg2-binary>=2.9.12",
+    "vcrpy>=6.0",
+    "respx>=0.21",
+    "pytest-vcr>=1.0",
+    "pytest-cov>=7.1.0",
 ]
 
 [tool.pytest.ini_options]

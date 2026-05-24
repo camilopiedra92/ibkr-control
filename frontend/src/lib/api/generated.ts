@@ -24,6 +24,13 @@ import type {
 } from '@tanstack/react-query';
 
 import { axiosMutator } from './mutator';
+export interface AccountInWizard {
+  /** @pattern ^U\d{8}$ */
+  ibkr_account_id: string;
+  alias?: string | null;
+  pct: number | string;
+}
+
 export interface BearerResponse {
   access_token: string;
   token_type: string;
@@ -38,10 +45,38 @@ export interface BodyAuthJwtLoginApiAuthJwtLoginPost {
   client_secret?: string | null;
 }
 
+export interface BodyUploadXmlApiImportsUploadPost {
+  file: Blob;
+}
+
 export type ErrorModelDetail = string | {[key: string]: string};
 
 export interface ErrorModel {
   detail: ErrorModelDetail;
+}
+
+export interface FlexCredentialsRead {
+  configured_at: string;
+  query_id: string;
+  last_rotated_at: string;
+}
+
+export interface FlexCredentialsUpdate {
+  token?: string | null;
+  query_id?: string | null;
+}
+
+export interface FlexCredentialsValidate {
+  /**
+     * @minLength 10
+     * @maxLength 512
+     */
+  token: string;
+  /**
+     * @minLength 1
+     * @maxLength 64
+     */
+  query_id: string;
 }
 
 export type ValidationErrorCtx = { [key: string]: unknown };
@@ -56,6 +91,51 @@ export interface ValidationError {
 
 export interface HTTPValidationError {
   detail?: ValidationError[];
+}
+
+export interface IngestJobStarted {
+  job_id: number;
+}
+
+export interface IngestLogRead {
+  id: number;
+  job_kind: string;
+  started_at: string;
+  finished_at: string | null;
+  status: string;
+  items_processed: number | null;
+  error_message: string | null;
+  trigger: string;
+}
+
+export interface IngestTrigger {
+  /** @pattern ^(flex|trm|both)$ */
+  kind: string;
+}
+
+export interface SetupJobStarted {
+  job_id: number;
+}
+
+export type SetupStateStep4Substeps = {[key: string]: string};
+
+export interface SetupState {
+  step1_credentials?: boolean;
+  step2_accounts?: boolean;
+  step3_xmls?: boolean;
+  step3_n_xmls_uploaded?: number;
+  step4_started_at?: string | null;
+  step4_job_id?: number | null;
+  step4_substeps?: SetupStateStep4Substeps;
+  setup_completed_at?: string | null;
+}
+
+export interface SetupStep2Save {
+  /**
+     * @minItems 1
+     * @maxItems 20
+     */
+  accounts: AccountInWizard[];
 }
 
 export interface UserCreate {
@@ -101,6 +181,24 @@ export interface UserUpdate {
 }
 
 export type HealthHealthGet200 = {[key: string]: string};
+
+export type UpdateFlexCredentialsApiCredentialsFlexPut200 = { [key: string]: unknown };
+
+export type Step1ValidateApiSetupStep1ValidatePost200 = { [key: string]: unknown };
+
+export type Step2SaveApiSetupStep2SavePost200 = { [key: string]: unknown };
+
+export type Step3CompleteApiSetupStep3CompletePost200 = { [key: string]: unknown };
+
+export type UploadXmlApiImportsUploadPost200 = { [key: string]: unknown };
+
+export type ListLogsApiIngestLogsGetParams = {
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+};
 
 /**
  * @summary Health
@@ -1026,3 +1124,922 @@ export function useUpdateSettingsApiSettingsPatch<TData = Awaited<ReturnType<typ
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+
+
+
+
+
+
+/**
+ * @summary Get Flex Credentials
+ */
+export const getFlexCredentialsApiCredentialsFlexGet = (
+
+ signal?: AbortSignal
+) => {
+
+
+      return axiosMutator<FlexCredentialsRead>(
+      {url: `/api/credentials/flex`, method: 'GET', signal
+    },
+      );
+    }
+
+
+
+export const getGetFlexCredentialsApiCredentialsFlexGetMutationOptions = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getFlexCredentialsApiCredentialsFlexGet>>, TError,void, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof getFlexCredentialsApiCredentialsFlexGet>>, TError,void, TContext> => {
+
+const mutationKey = ['getFlexCredentialsApiCredentialsFlexGet'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof getFlexCredentialsApiCredentialsFlexGet>>, void> = () => {
+
+
+          return  getFlexCredentialsApiCredentialsFlexGet()
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GetFlexCredentialsApiCredentialsFlexGetMutationResult = NonNullable<Awaited<ReturnType<typeof getFlexCredentialsApiCredentialsFlexGet>>>
+
+    export type GetFlexCredentialsApiCredentialsFlexGetMutationError = unknown
+
+    /**
+ * @summary Get Flex Credentials
+ */
+export const useGetFlexCredentialsApiCredentialsFlexGet = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getFlexCredentialsApiCredentialsFlexGet>>, TError,void, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof getFlexCredentialsApiCredentialsFlexGet>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getGetFlexCredentialsApiCredentialsFlexGetMutationOptions(options), queryClient);
+    }
+
+/**
+ * Si pasa token, lo valida contra IBKR antes de guardar.
+ * @summary Update Flex Credentials
+ */
+export const updateFlexCredentialsApiCredentialsFlexPut = (
+    flexCredentialsUpdate: FlexCredentialsUpdate,
+ signal?: AbortSignal
+) => {
+
+
+      return axiosMutator<UpdateFlexCredentialsApiCredentialsFlexPut200>(
+      {url: `/api/credentials/flex`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: flexCredentialsUpdate, signal
+    },
+      );
+    }
+
+
+
+
+export const getUpdateFlexCredentialsApiCredentialsFlexPutQueryKey = (flexCredentialsUpdate?: FlexCredentialsUpdate,) => {
+    return [
+    'PUT', `/api/credentials/flex`, flexCredentialsUpdate
+    ] as const;
+    }
+
+
+export const getUpdateFlexCredentialsApiCredentialsFlexPutQueryOptions = <TData = Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>, TError = HTTPValidationError>(flexCredentialsUpdate: FlexCredentialsUpdate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getUpdateFlexCredentialsApiCredentialsFlexPutQueryKey(flexCredentialsUpdate);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>> = ({ signal }) => updateFlexCredentialsApiCredentialsFlexPut(flexCredentialsUpdate, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type UpdateFlexCredentialsApiCredentialsFlexPutQueryResult = NonNullable<Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>>
+export type UpdateFlexCredentialsApiCredentialsFlexPutQueryError = HTTPValidationError
+
+
+export function useUpdateFlexCredentialsApiCredentialsFlexPut<TData = Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>, TError = HTTPValidationError>(
+ flexCredentialsUpdate: FlexCredentialsUpdate, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>,
+          TError,
+          Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useUpdateFlexCredentialsApiCredentialsFlexPut<TData = Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>, TError = HTTPValidationError>(
+ flexCredentialsUpdate: FlexCredentialsUpdate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>,
+          TError,
+          Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useUpdateFlexCredentialsApiCredentialsFlexPut<TData = Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>, TError = HTTPValidationError>(
+ flexCredentialsUpdate: FlexCredentialsUpdate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Update Flex Credentials
+ */
+
+export function useUpdateFlexCredentialsApiCredentialsFlexPut<TData = Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>, TError = HTTPValidationError>(
+ flexCredentialsUpdate: FlexCredentialsUpdate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getUpdateFlexCredentialsApiCredentialsFlexPutQueryOptions(flexCredentialsUpdate,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+/**
+ * @summary Get State
+ */
+export const getStateApiSetupStateGet = (
+
+ signal?: AbortSignal
+) => {
+
+
+      return axiosMutator<SetupState>(
+      {url: `/api/setup/state`, method: 'GET', signal
+    },
+      );
+    }
+
+
+
+export const getGetStateApiSetupStateGetMutationOptions = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getStateApiSetupStateGet>>, TError,void, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof getStateApiSetupStateGet>>, TError,void, TContext> => {
+
+const mutationKey = ['getStateApiSetupStateGet'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof getStateApiSetupStateGet>>, void> = () => {
+
+
+          return  getStateApiSetupStateGet()
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GetStateApiSetupStateGetMutationResult = NonNullable<Awaited<ReturnType<typeof getStateApiSetupStateGet>>>
+
+    export type GetStateApiSetupStateGetMutationError = unknown
+
+    /**
+ * @summary Get State
+ */
+export const useGetStateApiSetupStateGet = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getStateApiSetupStateGet>>, TError,void, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof getStateApiSetupStateGet>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getGetStateApiSetupStateGetMutationOptions(options), queryClient);
+    }
+
+/**
+ * @summary Step1 Validate
+ */
+export const step1ValidateApiSetupStep1ValidatePost = (
+    flexCredentialsValidate: FlexCredentialsValidate,
+ signal?: AbortSignal
+) => {
+
+
+      return axiosMutator<Step1ValidateApiSetupStep1ValidatePost200>(
+      {url: `/api/setup/step1/validate`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: flexCredentialsValidate, signal
+    },
+      );
+    }
+
+
+
+
+export const getStep1ValidateApiSetupStep1ValidatePostQueryKey = (flexCredentialsValidate?: FlexCredentialsValidate,) => {
+    return [
+    'POST', `/api/setup/step1/validate`, flexCredentialsValidate
+    ] as const;
+    }
+
+
+export const getStep1ValidateApiSetupStep1ValidatePostQueryOptions = <TData = Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>, TError = HTTPValidationError>(flexCredentialsValidate: FlexCredentialsValidate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getStep1ValidateApiSetupStep1ValidatePostQueryKey(flexCredentialsValidate);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>> = ({ signal }) => step1ValidateApiSetupStep1ValidatePost(flexCredentialsValidate, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type Step1ValidateApiSetupStep1ValidatePostQueryResult = NonNullable<Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>>
+export type Step1ValidateApiSetupStep1ValidatePostQueryError = HTTPValidationError
+
+
+export function useStep1ValidateApiSetupStep1ValidatePost<TData = Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>, TError = HTTPValidationError>(
+ flexCredentialsValidate: FlexCredentialsValidate, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>,
+          TError,
+          Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useStep1ValidateApiSetupStep1ValidatePost<TData = Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>, TError = HTTPValidationError>(
+ flexCredentialsValidate: FlexCredentialsValidate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>,
+          TError,
+          Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useStep1ValidateApiSetupStep1ValidatePost<TData = Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>, TError = HTTPValidationError>(
+ flexCredentialsValidate: FlexCredentialsValidate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Step1 Validate
+ */
+
+export function useStep1ValidateApiSetupStep1ValidatePost<TData = Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>, TError = HTTPValidationError>(
+ flexCredentialsValidate: FlexCredentialsValidate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getStep1ValidateApiSetupStep1ValidatePostQueryOptions(flexCredentialsValidate,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+/**
+ * @summary Step2 Save
+ */
+export const step2SaveApiSetupStep2SavePost = (
+    setupStep2Save: SetupStep2Save,
+ signal?: AbortSignal
+) => {
+
+
+      return axiosMutator<Step2SaveApiSetupStep2SavePost200>(
+      {url: `/api/setup/step2/save`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: setupStep2Save, signal
+    },
+      );
+    }
+
+
+
+
+export const getStep2SaveApiSetupStep2SavePostQueryKey = (setupStep2Save?: SetupStep2Save,) => {
+    return [
+    'POST', `/api/setup/step2/save`, setupStep2Save
+    ] as const;
+    }
+
+
+export const getStep2SaveApiSetupStep2SavePostQueryOptions = <TData = Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError = HTTPValidationError>(setupStep2Save: SetupStep2Save, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getStep2SaveApiSetupStep2SavePostQueryKey(setupStep2Save);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>> = ({ signal }) => step2SaveApiSetupStep2SavePost(setupStep2Save, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type Step2SaveApiSetupStep2SavePostQueryResult = NonNullable<Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>>
+export type Step2SaveApiSetupStep2SavePostQueryError = HTTPValidationError
+
+
+export function useStep2SaveApiSetupStep2SavePost<TData = Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError = HTTPValidationError>(
+ setupStep2Save: SetupStep2Save, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>,
+          TError,
+          Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useStep2SaveApiSetupStep2SavePost<TData = Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError = HTTPValidationError>(
+ setupStep2Save: SetupStep2Save, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>,
+          TError,
+          Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useStep2SaveApiSetupStep2SavePost<TData = Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError = HTTPValidationError>(
+ setupStep2Save: SetupStep2Save, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Step2 Save
+ */
+
+export function useStep2SaveApiSetupStep2SavePost<TData = Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError = HTTPValidationError>(
+ setupStep2Save: SetupStep2Save, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getStep2SaveApiSetupStep2SavePostQueryOptions(setupStep2Save,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+/**
+ * @summary Step3 Complete
+ */
+export const step3CompleteApiSetupStep3CompletePost = (
+
+ signal?: AbortSignal
+) => {
+
+
+      return axiosMutator<Step3CompleteApiSetupStep3CompletePost200>(
+      {url: `/api/setup/step3/complete`, method: 'POST', signal
+    },
+      );
+    }
+
+
+
+
+export const getStep3CompleteApiSetupStep3CompletePostQueryKey = () => {
+    return [
+    'POST', `/api/setup/step3/complete`
+    ] as const;
+    }
+
+
+export const getStep3CompleteApiSetupStep3CompletePostQueryOptions = <TData = Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getStep3CompleteApiSetupStep3CompletePostQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>> = ({ signal }) => step3CompleteApiSetupStep3CompletePost(signal);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type Step3CompleteApiSetupStep3CompletePostQueryResult = NonNullable<Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>>
+export type Step3CompleteApiSetupStep3CompletePostQueryError = unknown
+
+
+export function useStep3CompleteApiSetupStep3CompletePost<TData = Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>, TError = unknown>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>,
+          TError,
+          Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useStep3CompleteApiSetupStep3CompletePost<TData = Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>,
+          TError,
+          Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useStep3CompleteApiSetupStep3CompletePost<TData = Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Step3 Complete
+ */
+
+export function useStep3CompleteApiSetupStep3CompletePost<TData = Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getStep3CompleteApiSetupStep3CompletePostQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+/**
+ * @summary Step4 Start
+ */
+export const step4StartApiSetupStep4StartPost = (
+
+ signal?: AbortSignal
+) => {
+
+
+      return axiosMutator<SetupJobStarted>(
+      {url: `/api/setup/step4/start`, method: 'POST', signal
+    },
+      );
+    }
+
+
+
+
+export const getStep4StartApiSetupStep4StartPostQueryKey = () => {
+    return [
+    'POST', `/api/setup/step4/start`
+    ] as const;
+    }
+
+
+export const getStep4StartApiSetupStep4StartPostQueryOptions = <TData = Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getStep4StartApiSetupStep4StartPostQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>> = ({ signal }) => step4StartApiSetupStep4StartPost(signal);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type Step4StartApiSetupStep4StartPostQueryResult = NonNullable<Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>>
+export type Step4StartApiSetupStep4StartPostQueryError = unknown
+
+
+export function useStep4StartApiSetupStep4StartPost<TData = Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>, TError = unknown>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>,
+          TError,
+          Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useStep4StartApiSetupStep4StartPost<TData = Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>,
+          TError,
+          Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useStep4StartApiSetupStep4StartPost<TData = Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Step4 Start
+ */
+
+export function useStep4StartApiSetupStep4StartPost<TData = Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getStep4StartApiSetupStep4StartPostQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+/**
+ * @summary Upload Xml
+ */
+export const uploadXmlApiImportsUploadPost = (
+    bodyUploadXmlApiImportsUploadPost: BodyUploadXmlApiImportsUploadPost,
+ signal?: AbortSignal
+) => {
+
+      const formData = new FormData();
+formData.append(`file`, bodyUploadXmlApiImportsUploadPost.file);
+
+      return axiosMutator<UploadXmlApiImportsUploadPost200>(
+      {url: `/api/imports/upload`, method: 'POST',
+      headers: {'Content-Type': 'multipart/form-data', },
+       data: formData, signal
+    },
+      );
+    }
+
+
+
+
+export const getUploadXmlApiImportsUploadPostQueryKey = (bodyUploadXmlApiImportsUploadPost?: BodyUploadXmlApiImportsUploadPost,) => {
+    return [
+    'POST', `/api/imports/upload`, bodyUploadXmlApiImportsUploadPost
+    ] as const;
+    }
+
+
+export const getUploadXmlApiImportsUploadPostQueryOptions = <TData = Awaited<ReturnType<typeof uploadXmlApiImportsUploadPost>>, TError = HTTPValidationError>(bodyUploadXmlApiImportsUploadPost: BodyUploadXmlApiImportsUploadPost, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof uploadXmlApiImportsUploadPost>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getUploadXmlApiImportsUploadPostQueryKey(bodyUploadXmlApiImportsUploadPost);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof uploadXmlApiImportsUploadPost>>> = ({ signal }) => uploadXmlApiImportsUploadPost(bodyUploadXmlApiImportsUploadPost, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof uploadXmlApiImportsUploadPost>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type UploadXmlApiImportsUploadPostQueryResult = NonNullable<Awaited<ReturnType<typeof uploadXmlApiImportsUploadPost>>>
+export type UploadXmlApiImportsUploadPostQueryError = HTTPValidationError
+
+
+export function useUploadXmlApiImportsUploadPost<TData = Awaited<ReturnType<typeof uploadXmlApiImportsUploadPost>>, TError = HTTPValidationError>(
+ bodyUploadXmlApiImportsUploadPost: BodyUploadXmlApiImportsUploadPost, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof uploadXmlApiImportsUploadPost>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof uploadXmlApiImportsUploadPost>>,
+          TError,
+          Awaited<ReturnType<typeof uploadXmlApiImportsUploadPost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useUploadXmlApiImportsUploadPost<TData = Awaited<ReturnType<typeof uploadXmlApiImportsUploadPost>>, TError = HTTPValidationError>(
+ bodyUploadXmlApiImportsUploadPost: BodyUploadXmlApiImportsUploadPost, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof uploadXmlApiImportsUploadPost>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof uploadXmlApiImportsUploadPost>>,
+          TError,
+          Awaited<ReturnType<typeof uploadXmlApiImportsUploadPost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useUploadXmlApiImportsUploadPost<TData = Awaited<ReturnType<typeof uploadXmlApiImportsUploadPost>>, TError = HTTPValidationError>(
+ bodyUploadXmlApiImportsUploadPost: BodyUploadXmlApiImportsUploadPost, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof uploadXmlApiImportsUploadPost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Upload Xml
+ */
+
+export function useUploadXmlApiImportsUploadPost<TData = Awaited<ReturnType<typeof uploadXmlApiImportsUploadPost>>, TError = HTTPValidationError>(
+ bodyUploadXmlApiImportsUploadPost: BodyUploadXmlApiImportsUploadPost, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof uploadXmlApiImportsUploadPost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getUploadXmlApiImportsUploadPostQueryOptions(bodyUploadXmlApiImportsUploadPost,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+/**
+ * @summary Trigger Manual Refresh
+ */
+export const triggerManualRefreshApiIngestTriggerPost = (
+    ingestTrigger: IngestTrigger,
+ signal?: AbortSignal
+) => {
+
+
+      return axiosMutator<IngestJobStarted>(
+      {url: `/api/ingest/trigger`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: ingestTrigger, signal
+    },
+      );
+    }
+
+
+
+
+export const getTriggerManualRefreshApiIngestTriggerPostQueryKey = (ingestTrigger?: IngestTrigger,) => {
+    return [
+    'POST', `/api/ingest/trigger`, ingestTrigger
+    ] as const;
+    }
+
+
+export const getTriggerManualRefreshApiIngestTriggerPostQueryOptions = <TData = Awaited<ReturnType<typeof triggerManualRefreshApiIngestTriggerPost>>, TError = HTTPValidationError>(ingestTrigger: IngestTrigger, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof triggerManualRefreshApiIngestTriggerPost>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getTriggerManualRefreshApiIngestTriggerPostQueryKey(ingestTrigger);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof triggerManualRefreshApiIngestTriggerPost>>> = ({ signal }) => triggerManualRefreshApiIngestTriggerPost(ingestTrigger, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof triggerManualRefreshApiIngestTriggerPost>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type TriggerManualRefreshApiIngestTriggerPostQueryResult = NonNullable<Awaited<ReturnType<typeof triggerManualRefreshApiIngestTriggerPost>>>
+export type TriggerManualRefreshApiIngestTriggerPostQueryError = HTTPValidationError
+
+
+export function useTriggerManualRefreshApiIngestTriggerPost<TData = Awaited<ReturnType<typeof triggerManualRefreshApiIngestTriggerPost>>, TError = HTTPValidationError>(
+ ingestTrigger: IngestTrigger, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof triggerManualRefreshApiIngestTriggerPost>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof triggerManualRefreshApiIngestTriggerPost>>,
+          TError,
+          Awaited<ReturnType<typeof triggerManualRefreshApiIngestTriggerPost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useTriggerManualRefreshApiIngestTriggerPost<TData = Awaited<ReturnType<typeof triggerManualRefreshApiIngestTriggerPost>>, TError = HTTPValidationError>(
+ ingestTrigger: IngestTrigger, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof triggerManualRefreshApiIngestTriggerPost>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof triggerManualRefreshApiIngestTriggerPost>>,
+          TError,
+          Awaited<ReturnType<typeof triggerManualRefreshApiIngestTriggerPost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useTriggerManualRefreshApiIngestTriggerPost<TData = Awaited<ReturnType<typeof triggerManualRefreshApiIngestTriggerPost>>, TError = HTTPValidationError>(
+ ingestTrigger: IngestTrigger, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof triggerManualRefreshApiIngestTriggerPost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Trigger Manual Refresh
+ */
+
+export function useTriggerManualRefreshApiIngestTriggerPost<TData = Awaited<ReturnType<typeof triggerManualRefreshApiIngestTriggerPost>>, TError = HTTPValidationError>(
+ ingestTrigger: IngestTrigger, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof triggerManualRefreshApiIngestTriggerPost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getTriggerManualRefreshApiIngestTriggerPostQueryOptions(ingestTrigger,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+/**
+ * @summary Stream Progress
+ */
+export const streamProgressApiIngestStreamJobIdGet = (
+    jobId: number,
+ signal?: AbortSignal
+) => {
+
+
+      return axiosMutator<unknown>(
+      {url: `/api/ingest/stream/${jobId}`, method: 'GET', signal
+    },
+      );
+    }
+
+
+
+export const getStreamProgressApiIngestStreamJobIdGetMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof streamProgressApiIngestStreamJobIdGet>>, TError,{jobId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof streamProgressApiIngestStreamJobIdGet>>, TError,{jobId: number}, TContext> => {
+
+const mutationKey = ['streamProgressApiIngestStreamJobIdGet'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof streamProgressApiIngestStreamJobIdGet>>, {jobId: number}> = (props) => {
+          const {jobId} = props ?? {};
+
+          return  streamProgressApiIngestStreamJobIdGet(jobId,)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StreamProgressApiIngestStreamJobIdGetMutationResult = NonNullable<Awaited<ReturnType<typeof streamProgressApiIngestStreamJobIdGet>>>
+
+    export type StreamProgressApiIngestStreamJobIdGetMutationError = HTTPValidationError
+
+    /**
+ * @summary Stream Progress
+ */
+export const useStreamProgressApiIngestStreamJobIdGet = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof streamProgressApiIngestStreamJobIdGet>>, TError,{jobId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof streamProgressApiIngestStreamJobIdGet>>,
+        TError,
+        {jobId: number},
+        TContext
+      > => {
+      return useMutation(getStreamProgressApiIngestStreamJobIdGetMutationOptions(options), queryClient);
+    }
+
+/**
+ * @summary List Logs
+ */
+export const listLogsApiIngestLogsGet = (
+    params?: ListLogsApiIngestLogsGetParams,
+ signal?: AbortSignal
+) => {
+
+
+      return axiosMutator<IngestLogRead[]>(
+      {url: `/api/ingest/logs`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+
+
+
+export const getListLogsApiIngestLogsGetMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof listLogsApiIngestLogsGet>>, TError,{params?: ListLogsApiIngestLogsGetParams}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof listLogsApiIngestLogsGet>>, TError,{params?: ListLogsApiIngestLogsGetParams}, TContext> => {
+
+const mutationKey = ['listLogsApiIngestLogsGet'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof listLogsApiIngestLogsGet>>, {params?: ListLogsApiIngestLogsGetParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  listLogsApiIngestLogsGet(params,)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ListLogsApiIngestLogsGetMutationResult = NonNullable<Awaited<ReturnType<typeof listLogsApiIngestLogsGet>>>
+
+    export type ListLogsApiIngestLogsGetMutationError = HTTPValidationError
+
+    /**
+ * @summary List Logs
+ */
+export const useListLogsApiIngestLogsGet = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof listLogsApiIngestLogsGet>>, TError,{params?: ListLogsApiIngestLogsGetParams}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof listLogsApiIngestLogsGet>>,
+        TError,
+        {params?: ListLogsApiIngestLogsGetParams},
+        TContext
+      > => {
+      return useMutation(getListLogsApiIngestLogsGetMutationOptions(options), queryClient);
+    }
