@@ -5779,7 +5779,7 @@ git commit -m "feat(phase2): frontend wizard scaffold — middleware + stepper +
 - Create: `frontend/src/hooks/useIngestStream.ts`
 - Modify: `frontend/src/app/(setup)/setup/page.tsx` (wire steps 3 + 4)
 
-- [ ] **Step 1: Crear hook `useIngestStream` para SSE**
+- [x] **Step 1: Crear hook `useIngestStream` para SSE**
 
 Crear `frontend/src/hooks/useIngestStream.ts`:
 
@@ -5845,7 +5845,7 @@ export function useIngestStream(jobId: number | null): IngestStreamState {
 }
 ```
 
-- [ ] **Step 2: Crear Step3Xmls (drag&drop con react-dropzone)**
+- [x] **Step 2: Crear Step3Xmls (drag&drop con react-dropzone)**
 
 Asegurar dep:
 
@@ -5954,7 +5954,7 @@ export function Step3Xmls({ onComplete, onBack }: Step3Props) {
 }
 ```
 
-- [ ] **Step 3: Crear Step4Initial (SSE progress + retry)**
+- [x] **Step 3: Crear Step4Initial (SSE progress + retry)**
 
 Crear `frontend/src/components/wizard/Step4Initial.tsx`:
 
@@ -6076,7 +6076,7 @@ export function Step4Initial() {
 }
 ```
 
-- [ ] **Step 4: Wire steps 3 + 4 en `setup/page.tsx`**
+- [x] **Step 4: Wire steps 3 + 4 en `setup/page.tsx`**
 
 Modificar `frontend/src/app/(setup)/setup/page.tsx`:
 
@@ -6115,7 +6115,7 @@ export default function SetupPage() {
 }
 ```
 
-- [ ] **Step 5: Build + smoke test**
+- [x] **Step 5: Build + smoke test**
 
 ```bash
 cd frontend && pnpm build
@@ -6124,7 +6124,7 @@ docker compose up -d --build && sleep 5
 
 Abrir browser, completar wizard end-to-end (necesita backend con credenciales reales — si no, mockear con respx temporalmente o usar tokens de prueba que devuelven el XML vacío).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add frontend/src/components/wizard/Step3Xmls.tsx \
