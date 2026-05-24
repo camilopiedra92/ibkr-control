@@ -5293,7 +5293,7 @@ cd frontend && pnpm openapi:gen
 
 (Esto refresca `src/lib/api/` con los endpoints nuevos de credentials/setup/imports/ingest.)
 
-- [ ] **Step 1: Regenerar cliente TS**
+- [x] **Step 1: Regenerar cliente TS**
 
 Levantar backend para que exponga el OpenAPI nuevo:
 
@@ -5303,7 +5303,7 @@ docker compose up -d backend && sleep 3 && cd frontend && pnpm openapi:gen
 
 Verificar que se generaron hooks tipo `useSetupStateRetrieve`, `usePostSetupStep1Validate`, `usePostSetupStep2Save`, `usePostSetupStep3Complete`, `usePostSetupStep4Start`, `useGetCredentialsFlex`, `usePutCredentialsFlex`, `usePostImportsUpload`, `usePostIngestTrigger`, `useGetIngestLogs`.
 
-- [ ] **Step 2: Crear middleware de routing**
+- [x] **Step 2: Crear middleware de routing**
 
 Crear `frontend/src/middleware.ts`:
 
@@ -5375,7 +5375,7 @@ export const config = {
 };
 ```
 
-- [ ] **Step 3: Crear hook `useSetupState`**
+- [x] **Step 3: Crear hook `useSetupState`**
 
 Crear `frontend/src/hooks/useSetupState.ts`:
 
@@ -5411,7 +5411,7 @@ export function currentStep(state: SetupState | undefined): 1 | 2 | 3 | 4 {
 }
 ```
 
-- [ ] **Step 4: Crear layout del wizard**
+- [x] **Step 4: Crear layout del wizard**
 
 Crear `frontend/src/app/(setup)/setup/layout.tsx`:
 
@@ -5430,7 +5430,7 @@ export default function SetupLayout({ children }: { children: ReactNode }) {
 }
 ```
 
-- [ ] **Step 5: Crear componente `Stepper`**
+- [x] **Step 5: Crear componente `Stepper`**
 
 Crear `frontend/src/components/wizard/Stepper.tsx`:
 
@@ -5482,7 +5482,7 @@ export function Stepper({ current, labels }: StepperProps) {
 }
 ```
 
-- [ ] **Step 6: Crear Step1Credentials**
+- [x] **Step 6: Crear Step1Credentials**
 
 Crear `frontend/src/components/wizard/Step1Credentials.tsx`:
 
@@ -5557,7 +5557,7 @@ export function Step1Credentials({ onComplete }: Step1Props) {
 }
 ```
 
-- [ ] **Step 7: Crear Step2Accounts**
+- [x] **Step 7: Crear Step2Accounts**
 
 Crear `frontend/src/components/wizard/Step2Accounts.tsx`:
 
@@ -5688,7 +5688,7 @@ export function Step2Accounts({ onComplete, onBack }: Step2Props) {
 }
 ```
 
-- [ ] **Step 8: Crear página `setup/page.tsx` (shell que delega a steps 1-2 por ahora)**
+- [x] **Step 8: Crear página `setup/page.tsx` (shell que delega a steps 1-2 por ahora)**
 
 Crear `frontend/src/app/(setup)/setup/page.tsx`:
 
@@ -5736,7 +5736,7 @@ export default function SetupPage() {
 }
 ```
 
-- [ ] **Step 9: Verificar build del frontend**
+- [x] **Step 9: Verificar build del frontend**
 
 ```bash
 cd frontend && pnpm build
@@ -5744,7 +5744,7 @@ cd frontend && pnpm build
 
 Expected: build OK sin errores TS.
 
-- [ ] **Step 10: Smoke test manual — verificar redirect /setup**
+- [x] **Step 10: Smoke test manual — verificar redirect /setup**
 
 ```bash
 docker compose up -d --build && sleep 5
@@ -5756,7 +5756,7 @@ Abrir browser en `http://localhost:3000`. Registrarse con email/password. Verifi
 docker compose down
 ```
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add frontend/src/middleware.ts \
