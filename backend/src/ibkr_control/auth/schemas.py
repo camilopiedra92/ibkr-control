@@ -1,4 +1,5 @@
 from fastapi_users import schemas
+from pydantic import Field
 
 
 class UserRead(schemas.BaseUser[int]):
@@ -6,8 +7,8 @@ class UserRead(schemas.BaseUser[int]):
 
 
 class UserCreate(schemas.BaseUserCreate):
-    name: str
+    name: str = Field(min_length=1, max_length=200)
 
 
 class UserUpdate(schemas.BaseUserUpdate):
-    name: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=200)

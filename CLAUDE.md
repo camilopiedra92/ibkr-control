@@ -163,6 +163,16 @@ Cobertura completa en `docs/specs/2026-05-24-ibkr-control-center-design.md` §6.
 - **Decimal para dinero**, nunca float
 - **Postgres-specific** (JSONB, ON CONFLICT, ranges) — no abstraer a SQLite
 - **Dedup de imports por SHA-256** (mismo patrón que `renta/documentos/_hash.py`)
+- **No capturar `settings = get_settings()` a nivel módulo** — llamar `get_settings()` dentro de funciones/métodos. El patrón module-level cachea valores en cada módulo independientemente; cuando los tests hacen `monkeypatch.setenv` + `get_settings.cache_clear()`, los módulos ya cargados siguen viendo los settings viejos. (Code review de Task 5 detectó que los tests actuales pasan por coincidencia — los valores de conftest y fixture son idénticos.) Aplicar a código nuevo desde Task 6+; refactor de los 3 archivos existentes (`db/session.py`, `auth/manager.py`, `auth/backend.py`) está en el polish backlog.
+
+## Polish backlog (antes de tagear v0.1.0-foundation)
+
+Issues detectados por code reviewers durante Phase 1 que se difirieron para no inflar tasks individuales:
+
+- **CORS wildcard guard** (`main.py`): rechazar `BACKEND_CORS_ORIGINS=*` explícitamente porque incompatible con `allow_credentials=True` (browsers fallan silenciosamente). Aplicar en Task 14 Coolify config.
+- **Test de migrations** (`backend/tests/`): agregar `test_migrations_apply_cleanly` que corre `alembic upgrade head` contra container fresh y verifica `Base.metadata` matchea schema reflejado. El plan Phase 1 dice "first migration applies cleanly" — actualmente solo verificado manual con `alembic current`. Aplicar antes de tagear v0.1.0.
+- **Refactor module-level settings capture** (`db/session.py`, `auth/manager.py`, `auth/backend.py`): mover `settings = get_settings()` adentro de funciones/factories. Ver convención nueva arriba. Tarea aislada, ~30 min.
+- **Dockerfile `USER` non-root + remove postgres host-port binding**: difer a Task 14 (Coolify deploy) per recomendación de code reviewer Task 3.
 
 ## Comandos comunes
 

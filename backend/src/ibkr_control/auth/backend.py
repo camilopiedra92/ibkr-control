@@ -1,6 +1,5 @@
 from fastapi_users.authentication import AuthenticationBackend, BearerTransport, JWTStrategy
 from fastapi_users import FastAPIUsers
-from fastapi import Depends
 
 from ibkr_control.config import get_settings
 from ibkr_control.auth.manager import get_user_manager
