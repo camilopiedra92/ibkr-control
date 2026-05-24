@@ -16,7 +16,10 @@ axiosInstance.interceptors.request.use((cfg) => {
 });
 
 export const axiosMutator = <T>(config: AxiosRequestConfig): Promise<T> => {
-  return axiosInstance.request<T, T>(config);
+  // axios.request returns AxiosResponse<T> with .data, .headers, .status, etc.
+  // Orval-generated code expects T directly — unwrap .data here so the type
+  // contract (Promise<T>) matches runtime behavior.
+  return axiosInstance.request<T>(config).then((r) => r.data);
 };
 
 export default axiosMutator;
