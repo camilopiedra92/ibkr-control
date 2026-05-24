@@ -15,10 +15,14 @@ Patron de transaccion en ingest_xml:
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ibkr_control.db.models.flex_credentials import FlexCredentials
+from ibkr_control.db.models.flex_raw import FlexImport  # noqa: F401 — kept for symmetry
+from ibkr_control.db.models.ingest_log import IngestLog
 from ibkr_control.ingest.flex import client as flex_client_mod
 from ibkr_control.ingest.flex import crypto as flex_crypto_mod
 from ibkr_control.ingest.flex import parser as flex_parser_mod
 from ibkr_control.ingest.flex import persister as flex_persister_mod
+from ibkr_control.ingest.hash_dedup import is_known_hash, xml_hash
 from ibkr_control.ingest.lock import advisory_lock
 from ibkr_control.ingest.log import ingest_log_entry
 
@@ -64,7 +68,6 @@ async def ingest_xml(
             raise
 
         # Update items_processed antes del exit del log context
-        from ibkr_control.db.models.ingest_log import IngestLog
         log_row = await session.scalar(select(IngestLog).where(IngestLog.id == log_id))
         log_row.items_processed = (
             len(parsed.trades)
@@ -88,9 +91,6 @@ async def run(
     Toma advisory_lock por (source='flex', user_id) — bloquea concurrent runs
     para el mismo user. Si esta tomado, lanza LockHeldError (caller decide que hacer).
     """
-    from ibkr_control.db.models.flex_credentials import FlexCredentials
-    from ibkr_control.ingest.hash_dedup import xml_hash, is_known_hash
-
     async with session_factory() as session:
         async with advisory_lock(session, user_id=user_id, source="flex"):
             async with ingest_log_entry(session, "flex", user_id, trigger) as log_id:
@@ -108,7 +108,6 @@ async def run(
                 h = xml_hash(xml_bytes)
                 if await is_known_hash(session, h):
                     # No changes — solo update log items_processed
-                    from ibkr_control.db.models.ingest_log import IngestLog
                     log_row = await session.scalar(
                         select(IngestLog).where(IngestLog.id == log_id)
                     )
@@ -131,7 +130,6 @@ async def run(
                     await sp.rollback()
                     raise
 
-                from ibkr_control.db.models.ingest_log import IngestLog
                 log_row = await session.scalar(
                     select(IngestLog).where(IngestLog.id == log_id)
                 )

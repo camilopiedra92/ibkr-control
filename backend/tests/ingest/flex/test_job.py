@@ -177,3 +177,143 @@ async def test_ingest_xml_rolls_back_persister_on_failure(db_session: AsyncSessi
             .limit(1)
         )
         assert log_row is not None, "Expected a failed ingest_log row to persist"
+
+
+# ---------------------------------------------------------------------------
+# Tests for run() — the cron entry point
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_run_happy_path_with_mocked_flex_client(
+    monkeypatch, db_session: AsyncSession, db_engine, sample_user
+):
+    """run() fetches from Flex WS (mocked), persists XML, marks log ok."""
+    import base64
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from ibkr_control.db.models.flex_credentials import FlexCredentials
+    from ibkr_control.db.models.flex_raw import FlexImport
+    from ibkr_control.db.models.ingest_log import IngestLog
+    from ibkr_control.ingest.flex import client as client_mod
+    from ibkr_control.ingest.flex import crypto as crypto_mod
+
+    # Set TOKEN_ENCRYPTION_KEY before calling encrypt_token
+    test_key = base64.b64encode(b"Y" * 32).decode("ascii")
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", test_key)
+
+    # Write FlexCredentials for sample_user using the existing db_session
+    encrypted = crypto_mod.encrypt_token("test-token-real")
+    creds = FlexCredentials(
+        user_id=sample_user.id,
+        token_encrypted=encrypted,
+        ytd_query_id="QUERY-123",
+    )
+    db_session.add(creds)
+    await db_session.commit()
+
+    # Prepare canned XML from fixture
+    xml_bytes = (FIXTURE_DIR / "empty_query_response.xml").read_bytes()
+
+    async def fake_send_request(self, query_id):
+        assert query_id == "QUERY-123"
+        return "REF-999"
+
+    async def fake_poll_statement(self, reference_code, max_wait_seconds=300):
+        assert reference_code == "REF-999"
+        return xml_bytes
+
+    monkeypatch.setattr(client_mod.FlexClient, "send_request", fake_send_request)
+    monkeypatch.setattr(client_mod.FlexClient, "poll_statement", fake_poll_statement)
+
+    # session_factory backed by same test DB (schema already up via db_session fixture)
+    SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
+
+    from ibkr_control.ingest.flex import job as flex_job_mod
+    flex_import_id = await flex_job_mod.run(
+        SessionLocal, user_id=sample_user.id, trigger="cron"
+    )
+    assert flex_import_id is not None
+
+    # Verify FlexImport row was created correctly
+    async with SessionLocal() as s2:
+        fi = await s2.get(FlexImport, flex_import_id)
+        assert fi is not None
+        assert fi.user_id == sample_user.id
+        assert fi.source == "web_service"
+        assert fi.status == "ok"
+
+        # Verify ingest_log row was created with correct metadata
+        n_logs = await s2.scalar(
+            select(func.count(IngestLog.id)).where(
+                IngestLog.job_kind == "flex",
+                IngestLog.user_id == sample_user.id,
+                IngestLog.status == "ok",
+                IngestLog.trigger == "cron",
+            )
+        )
+        assert n_logs >= 1
+
+
+@pytest.mark.asyncio
+async def test_run_returns_none_if_hash_already_known(
+    monkeypatch, db_session: AsyncSession, db_engine, sample_user
+):
+    """If is_known_hash(fetched_xml) == True, run() returns None and items_processed=0."""
+    import base64
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from ibkr_control.db.models.flex_credentials import FlexCredentials
+    from ibkr_control.db.models.flex_raw import FlexImport
+    from ibkr_control.db.models.ingest_log import IngestLog
+    from ibkr_control.ingest.flex import client as client_mod
+    from ibkr_control.ingest.flex import crypto as crypto_mod
+    from ibkr_control.ingest.flex import job as flex_job_mod
+
+    test_key = base64.b64encode(b"Z" * 32).decode("ascii")
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", test_key)
+
+    encrypted = crypto_mod.encrypt_token("test-token-2")
+    db_session.add(FlexCredentials(
+        user_id=sample_user.id,
+        token_encrypted=encrypted,
+        ytd_query_id="QUERY-456",
+    ))
+    await db_session.commit()
+
+    xml_bytes = (FIXTURE_DIR / "empty_query_response.xml").read_bytes()
+
+    async def fake_send_request(self, query_id):
+        return "REF-1"
+
+    async def fake_poll_statement(self, reference_code, max_wait_seconds=300):
+        return xml_bytes
+
+    monkeypatch.setattr(client_mod.FlexClient, "send_request", fake_send_request)
+    monkeypatch.setattr(client_mod.FlexClient, "poll_statement", fake_poll_statement)
+
+    SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
+
+    # First run: persists XML, returns a valid ID
+    fi_id_1 = await flex_job_mod.run(SessionLocal, user_id=sample_user.id, trigger="cron")
+    assert fi_id_1 is not None
+
+    # Second run: same XML hash → early exit, returns None
+    fi_id_2 = await flex_job_mod.run(SessionLocal, user_id=sample_user.id, trigger="cron")
+    assert fi_id_2 is None
+
+    async with SessionLocal() as s2:
+        # Only 1 FlexImport row should exist (the first one, not duplicated)
+        n_fi = await s2.scalar(
+            select(func.count(FlexImport.id)).where(
+                FlexImport.user_id == sample_user.id
+            )
+        )
+        assert n_fi == 1
+
+        # Two ingest_log entries (one per run, both ok)
+        n_logs = await s2.scalar(
+            select(func.count(IngestLog.id)).where(
+                IngestLog.job_kind == "flex",
+                IngestLog.user_id == sample_user.id,
+                IngestLog.status == "ok",
+            )
+        )
+        assert n_logs == 2
