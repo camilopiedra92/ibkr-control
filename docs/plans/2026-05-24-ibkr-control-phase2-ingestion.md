@@ -4285,7 +4285,7 @@ git commit -m "feat(phase2): APScheduler setup with 2 daily jobs (Flex 07:00 COT
 - Create: `backend/tests/api/test_credentials.py`
 - Create: `backend/tests/api/test_setup.py`
 
-- [ ] **Step 1: Crear schemas Pydantic**
+- [x] **Step 1: Crear schemas Pydantic**
 
 Crear `backend/src/ibkr_control/api/_schemas.py`:
 
@@ -4363,7 +4363,7 @@ class IngestLogRead(BaseModel):
     trigger: str
 ```
 
-- [ ] **Step 2: Escribir tests de credentials (failing)**
+- [x] **Step 2: Escribir tests de credentials (failing)**
 
 Crear `backend/tests/api/test_credentials.py`:
 
@@ -4432,7 +4432,7 @@ def _make_test_key() -> str:
     return base64.b64encode(b"X" * 32).decode("ascii")
 ```
 
-- [ ] **Step 3: Implementar `api/credentials.py`**
+- [x] **Step 3: Implementar `api/credentials.py`**
 
 Crear `backend/src/ibkr_control/api/credentials.py`:
 
@@ -4521,7 +4521,7 @@ async def update_flex_credentials(
     return {"ok": True}
 ```
 
-- [ ] **Step 4: Escribir tests de setup (failing)**
+- [x] **Step 4: Escribir tests de setup (failing)**
 
 Crear `backend/tests/api/test_setup.py`:
 
@@ -4613,7 +4613,7 @@ async def test_step3_complete_marks_progress(client: AsyncClient, auth_headers: 
     assert state["step3_xmls"] is True
 ```
 
-- [ ] **Step 5: Implementar `api/setup.py`**
+- [x] **Step 5: Implementar `api/setup.py`**
 
 Crear `backend/src/ibkr_control/api/setup.py`:
 
@@ -4844,7 +4844,7 @@ async def _run_setup_meta_job(user_id: int, job_id: int):
     tracker.mark_done(job_id)
 ```
 
-- [ ] **Step 6: Agregar `get_engine` helper en `db/session.py` si no existe**
+- [x] **Step 6: Agregar `get_engine` helper en `db/session.py` si no existe**
 
 Si no existe, agregar a `backend/src/ibkr_control/db/session.py`:
 
@@ -4859,7 +4859,7 @@ def get_engine() -> AsyncEngine:
     return create_async_engine(get_settings().database_url, echo=False)
 ```
 
-- [ ] **Step 7: Wire routers en `main.py`**
+- [x] **Step 7: Wire routers en `main.py`**
 
 En `backend/src/ibkr_control/main.py`:
 
@@ -4871,7 +4871,7 @@ app.include_router(credentials_router.router)
 app.include_router(setup_router.router)
 ```
 
-- [ ] **Step 8: Correr tests**
+- [x] **Step 8: Correr tests**
 
 ```bash
 cd backend && uv run pytest tests/api/test_credentials.py tests/api/test_setup.py -v
@@ -4879,7 +4879,7 @@ cd backend && uv run pytest tests/api/test_credentials.py tests/api/test_setup.p
 
 Expected: 10/10 PASS.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add backend/src/ibkr_control/api/_schemas.py \
