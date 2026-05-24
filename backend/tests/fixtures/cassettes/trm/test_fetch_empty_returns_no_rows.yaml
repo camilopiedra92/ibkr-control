@@ -1,0 +1,18 @@
+interactions:
+  - request:
+      method: GET
+      uri: https://www.datos.gov.co/resource/ceyp-9c7c.json?%24where=vigenciadesde+%3E+%272026-05-24T00%3A00%3A00.000%27&%24order=vigenciadesde+ASC&%24limit=50000
+      headers:
+        Host:
+          - www.datos.gov.co
+      body: null
+    response:
+      status:
+        code: 200
+        message: OK
+      headers:
+        content-type:
+          - application/json
+      body:
+        string: "[]"
+version: 1
