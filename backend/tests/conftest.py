@@ -2,15 +2,16 @@ import os
 
 # Defaults seteados ANTES de cualquier import de ibkr_control.*, porque pytest
 # carga conftest.py antes de colectar test modules. Sin esto, test_health.py
-# falla en collection time post-Task 5 cuando main.py importe auth → db.session
-# → get_settings() → ValidationError por DATABASE_URL/JWT_SECRET faltantes.
+# falla en collection time post-Task 5 cuando main.py importe auth -> db.session
+# -> get_settings() -> ValidationError por DATABASE_URL/JWT_SECRET faltantes.
 # Tests que necesitan DB real (test_db_connection, test_auth) sobreescriben
-# vía monkeypatch — setdefault no piso valores ya seteados.
+# via monkeypatch -- setdefault no piso valores ya seteados.
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET", "test-secret-32-chars-minimum-please-ok")
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
 
@@ -137,3 +138,19 @@ async def sample_account(db_session: AsyncSession):
     await db_session.commit()
     await db_session.refresh(a)
     return a
+
+
+@pytest.fixture(scope="session")
+def cassette_dir() -> Path:
+    return Path(__file__).parent / "fixtures" / "cassettes"
+
+
+@pytest.fixture
+def vcr_config():
+    """Config base para VCR. Filtra Authorization header y query params sensibles."""
+    return {
+        "filter_headers": ["Authorization", "X-Api-Key"],
+        "filter_query_parameters": ["t", "token", "$$app_token"],
+        "decode_compressed_response": True,
+        "record_mode": "none",  # CI fails if cassette missing
+    }
