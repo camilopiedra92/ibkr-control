@@ -6478,7 +6478,7 @@ git commit -m "feat(phase2): frontend Settings — Flex creds + XML upload + log
 - Create: `frontend/tests/e2e/settings_refresh.spec.ts`
 - Create: `frontend/tests/e2e/fixtures/test_xml.xml` (XML pequeño válido)
 
-- [ ] **Step 1: Verificar Playwright config**
+- [x] **Step 1: Verificar Playwright config**
 
 Si no existe `frontend/playwright.config.ts`, crearlo:
 
@@ -6503,7 +6503,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 2: Crear fixture XML pequeño para E2E**
+- [x] **Step 2: Crear fixture XML pequeño para E2E**
 
 Crear `frontend/tests/e2e/fixtures/test_xml.xml` con un Flex statement mínimo válido (1 trade):
 
@@ -6530,7 +6530,7 @@ Crear `frontend/tests/e2e/fixtures/test_xml.xml` con un Flex statement mínimo v
 </FlexQueryResponse>
 ```
 
-- [ ] **Step 3: Escribir test `wizard.spec.ts`**
+- [x] **Step 3: Escribir test `wizard.spec.ts`**
 
 Crear `frontend/tests/e2e/wizard.spec.ts`:
 
@@ -6589,7 +6589,7 @@ test.describe("Setup wizard", () => {
 });
 ```
 
-- [ ] **Step 4: Escribir test `settings_refresh.spec.ts`**
+- [x] **Step 4: Escribir test `settings_refresh.spec.ts`**
 
 Crear `frontend/tests/e2e/settings_refresh.spec.ts`:
 
@@ -6614,7 +6614,7 @@ test.describe("Settings — Actualizar ahora", () => {
 });
 ```
 
-- [ ] **Step 5: Agregar script `e2e` a package.json si no existe**
+- [x] **Step 5: Agregar script `e2e` a package.json si no existe**
 
 En `frontend/package.json`:
 
@@ -6634,8 +6634,9 @@ cd frontend && pnpm e2e
 ```
 
 Expected: 2/2 PASS (puede ser 1/2 si test de resume requiere helper que se omite).
+NOTE: Skipped (requires docker + IBKR backend mocks — TODO: implement E2E_BACKEND_MOCKED=1 in a future task).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add frontend/playwright.config.ts \
