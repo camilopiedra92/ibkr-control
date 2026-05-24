@@ -2334,7 +2334,7 @@ git commit -m "ci: github actions backend pytest + frontend build"
 - Modify: `docker-compose.yml` (separar compose dev vs deploy)
 - Create: `docker-compose.coolify.yml`
 
-- [ ] **Step 1: Crear docker-compose.coolify.yml (con env de Coolify)**
+- [x] **Step 1: Crear docker-compose.coolify.yml (con env de Coolify)**
 
 `/Users/owner/Development/ibkr-control/docker-compose.coolify.yml`:
 
@@ -2387,7 +2387,7 @@ volumes:
   postgres_data:
 ```
 
-- [ ] **Step 2: Crear docs/deploy.md**
+- [x] **Step 2: Crear docs/deploy.md**
 
 `/Users/owner/Development/ibkr-control/docs/deploy.md`:
 
@@ -2440,7 +2440,7 @@ curl https://ibkr.tudominio.com/api/health
 ```
 ```
 
-- [ ] **Step 3: Commit + tag de release v0.1.0-foundation**
+- [x] **Step 3: Commit + tag de release v0.1.0-foundation**
 
 ```bash
 cd /Users/owner/Development/ibkr-control
