@@ -17,10 +17,11 @@ interface Step2Props {
   onBack: () => void;
 }
 
+// Single empty row by default. User adds rows for each IBKR account they own.
+// Previously this had real account placeholders, but those leaked PII; better
+// to require explicit entry.
 const DEFAULT_ACCOUNTS: AccountRow[] = [
-  { ibkr_account_id: "U99999001", alias: "Conjunta Joint Holder", pct: "0.5000" },
-  { ibkr_account_id: "U99999002", alias: "Personal Swing", pct: "1.0000" },
-  { ibkr_account_id: "U99999003", alias: "Personal Futuros", pct: "1.0000" },
+  { ibkr_account_id: "U", alias: "", pct: "1.0000" },
 ];
 
 export function Step2Accounts({ onComplete, onBack }: Step2Props) {
