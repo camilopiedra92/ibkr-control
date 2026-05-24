@@ -1,5 +1,7 @@
 from decimal import Decimal
-from pydantic import BaseModel, ConfigDict, Field
+from zoneinfo import available_timezones
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class UserSettingsRead(BaseModel):
@@ -18,3 +20,12 @@ class UserSettingsUpdate(BaseModel):
         decimal_places=4,
     )
     timezone: str | None = None
+
+    @field_validator("timezone")
+    @classmethod
+    def _timezone_must_be_zoneinfo(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v not in available_timezones():
+            raise ValueError(f"unknown timezone: {v!r}")
+        return v
