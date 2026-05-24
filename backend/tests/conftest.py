@@ -84,6 +84,9 @@ async def db_session(postgres_container, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", url)
     monkeypatch.setenv("JWT_SECRET", "test-secret-32-chars-minimum-please-ok")
 
+    from ibkr_control.config import get_settings
+    get_settings.cache_clear()
+
     import ibkr_control.db  # noqa: F401 — registra todos los modelos en Base.metadata
 
     engine = create_async_engine(url)

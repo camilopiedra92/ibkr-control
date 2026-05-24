@@ -1,6 +1,8 @@
 """Tests del schema agregado en migration A (phase2_identity)."""
 import pytest
+from decimal import Decimal
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -34,7 +36,7 @@ async def test_accounts_ibkr_account_id_unique(db_session: AsyncSession):
     db_session.add(Account(ibkr_account_id='U99999001', alias='test1'))
     await db_session.commit()
     db_session.add(Account(ibkr_account_id='U99999001', alias='dup'))
-    with pytest.raises(Exception):  # IntegrityError
+    with pytest.raises(IntegrityError):
         await db_session.commit()
     await db_session.rollback()
 
@@ -61,10 +63,10 @@ async def test_participations_pct_check_constraint(db_session: AsyncSession):
 
     db_session.add(Participation(
         user_id=user.id, account_id=acc.id,
-        pct=1.5,  # > 1, debe fallar
+        pct=Decimal('1.5'),  # > 1, debe fallar
         valid_from=date(2026, 1, 1)
     ))
-    with pytest.raises(Exception):
+    with pytest.raises(IntegrityError):
         await db_session.commit()
     await db_session.rollback()
 
@@ -92,7 +94,7 @@ async def test_flex_credentials_one_per_user(db_session: AsyncSession):
     db_session.add(FlexCredentials(
         user_id=user.id, token_encrypted=b'fake2', ytd_query_id='456'
     ))
-    with pytest.raises(Exception):  # PRIMARY KEY violation
+    with pytest.raises(IntegrityError):
         await db_session.commit()
     await db_session.rollback()
 
@@ -105,3 +107,36 @@ async def test_users_setup_columns_exist(db_session: AsyncSession):
     """))
     cols = {row[0] for row in result.all()}
     assert cols == {'setup_completed_at', 'setup_progress'}
+
+
+@pytest.mark.asyncio
+async def test_participations_valid_range_check_constraint(db_session: AsyncSession):
+    """valid_to must be strictly greater than valid_from when not NULL."""
+    from ibkr_control.db.models.accounts import Account
+    from ibkr_control.db.models.participations import Participation
+    from ibkr_control.auth.models import User
+    from datetime import date
+
+    user = User(
+        email='range@t.com',
+        hashed_password='x',
+        is_active=True,
+        is_superuser=False,
+        is_verified=False,
+        name='RangeTest',
+    )
+    db_session.add(user)
+    acc = Account(ibkr_account_id='U99999003', alias='range-test')
+    db_session.add(acc)
+    await db_session.commit()
+
+    # valid_to BEFORE valid_from -> CHECK should fail
+    db_session.add(Participation(
+        user_id=user.id, account_id=acc.id,
+        pct=Decimal('0.5'),
+        valid_from=date(2026, 1, 1),
+        valid_to=date(2025, 12, 31),  # earlier than valid_from
+    ))
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
+    await db_session.rollback()

@@ -16,7 +16,7 @@ class User(SQLAlchemyBaseUserTable[int], Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     setup_completed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, default=None
+        DateTime(timezone=True), nullable=True
     )
     setup_progress: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
