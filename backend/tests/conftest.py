@@ -104,6 +104,22 @@ async def db_session(postgres_container, monkeypatch):
 
 
 @pytest.fixture
+async def db_engine(postgres_container):
+    """Engine sharing the testcontainer with db_session; used by tests that need to
+    open multiple concurrent sessions (e.g. advisory lock contention).
+
+    Function-scoped (not session-scoped) so it does not outlive per-test DB state.
+    Uses the same postgres_container URL as db_session (asyncpg driver included).
+    """
+    url = postgres_container.get_connection_url()
+    engine = create_async_engine(url, echo=False)
+    try:
+        yield engine
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture
 async def sample_user(db_session: AsyncSession):
     from ibkr_control.auth.models import User
     u = User(email='fixture@t.com', hashed_password='x', is_active=True, name='Fixture User')
