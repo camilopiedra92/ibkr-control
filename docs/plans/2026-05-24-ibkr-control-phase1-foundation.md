@@ -247,7 +247,7 @@ git commit -m "feat(backend): FastAPI skeleton with health endpoint"
 - Create: `backend/.dockerignore`
 - Create: `.env.example`
 
-- [ ] **Step 1: Crear backend/Dockerfile (multi-stage para dev)**
+- [x] **Step 1: Crear backend/Dockerfile (multi-stage para dev)**
 
 `backend/Dockerfile`:
 
@@ -282,7 +282,7 @@ EXPOSE 8000
 CMD ["uv", "run", "uvicorn", "ibkr_control.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
-- [ ] **Step 2: Crear backend/.dockerignore**
+- [x] **Step 2: Crear backend/.dockerignore**
 
 `backend/.dockerignore`:
 
@@ -297,7 +297,7 @@ tests/
 .env.*
 ```
 
-- [ ] **Step 3: Crear .env.example en la raíz**
+- [x] **Step 3: Crear .env.example en la raíz**
 
 `/Users/owner/Development/ibkr-control/.env.example`:
 
@@ -315,7 +315,7 @@ JWT_LIFETIME_SECONDS=3600
 BACKEND_CORS_ORIGINS=http://localhost:3000
 ```
 
-- [ ] **Step 4: Copiar .env.example a .env y editar JWT_SECRET**
+- [x] **Step 4: Copiar .env.example a .env y editar JWT_SECRET**
 
 ```bash
 cd /Users/owner/Development/ibkr-control
@@ -325,7 +325,7 @@ python3 -c "import secrets; print(secrets.token_urlsafe(48))"
 # Reemplazar JWT_SECRET en .env con el valor generado
 ```
 
-- [ ] **Step 5: Crear docker-compose.yml**
+- [x] **Step 5: Crear docker-compose.yml**
 
 `/Users/owner/Development/ibkr-control/docker-compose.yml`:
 
@@ -370,7 +370,7 @@ volumes:
 
 (El servicio `frontend` se agrega en Task 7.)
 
-- [ ] **Step 6: Arrancar el stack y verificar**
+- [x] **Step 6: Arrancar el stack y verificar**
 
 ```bash
 cd /Users/owner/Development/ibkr-control
@@ -381,7 +381,7 @@ curl -s http://localhost:8000/health
 
 Expected: `{"status":"ok"}`.
 
-- [ ] **Step 7: Verificar Postgres está vivo**
+- [x] **Step 7: Verificar Postgres está vivo**
 
 ```bash
 docker compose exec postgres pg_isready -U ibkr
@@ -389,7 +389,7 @@ docker compose exec postgres pg_isready -U ibkr
 
 Expected: `/var/run/postgresql:5432 - accepting connections`.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 docker compose down
