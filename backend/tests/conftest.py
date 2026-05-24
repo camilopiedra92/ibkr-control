@@ -145,12 +145,23 @@ def cassette_dir() -> Path:
     return Path(__file__).parent / "fixtures" / "cassettes"
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def vcr_config():
-    """Config base para VCR. Filtra Authorization header y query params sensibles."""
+    """Config base para VCR. Filtra Authorization header y query params sensibles.
+
+    scope="module" es requerido por pytest-vcr: el fixture vcr interno que
+    consume vcr_config usa scope module, y pytest no permite que un fixture de
+    scope inferior (function) sea consumido por uno de scope superior.
+
+    match_on excluye query params para que las cassettes handwritten (con tokens
+    de prueba) coincidan con cualquier request al mismo path, sin importar el
+    valor del token/query_id en los params. Es seguro porque los cassettes son
+    por-path y los tokens se filtran del header a nivel de record.
+    """
     return {
         "filter_headers": ["Authorization", "X-Api-Key"],
         "filter_query_parameters": ["t", "token", "$$app_token"],
         "decode_compressed_response": True,
         "record_mode": "none",  # CI fails if cassette missing
+        "match_on": ["method", "scheme", "host", "path"],
     }

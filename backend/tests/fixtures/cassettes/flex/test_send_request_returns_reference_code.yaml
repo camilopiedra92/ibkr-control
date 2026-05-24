@@ -1,0 +1,19 @@
+interactions:
+  - request:
+      method: GET
+      uri: https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService.SendRequest
+      headers:
+        Host:
+          - gdcdyn.interactivebrokers.com
+      body: null
+    response:
+      status:
+        code: 200
+        message: OK
+      headers:
+        content-type:
+          - text/xml
+      body:
+        string: "<?xml version=\"1.0\"?>\n<FlexStatementResponse>\n  <Status>Success</Status>\n
+          \ <ReferenceCode>9999999</ReferenceCode>\n  <Url>https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService.GetStatement</Url>\n</FlexStatementResponse>\n"
+version: 1
