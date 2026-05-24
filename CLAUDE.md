@@ -41,6 +41,7 @@ Detalles útiles para evitar re-depurar en fases futuras:
 - **`_lock_key` debe ser determinístico** — la primera implementación generaba la clave con `hash()` de Python, que varía entre procesos (PYTHONHASHSEED). Task 5 lo reemplazó con `zlib.crc32` para garantizar que el advisory lock sea el mismo en worker y cron.
 - **Next.js 16 renombró `middleware.ts` semántica** — el proxy de dev (`/api/*` → backend) se mueve a `src/lib/proxy.ts` o similar porque `middleware.ts` en Next 16 tiene restricciones de Edge Runtime que no permiten `http-proxy`. Task 16 resolvió esto con una API route handler en `app/api/[...path]/route.ts`.
 - **Orval genera POSTs como `useQuery` en algunos casos** — cuando el endpoint tiene `requestBody` pero Orval no puede inferir mutación, genera un hook `useQuery` en vez de `useMutation`. Workaround: usar `useMutation` de TanStack directamente con la función fetch generada por Orval, no el hook auto-generado.
+- **Dividend accruals — addendum post-Phase-2** — el plan original de Phase 2 no incluía `ChangeInDividendAccrual` / `OpenDividendAccrual`. Al comparar con el sibling renta (que SÍ los ingiere), se detectó gap antes del merge. Task 21 agregó Migration E con 2 tablas (`change_in_dividend_accruals`, `open_dividend_accruals`) + parser + persister filtrando rows con `accountId="-"` (matching renta's `_ingest_dividends.py`). En el fixture 2025: 51 rows DETAIL persistidas en change_in + 1 row en open. Fixture 2024 no tiene accruals (Flex Query distinta). 151 tests pass. Tag `v0.2.0-ingest` re-pointed al commit del addendum.
 
 ---
 
