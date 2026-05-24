@@ -1260,7 +1260,7 @@ git commit -m "feat(settings): user_settings table with marginal_rate + timezone
 - Create: `frontend/.dockerignore`
 - Modify: `docker-compose.yml`
 
-- [ ] **Step 1: Verificar pnpm instalado**
+- [x] **Step 1: Verificar pnpm instalado**
 
 ```bash
 pnpm --version
@@ -1272,7 +1272,7 @@ Si falla:
 npm install -g pnpm@latest
 ```
 
-- [ ] **Step 2: Bootstrap Next.js con TypeScript + Tailwind**
+- [x] **Step 2: Bootstrap Next.js con TypeScript + Tailwind**
 
 ```bash
 cd /Users/owner/Development/ibkr-control
@@ -1282,7 +1282,7 @@ pnpm create next-app@latest frontend \
 
 Acepta defaults. Verificar que crea `frontend/` con la estructura esperada.
 
-- [ ] **Step 3: Agregar dependencias adicionales**
+- [x] **Step 3: Agregar dependencias adicionales**
 
 ```bash
 cd /Users/owner/Development/ibkr-control/frontend
@@ -1290,7 +1290,7 @@ pnpm add @tanstack/react-query axios zod react-hook-form @hookform/resolvers
 pnpm add -D @types/node @playwright/test orval
 ```
 
-- [ ] **Step 4: Inicializar shadcn/ui**
+- [x] **Step 4: Inicializar shadcn/ui**
 
 ```bash
 pnpm dlx shadcn@latest init -d
@@ -1304,7 +1304,7 @@ Agregar componentes mínimos:
 pnpm dlx shadcn@latest add button input label form card
 ```
 
-- [ ] **Step 5: Crear home page mínimo (placeholder)**
+- [x] **Step 5: Crear home page mínimo (placeholder)**
 
 `frontend/src/app/page.tsx` (reemplazar lo que generó Next):
 
@@ -1319,7 +1319,7 @@ export default function Home() {
 }
 ```
 
-- [ ] **Step 6: Test de smoke local**
+- [x] **Step 6: Test de smoke local**
 
 ```bash
 cd /Users/owner/Development/ibkr-control/frontend
@@ -1331,7 +1331,7 @@ kill %1
 
 Expected: La línea con `IBKR Control Center` aparece en la salida.
 
-- [ ] **Step 7: Crear frontend/Dockerfile (multi-stage prod build)**
+- [x] **Step 7: Crear frontend/Dockerfile (multi-stage prod build)**
 
 `frontend/Dockerfile`:
 
@@ -1364,7 +1364,7 @@ EXPOSE 3000
 CMD ["node", "server.js"]
 ```
 
-- [ ] **Step 8: Habilitar standalone output en Next.js**
+- [x] **Step 8: Habilitar standalone output en Next.js**
 
 `frontend/next.config.mjs`:
 
@@ -1376,7 +1376,7 @@ const nextConfig = {
 export default nextConfig;
 ```
 
-- [ ] **Step 9: Crear frontend/.dockerignore**
+- [x] **Step 9: Crear frontend/.dockerignore**
 
 `frontend/.dockerignore`:
 
@@ -1391,7 +1391,7 @@ test-results
 playwright-report
 ```
 
-- [ ] **Step 10: Agregar servicio frontend a docker-compose.yml**
+- [x] **Step 10: Agregar servicio frontend a docker-compose.yml**
 
 Editar `docker-compose.yml` para agregar el servicio frontend, justo antes del bloque `volumes`:
 
@@ -1409,7 +1409,7 @@ Editar `docker-compose.yml` para agregar el servicio frontend, justo antes del b
       - backend
 ```
 
-- [ ] **Step 11: Build + start full stack**
+- [x] **Step 11: Build + start full stack**
 
 ```bash
 cd /Users/owner/Development/ibkr-control
@@ -1421,7 +1421,7 @@ curl -s http://localhost:8000/health
 
 Expected: La línea aparece + `{"status":"ok"}`.
 
-- [ ] **Step 12: Down + commit**
+- [x] **Step 12: Down + commit**
 
 ```bash
 docker compose down
