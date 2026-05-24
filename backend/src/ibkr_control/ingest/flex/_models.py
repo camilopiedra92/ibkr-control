@@ -37,6 +37,7 @@ class ParsedClosedLot:
     cost_basis_usd: Decimal
     proceeds_usd: Decimal
     fifo_pnl_usd: Decimal
+    transaction_id: str | None  # Links to Trade via raw XML transactionID; None if not captured
 
 
 @dataclass

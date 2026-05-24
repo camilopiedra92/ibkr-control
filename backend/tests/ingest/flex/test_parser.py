@@ -114,3 +114,23 @@ def test_raw_attrs_preserved():
         # Al menos algún atributo no del schema fijo debe estar en raw_attrs
         first = parsed.trades[0]
         assert isinstance(first.raw_attrs, dict)
+
+
+def test_cash_transactions_drop_summary_rows():
+    """CashTransaction rows with levelOfDetail=SUMMARY are dropped (they duplicate DETAIL)."""
+    xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
+    parsed = parse(xml)
+    for tx in parsed.cash_transactions:
+        assert tx.ibkr_account_id != "-", \
+            f"SUMMARY row leaked into output (accountId='-'): {tx}"
+
+
+def test_closed_lots_capture_transaction_id():
+    """ClosedLot/Lot elements expose transactionID linking to Trade row; parser captures it."""
+    xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
+    parsed = parse(xml)
+    if parsed.closed_lots:
+        # At least some closed lots should have transaction_id populated from real XML
+        with_id = [c for c in parsed.closed_lots if c.transaction_id is not None]
+        assert len(with_id) > 0, \
+            "Expected transaction_id to be populated from real Activity XML Lot elements"

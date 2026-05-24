@@ -245,6 +245,7 @@ def _parse_lot_as_closed_lot(elem) -> ParsedClosedLot | None:
         cost_basis_usd=cost_basis,
         proceeds_usd=proceeds,
         fifo_pnl_usd=fifo_pnl,
+        transaction_id=elem.get("transactionID") or None,
     )
 
 
@@ -278,6 +279,7 @@ def _parse_closed_lots_wrapper(elem) -> list[ParsedClosedLot]:
             cost_basis_usd=cost_basis,
             proceeds_usd=proceeds,
             fifo_pnl_usd=fifo_pnl,
+            transaction_id=lot.get("transactionID") or None,
         ))
     return out
 
@@ -316,6 +318,13 @@ def _parse_open_positions(elem) -> list[ParsedOpenPositionLot]:
 def _parse_cash_transactions(elem) -> list[ParsedCashTransaction]:
     out: list[ParsedCashTransaction] = []
     for tx in elem.iterchildren("CashTransaction"):
+        # IBKR Activity XML emits each CashTransaction twice:
+        # - levelOfDetail="SUMMARY" with accountId="-" (rollup)
+        # - levelOfDetail="DETAIL"  with the real accountId
+        # We only want DETAIL rows. Skipping SUMMARY also avoids FK violations
+        # on persistence (the "-" placeholder doesn't map to any accounts row).
+        if tx.get("levelOfDetail") == "SUMMARY":
+            continue
         tx_date = _parse_date(tx.get("dateTime") or tx.get("settleDate"))
         if tx_date is None:
             continue
