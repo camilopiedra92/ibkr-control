@@ -1,4 +1,7 @@
 from httpx import AsyncClient
+from sqlalchemy import text
+
+from ibkr_control.db.session import get_async_session
 
 # Fixtures (client, app_with_db, postgres_container) viven en tests/conftest.py.
 
@@ -48,3 +51,22 @@ async def test_settings_patch_rejects_out_of_range(client):
 async def test_settings_requires_auth(client):
     response = await client.get("/api/settings")
     assert response.status_code == 401
+
+
+async def test_settings_get_recovers_when_row_missing(client, app_with_db):
+    # Protege la deviation 1: _load es idempotente. Si on_after_register fallara
+    # post-User.commit, el row de UserSettings no existiría. GET debe recrearlo
+    # con defaults DB-side, no 404. Sin este test, refactorizar _load a strict
+    # 404 pasaría silenciosamente (los otros tests no ejercen la rama de None).
+    token = await _register_and_login(client)
+    override = app_with_db.dependency_overrides[get_async_session]
+    async for session in override():
+        await session.execute(text("DELETE FROM user_settings"))
+        await session.commit()
+        break
+
+    response = await client.get("/api/settings", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["marginal_rate"] == "0.3900"
+    assert body["timezone"] == "America/Bogota"

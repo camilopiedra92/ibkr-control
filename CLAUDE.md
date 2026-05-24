@@ -173,6 +173,8 @@ Issues detectados por code reviewers durante Phase 1 que se difirieron para no i
 - **Test de migrations** (`backend/tests/`): agregar `test_migrations_apply_cleanly` que corre `alembic upgrade head` contra container fresh y verifica `Base.metadata` matchea schema reflejado. El plan Phase 1 dice "first migration applies cleanly" — actualmente solo verificado manual con `alembic current`. Aplicar antes de tagear v0.1.0.
 - **Refactor module-level settings capture** (`db/session.py`, `auth/manager.py`, `auth/backend.py`): mover `settings = get_settings()` adentro de funciones/factories. Ver convención nueva arriba. Tarea aislada, ~30 min.
 - **Dockerfile `USER` non-root + remove postgres host-port binding**: difer a Task 14 (Coolify deploy) per recomendación de code reviewer Task 3.
+- **`UserSettingsUpdate.timezone` zoneinfo validator** (`settings/schemas.py`): rechazar timezones inválidos con 422 en vez de persistir basura. Phase 2 APScheduler va a leer este campo para localizar el job de 07:00 — falla silenciosa en boot si es inválido. 4 líneas: `from zoneinfo import available_timezones` + `field_validator` que valida contra el set. Aplicar antes de Task 11 (Settings page).
+- **`UserSettingsUpdate.marginal_rate` `max_digits=5, decimal_places=4`**: actualmente `Numeric(5,4)` redondea silenciosamente `"0.123456"` a `"0.1235"` y el user ve un valor distinto al que escribió. Una línea en el `Field()`.
 
 ## Comandos comunes
 
