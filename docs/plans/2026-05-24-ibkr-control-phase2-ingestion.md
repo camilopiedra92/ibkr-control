@@ -2599,7 +2599,7 @@ git commit -m "feat(phase2): Flex XML parser with audit (rejects unknown TOP-lev
 - Create: `backend/tests/fixtures/cassettes/flex/poll_statement_ready.yaml`
 - Create: `backend/tests/fixtures/cassettes/flex/send_request_invalid_token.yaml`
 
-- [ ] **Step 1: Escribir tests del client (incluye estructura de cassettes a grabar)**
+- [x] **Step 1: Escribir tests del client (incluye estructura de cassettes a grabar)**
 
 Crear `backend/tests/ingest/flex/test_client.py`:
 
@@ -2704,7 +2704,7 @@ async def test_poll_statement_succeeds_after_few_polls(monkeypatch):
         assert route.call_count == 2
 ```
 
-- [ ] **Step 2: Correr tests (deben fallar — sin client)**
+- [x] **Step 2: Correr tests (deben fallar — sin client)**
 
 ```bash
 cd backend && uv run pytest tests/ingest/flex/test_client.py -v
@@ -2712,7 +2712,7 @@ cd backend && uv run pytest tests/ingest/flex/test_client.py -v
 
 Expected: ImportError.
 
-- [ ] **Step 3: Implementar el client**
+- [x] **Step 3: Implementar el client**
 
 Crear `backend/src/ibkr_control/ingest/flex/client.py`:
 
@@ -2850,7 +2850,7 @@ class FlexClient:
         return False
 ```
 
-- [ ] **Step 4: Grabar cassettes (PROCESO MANUAL — requiere credenciales reales)**
+- [x] **Step 4: Grabar cassettes (PROCESO MANUAL — requiere credenciales reales)**
 
 **IMPORTANTE:** Este paso es manual. Si no tenés credenciales reales o querés diferirlo, podés crear cassettes mínimas a mano (ver Step 5 abajo).
 
@@ -2884,7 +2884,7 @@ unset FLEX_TOKEN_REAL FLEX_QUERY_ID_REAL
 rm /tmp/record_cassettes.py
 ```
 
-- [ ] **Step 5: ALTERNATIVA — Crear cassettes mínimas a mano (si no podés grabar reales)**
+- [x] **Step 5: ALTERNATIVA — Crear cassettes mínimas a mano (si no podés grabar reales)**
 
 Crear `backend/tests/fixtures/cassettes/flex/send_request_ok.yaml`:
 
@@ -2952,7 +2952,7 @@ interactions:
 version: 1
 ```
 
-- [ ] **Step 6: Correr todos los tests del client**
+- [x] **Step 6: Correr todos los tests del client**
 
 ```bash
 cd backend && uv run pytest tests/ingest/flex/test_client.py -v
@@ -2960,7 +2960,7 @@ cd backend && uv run pytest tests/ingest/flex/test_client.py -v
 
 Expected: 5/5 PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/src/ibkr_control/ingest/flex/client.py \
