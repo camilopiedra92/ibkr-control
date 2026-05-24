@@ -32,7 +32,7 @@ todo esté en su lugar antes de arrancar con el backend.
 - `/Users/owner/Development/ibkr-control/docs/specs/2026-05-24-ibkr-control-center-design.md`
 - `/Users/owner/Development/ibkr-control/docs/plans/2026-05-24-ibkr-control-phase1-foundation.md` (este archivo)
 
-- [ ] **Step 1: Verificar estructura**
+- [x] **Step 1: Verificar estructura**
 
 ```bash
 ls /Users/owner/Development/ibkr-control/
@@ -43,7 +43,7 @@ ls /Users/owner/Development/ibkr-control/docs/plans/
 Expected: ver `.gitignore`, `README.md`, `CLAUDE.md`, `docs/`. En
 `docs/specs/` el spec; en `docs/plans/` este plan.
 
-- [ ] **Step 2: Inicializar git si no está**
+- [x] **Step 2: Inicializar git si no está**
 
 ```bash
 cd /Users/owner/Development/ibkr-control
@@ -56,7 +56,7 @@ git status
 Expected: branch `main`, archivos untracked
 (`.gitignore`, `README.md`, `CLAUDE.md`, `docs/`).
 
-- [ ] **Step 3: Commit inicial**
+- [x] **Step 3: Commit inicial**
 
 ```bash
 cd /Users/owner/Development/ibkr-control
