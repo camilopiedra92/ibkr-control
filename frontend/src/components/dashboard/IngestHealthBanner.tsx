@@ -42,7 +42,7 @@ export function IngestHealthBanner({ health }: { health: IngestHealthResponse })
       <strong>{label}</strong>
       <p className="text-sm mt-1">
         Verificá el estado en{" "}
-        <Link href="/settings?tab=salud-ingesta" className="underline">
+        <Link href="/settings#salud-ingesta" className="underline">
           Settings &#x2192; Salud de ingesta
         </Link>
         .
