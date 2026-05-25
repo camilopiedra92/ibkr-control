@@ -12,8 +12,8 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 FROM deps AS dev
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-# WATCHPACK_POLLING=true se setea en compose.dev.yaml para que macOS/Docker Desktop
-# detecte file events del bind mount (inotify nativo no se propaga al container).
+# Asume Docker Desktop con VirtioFS (fsevents se propaga al container).
+# Fallback con polling documentado en compose.dev.yaml si tenés gRPC-FUSE.
 EXPOSE 3000
 CMD ["pnpm", "dev"]
 

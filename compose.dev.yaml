@@ -6,10 +6,21 @@
 #   - target: dev en ambos Dockerfiles (incluye dev deps + watchers)
 #   - source bind-montado para hot reload
 #   - backend: uvicorn --reload --reload-dir src
-#   - frontend: next dev con WATCHPACK_POLLING (macOS/Docker Desktop necesita
-#     polling porque inotify nativo no se propaga al container)
+#   - frontend: next dev con HMR nativo
 #   - frontend node_modules + .next como named volumes anónimos para que el
 #     host NO los pise (sino crashea: el host puede no tener pnpm install local)
+#
+# File-system performance en macOS:
+#   Asumimos Docker Desktop ≥4.6 con VirtioFS activo (Settings → General →
+#   "Choose file sharing implementation" → VirtioFS). VirtioFS propaga
+#   fsevents al container nativamente, así que NO necesitamos polling.
+#
+#   Si por alguna razón tenés gRPC-FUSE (legacy) y HMR no detecta cambios,
+#   agregá al servicio frontend:
+#     environment:
+#       WATCHPACK_POLLING: "true"
+#       CHOKIDAR_USEPOLLING: "true"
+#   Polling cuesta ~1-3% CPU constante; preferí activar VirtioFS antes.
 
 services:
   backend:
@@ -34,11 +45,5 @@ services:
       - /app/node_modules
       - /app/.next
     environment:
-      # macOS Docker Desktop file-event propagation es unreliable; polling
-      # garantiza que Next detecte cambios del bind mount. Costo: ~1-3% CPU
-      # extra del container, irrelevante en dev.
-      WATCHPACK_POLLING: "true"
-      CHOKIDAR_USEPOLLING: "true"
-      # Trae el reload de archivos generados por Orval (lib/api/generated.ts)
-      # cuando corras `pnpm openapi:gen` desde el host.
+      # TEMP: polling vars removed for VirtioFS test
       NEXT_PUBLIC_API_URL: http://localhost:8000
