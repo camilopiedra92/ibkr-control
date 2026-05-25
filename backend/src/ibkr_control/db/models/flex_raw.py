@@ -23,7 +23,8 @@ class FlexImport(Base):
     __table_args__ = (
         CheckConstraint("source IN ('web_service', 'manual_upload')", name="ck_flex_imports_source"),
         CheckConstraint("year_status IN ('rolling', 'sealed')", name="ck_flex_imports_year_status"),
-        CheckConstraint("status IN ('ok', 'failed')", name="ck_flex_imports_status"),
+        CheckConstraint("status IN ('ok', 'poison')", name="ck_flex_imports_status"),
+        UniqueConstraint("user_id", "xml_hash", name="flex_imports_user_xml_hash_key"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -31,7 +32,7 @@ class FlexImport(Base):
         BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     anyo: Mapped[int] = mapped_column(Integer, nullable=False)
-    xml_hash: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    xml_hash: Mapped[str] = mapped_column(String, nullable=False)
     xml_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     xml_bytes: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     source: Mapped[str] = mapped_column(String, nullable=False)
@@ -55,7 +56,10 @@ class FlexImport(Base):
     n_new_cash_tx: Mapped[int | None] = mapped_column(Integer, nullable=True)
     n_new_dividends: Mapped[int | None] = mapped_column(Integer, nullable=True)
     n_new_transfers: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    status: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=text("'ok'")
+    )
+    poison_reason: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class Trade(Base):
