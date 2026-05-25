@@ -10,7 +10,7 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger, CheckConstraint, Date, DateTime, ForeignKey, Index,
-    Integer, Numeric, String, text,
+    Integer, LargeBinary, Numeric, String, UniqueConstraint, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -33,6 +33,7 @@ class FlexImport(Base):
     anyo: Mapped[int] = mapped_column(Integer, nullable=False)
     xml_hash: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     xml_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    xml_bytes: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     source: Mapped[str] = mapped_column(String, nullable=False)
     period_covered_from: Mapped[date] = mapped_column(Date, nullable=False)
     period_covered_to: Mapped[date] = mapped_column(Date, nullable=False)
@@ -42,12 +43,18 @@ class FlexImport(Base):
     fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("NOW()")
     )
-    n_trades: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    n_lots_closed: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    n_open_lots: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    n_cash_tx: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    n_dividends: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    n_transfers: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_observed_trades: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_observed_lots_closed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_observed_open_lots: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_observed_cash_tx: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_observed_dividends: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_observed_transfers: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_new_trades: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_new_lots_closed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_new_open_lots: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_new_cash_tx: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_new_dividends: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_new_transfers: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False)
 
 
@@ -63,8 +70,8 @@ class Trade(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    flex_import_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("flex_imports.id", ondelete="CASCADE"), nullable=False
+    flex_import_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )
     transaction_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     account_id: Mapped[int] = mapped_column(
@@ -92,9 +99,10 @@ class ClosedLot(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    flex_import_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("flex_imports.id", ondelete="CASCADE"), nullable=False
+    flex_import_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )
+    transaction_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     account_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("accounts.id"), nullable=False
     )
@@ -114,11 +122,15 @@ class OpenPositionLot(Base):
     __tablename__ = "open_position_lots"
     __table_args__ = (
         Index("open_position_lots_account_symbol_idx", "account_id", "symbol"),
+        UniqueConstraint(
+            "account_id", "symbol", "open_date", "snapshot_date",
+            name="open_position_lots_natural_key",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    flex_import_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("flex_imports.id", ondelete="CASCADE"), nullable=False
+    flex_import_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )
     account_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("accounts.id"), nullable=False
@@ -139,9 +151,10 @@ class Transfer(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    flex_import_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("flex_imports.id", ondelete="CASCADE"), nullable=False
+    flex_import_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )
+    transaction_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     transfer_date: Mapped[date] = mapped_column(Date, nullable=False)
     direction: Mapped[str] = mapped_column(String, nullable=False)
     src_account_id: Mapped[int | None] = mapped_column(
@@ -174,9 +187,10 @@ class CashTransaction(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    flex_import_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("flex_imports.id", ondelete="CASCADE"), nullable=False
+    flex_import_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )
+    transaction_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     account_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("accounts.id"), nullable=False
     )
@@ -195,11 +209,15 @@ class ChangeInDividendAccrual(Base):
     __table_args__ = (
         Index("change_in_dividend_accruals_report_date_idx", "report_date"),
         Index("change_in_dividend_accruals_account_symbol_idx", "account_id", "symbol"),
+        UniqueConstraint(
+            "account_id", "conid", "ex_date", "pay_date", "accrual_date",
+            name="change_in_dividend_accruals_natural_key",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    flex_import_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("flex_imports.id", ondelete="CASCADE"), nullable=False
+    flex_import_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )
     account_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("accounts.id"), nullable=False
@@ -235,11 +253,15 @@ class OpenDividendAccrual(Base):
     __table_args__ = (
         Index("open_dividend_accruals_report_date_idx", "report_date"),
         Index("open_dividend_accruals_account_symbol_idx", "account_id", "symbol"),
+        UniqueConstraint(
+            "account_id", "conid", "ex_date", "pay_date", "report_date",
+            name="open_dividend_accruals_natural_key",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    flex_import_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("flex_imports.id", ondelete="CASCADE"), nullable=False
+    flex_import_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )
     account_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("accounts.id"), nullable=False
