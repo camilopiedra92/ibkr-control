@@ -262,6 +262,124 @@ async def test_run_happy_path_with_mocked_flex_client(
 
 
 @pytest.mark.asyncio
+async def test_run_idempotent_across_different_xmls_with_overlapping_trades(
+    monkeypatch, db_session: AsyncSession, db_engine, sample_user
+):
+    """Regression test para D13 [BUG-FIXED] (2026-05-25).
+
+    Pre Phase 2.5: el cron Flex fallaba al segundo run con
+    UniqueViolationError porque el persister dedupea solo a nivel xml_hash y
+    los XMLs YTD cambian byte-a-byte cada dia. Cada hash nuevo intentaba
+    re-INSERT de todos los trades del año -> choque con UNIQUE(transaction_id).
+
+    Post Phase 2.5: el persister es idempotent fila por fila via UPSERT por
+    natural key. Dos runs con XMLs distintos (hashes distintos) pero trades
+    overlapping deben ambos terminar OK, sin duplicados en DB.
+    """
+    import base64
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from ibkr_control.db.models.flex_credentials import FlexCredentials
+    from ibkr_control.db.models.flex_raw import FlexImport, Trade
+    from ibkr_control.db.models.ingest_log import IngestLog
+    from ibkr_control.ingest.flex import client as client_mod
+    from ibkr_control.ingest.flex import crypto as crypto_mod
+    from ibkr_control.ingest.flex import job as flex_job_mod
+
+    test_key = base64.b64encode(b"D" * 32).decode("ascii")
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", test_key)
+
+    encrypted = crypto_mod.encrypt_token("test-token-d13")
+    db_session.add(FlexCredentials(
+        user_id=sample_user.id,
+        token_encrypted=encrypted,
+        ytd_query_id="QUERY-D13",
+    ))
+    await db_session.commit()
+
+    # Use the real 2025 sanitized fixture (has trades + accruals + transfers
+    # — exercises the full persister surface that originally crashed).
+    xml_day1 = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
+    # Day 2: simulate IBKR re-emitting the same year with timestamp drift.
+    # Trailing whitespace changes the bytes (different hash) without
+    # affecting parsed content — exactly what happens day-over-day in YTD.
+    xml_day2 = xml_day1 + b"\n<!-- regenerated -->\n"
+
+    call_count = {"n": 0}
+
+    async def fake_send_request(self, query_id):
+        return f"REF-D13-{call_count['n']}"
+
+    async def fake_poll_statement(self, reference_code, max_wait_seconds=300):
+        call_count["n"] += 1
+        return xml_day1 if call_count["n"] == 1 else xml_day2
+
+    monkeypatch.setattr(client_mod.FlexClient, "send_request", fake_send_request)
+    monkeypatch.setattr(client_mod.FlexClient, "poll_statement", fake_poll_statement)
+
+    SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
+
+    # First run: fresh insert, must succeed
+    fi_id_1 = await flex_job_mod.run(SessionLocal, user_id=sample_user.id, trigger="cron")
+    assert fi_id_1 is not None
+
+    # Second run with a DIFFERENT XML (different hash) but overlapping trades.
+    # Pre-D13-fix this would crash with UniqueViolationError on trades_transaction_id_key.
+    # Post-fix it must succeed and return a new flex_import_id (new XML = new row),
+    # but children get DO NOTHING / DO UPDATE per entity type.
+    fi_id_2 = await flex_job_mod.run(SessionLocal, user_id=sample_user.id, trigger="cron")
+    assert fi_id_2 is not None
+    assert fi_id_2 != fi_id_1, "Different XML bytes should create a new FlexImport"
+
+    async with SessionLocal() as s2:
+        # Both runs logged as ok in ingest_log
+        n_ok = await s2.scalar(
+            select(func.count(IngestLog.id)).where(
+                IngestLog.job_kind == "flex",
+                IngestLog.user_id == sample_user.id,
+                IngestLog.status == "ok",
+                IngestLog.trigger == "cron",
+            )
+        )
+        assert n_ok == 2, "Both cron runs should be marked ok in ingest_log"
+
+        # ZERO failed logs (the original bug surfaced as failed rows)
+        n_failed = await s2.scalar(
+            select(func.count(IngestLog.id)).where(
+                IngestLog.job_kind == "flex",
+                IngestLog.user_id == sample_user.id,
+                IngestLog.status == "failed",
+            )
+        )
+        assert n_failed == 0, "No failed runs expected post-D13-fix"
+
+        # 2 flex_imports rows (one per distinct hash)
+        n_fi = await s2.scalar(
+            select(func.count(FlexImport.id)).where(
+                FlexImport.user_id == sample_user.id
+            )
+        )
+        assert n_fi == 2
+
+        # Trades: ALL trades from the fixture, NOT duplicated across the 2 runs.
+        # Count by distinct transaction_id should equal total count.
+        n_trades = await s2.scalar(select(func.count(Trade.id)))
+        n_distinct_tx = await s2.scalar(
+            select(func.count(func.distinct(Trade.transaction_id)))
+        )
+        assert n_trades == n_distinct_tx, (
+            f"trades duplicated across runs: {n_trades} rows but {n_distinct_tx} "
+            f"distinct transaction_ids — exactly the D13 bug if these differ"
+        )
+
+        # The second flex_import should report n_new_trades == 0 (all trades
+        # were already in DB from the first run).
+        fi_2 = await s2.get(FlexImport, fi_id_2)
+        assert fi_2.n_new_trades == 0, (
+            f"Second run should have inserted 0 new trades; got {fi_2.n_new_trades}"
+        )
+
+
+@pytest.mark.asyncio
 async def test_run_returns_none_if_hash_already_known(
     monkeypatch, db_session: AsyncSession, db_engine, sample_user
 ):
