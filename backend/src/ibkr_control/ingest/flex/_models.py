@@ -8,6 +8,9 @@ from decimal import Decimal
 class ParsedAccount:
     ibkr_account_id: str
     currency: str
+    account_alias: str | None = None
+    account_type: str | None = None
+    name: str | None = None
 
 
 @dataclass

@@ -169,6 +169,9 @@ def _parse_account_information(elem, accounts: list[ParsedAccount]) -> None:
     accounts.append(ParsedAccount(
         ibkr_account_id=elem.get("accountId", ""),
         currency=elem.get("currency") or "USD",
+        account_alias=elem.get("accountAlias") or None,
+        account_type=elem.get("accountType") or None,
+        name=elem.get("name") or None,
     ))
 
 
