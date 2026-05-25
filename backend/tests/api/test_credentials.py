@@ -36,8 +36,8 @@ async def test_put_credentials_validates_token_with_ibkr(client: AsyncClient, mo
     token = await _register_and_login(client)
     headers = {"Authorization": f"Bearer {token}"}
 
-    with respx.mock(base_url="https://gdcdyn.interactivebrokers.com") as mock_router:
-        mock_router.get("/Universal/servlet/FlexStatementService.SendRequest").mock(
+    with respx.mock(base_url="https://ndcdyn.interactivebrokers.com") as mock_router:
+        mock_router.get("/AccountManagement/FlexWebService/SendRequest").mock(
             return_value=Response(
                 200,
                 content=b"""<?xml version="1.0"?>
@@ -67,8 +67,8 @@ async def test_put_credentials_rejects_invalid_token(client: AsyncClient, monkey
     token = await _register_and_login(client)
     headers = {"Authorization": f"Bearer {token}"}
 
-    with respx.mock(base_url="https://gdcdyn.interactivebrokers.com") as mock_router:
-        mock_router.get("/Universal/servlet/FlexStatementService.SendRequest").mock(
+    with respx.mock(base_url="https://ndcdyn.interactivebrokers.com") as mock_router:
+        mock_router.get("/AccountManagement/FlexWebService/SendRequest").mock(
             return_value=Response(
                 200,
                 content=b"""<?xml version="1.0"?>
@@ -121,8 +121,8 @@ async def test_get_credentials_returns_metadata_without_token_plaintext(
 <FlexStatementResponse><Status>Success</Status><ReferenceCode>42</ReferenceCode></FlexStatementResponse>"""
 
     # PUT credentials first so there is something to GET
-    with respx.mock(base_url="https://gdcdyn.interactivebrokers.com") as mock_router:
-        mock_router.get("/Universal/servlet/FlexStatementService.SendRequest").mock(
+    with respx.mock(base_url="https://ndcdyn.interactivebrokers.com") as mock_router:
+        mock_router.get("/AccountManagement/FlexWebService/SendRequest").mock(
             return_value=Response(200, content=success_xml)
         )
         await client.put(
@@ -155,8 +155,8 @@ async def test_put_credentials_query_id_only_updates_without_ibkr_ping(
 <FlexStatementResponse><Status>Success</Status><ReferenceCode>11</ReferenceCode></FlexStatementResponse>"""
 
     # Create initial credentials with token
-    with respx.mock(base_url="https://gdcdyn.interactivebrokers.com") as mock_router:
-        mock_router.get("/Universal/servlet/FlexStatementService.SendRequest").mock(
+    with respx.mock(base_url="https://ndcdyn.interactivebrokers.com") as mock_router:
+        mock_router.get("/AccountManagement/FlexWebService/SendRequest").mock(
             return_value=Response(200, content=success_xml)
         )
         await client.put(
@@ -171,7 +171,7 @@ async def test_put_credentials_query_id_only_updates_without_ibkr_ping(
     ibkr_was_pinged = []
     with respx.mock(assert_all_called=False) as mock_router:
         mock_router.get(
-            "https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService.SendRequest"
+            "https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService/SendRequest"
         ).mock(side_effect=lambda req: ibkr_was_pinged.append(True) or Response(200, content=b""))
         resp = await client.put(
             "/api/credentials/flex",
@@ -196,8 +196,8 @@ async def test_put_credentials_ibkr_unreachable_returns_502(
     token = await _register_and_login_unique(client, "ibkrtimeout@test.com")
     headers = {"Authorization": f"Bearer {token}"}
 
-    with respx.mock(base_url="https://gdcdyn.interactivebrokers.com") as mock_router:
-        mock_router.get("/Universal/servlet/FlexStatementService.SendRequest").mock(
+    with respx.mock(base_url="https://ndcdyn.interactivebrokers.com") as mock_router:
+        mock_router.get("/AccountManagement/FlexWebService/SendRequest").mock(
             side_effect=httpx.ConnectTimeout("connection timed out")
         )
         resp = await client.put(
@@ -258,8 +258,8 @@ async def test_put_credentials_updates_existing_credentials_token(
 <FlexStatementResponse><Status>Success</Status><ReferenceCode>77</ReferenceCode></FlexStatementResponse>"""
 
     # Create initial credentials
-    with respx.mock(base_url="https://gdcdyn.interactivebrokers.com") as mock_router:
-        mock_router.get("/Universal/servlet/FlexStatementService.SendRequest").mock(
+    with respx.mock(base_url="https://ndcdyn.interactivebrokers.com") as mock_router:
+        mock_router.get("/AccountManagement/FlexWebService/SendRequest").mock(
             return_value=Response(200, content=success_xml)
         )
         r1 = await client.put(
@@ -270,8 +270,8 @@ async def test_put_credentials_updates_existing_credentials_token(
     assert r1.status_code == 200
 
     # Rotate with new token
-    with respx.mock(base_url="https://gdcdyn.interactivebrokers.com") as mock_router:
-        mock_router.get("/Universal/servlet/FlexStatementService.SendRequest").mock(
+    with respx.mock(base_url="https://ndcdyn.interactivebrokers.com") as mock_router:
+        mock_router.get("/AccountManagement/FlexWebService/SendRequest").mock(
             return_value=Response(200, content=success_xml)
         )
         r2 = await client.put(

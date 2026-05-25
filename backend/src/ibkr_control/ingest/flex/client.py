@@ -6,9 +6,11 @@ Flujo:
      IBKR responda con el XML completo, o lanza FlexPollTimeoutError a los
      max_wait_seconds (default 300 s = 5 min).
 
-URLs production:
-  https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService.SendRequest
-  https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService.GetStatement
+URLs production (Flex Web Service V3 — host ndcdyn + AccountManagement path):
+  https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService/SendRequest
+  https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService/GetStatement
+All requests carry a User-Agent header (V3 spec requires it; absent UA can
+trigger throttling).
 
 Notas sobre _is_pending:
   - Si el body NO empieza con <?xml, se asume que es directamente el XML del
@@ -28,9 +30,13 @@ import httpx
 from lxml import etree
 
 
-SEND_REQUEST_PATH: Final = "/Universal/servlet/FlexStatementService.SendRequest"
-GET_STATEMENT_PATH: Final = "/Universal/servlet/FlexStatementService.GetStatement"
-DEFAULT_BASE_URL: Final = "https://gdcdyn.interactivebrokers.com"
+SEND_REQUEST_PATH: Final = "/AccountManagement/FlexWebService/SendRequest"
+GET_STATEMENT_PATH: Final = "/AccountManagement/FlexWebService/GetStatement"
+DEFAULT_BASE_URL: Final = "https://ndcdyn.interactivebrokers.com"
+
+# V3 spec mandates a User-Agent header on every request. httpx's default
+# (`python-httpx/x.y.z`) is treated as a bot by IBKR and rate-limited.
+_USER_AGENT: Final = "ibkr-control/0.2 (+https://github.com/owner)"
 
 # Codigos de error documentados por IBKR Flex WS
 ERR_INVALID_TOKEN: Final = "1018"
@@ -142,7 +148,9 @@ class FlexClient:
         url = f"{self._base_url}{SEND_REQUEST_PATH}"
         params = {"v": "3", "t": self._token, "q": query_id}
 
-        async with httpx.AsyncClient(timeout=self._timeout) as http:
+        async with httpx.AsyncClient(
+            timeout=self._timeout, headers={"User-Agent": _USER_AGENT}
+        ) as http:
             resp = await http.get(url, params=params)
             resp.raise_for_status()
 
@@ -172,7 +180,9 @@ class FlexClient:
         backoff = _BACKOFF_INITIAL
         elapsed = 0
 
-        async with httpx.AsyncClient(timeout=self._timeout) as http:
+        async with httpx.AsyncClient(
+            timeout=self._timeout, headers={"User-Agent": _USER_AGENT}
+        ) as http:
             while elapsed < max_wait_seconds:
                 resp = await http.get(url, params=params)
                 resp.raise_for_status()

@@ -1,10 +1,10 @@
 interactions:
   - request:
       method: GET
-      uri: https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService.GetStatement
+      uri: https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService/GetStatement
       headers:
         Host:
-          - gdcdyn.interactivebrokers.com
+          - ndcdyn.interactivebrokers.com
       body: null
     response:
       status:

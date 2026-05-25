@@ -22,7 +22,7 @@ from ibkr_control.ingest.flex.client import (
 @pytest.mark.asyncio
 async def test_send_request_returns_reference_code():
     """Happy path via cassette: SendRequest devuelve reference_code numerico."""
-    client = FlexClient(token="fake-token", base_url="https://gdcdyn.interactivebrokers.com")
+    client = FlexClient(token="fake-token", base_url="https://ndcdyn.interactivebrokers.com")
     ref = await client.send_request(query_id="1234567")
     assert ref
     assert ref.isdigit()
@@ -32,7 +32,7 @@ async def test_send_request_returns_reference_code():
 @pytest.mark.asyncio
 async def test_poll_statement_returns_xml_bytes():
     """Cassette donde el reference ya esta READY — devuelve bytes XML."""
-    client = FlexClient(token="fake-token", base_url="https://gdcdyn.interactivebrokers.com")
+    client = FlexClient(token="fake-token", base_url="https://ndcdyn.interactivebrokers.com")
     xml = await client.poll_statement(reference_code="9999999")
     assert xml.startswith(b"<?xml") or xml.startswith(b"<FlexQueryResponse")
 
@@ -41,7 +41,7 @@ async def test_poll_statement_returns_xml_bytes():
 async def test_send_request_with_invalid_token_raises_auth_error(respx_mock):
     """Token invalido (ErrorCode 1018) → FlexAuthError."""
     respx_mock.get(
-        "https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService.SendRequest"
+        "https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService/SendRequest"
     ).mock(
         return_value=Response(
             200,
@@ -53,7 +53,7 @@ async def test_send_request_with_invalid_token_raises_auth_error(respx_mock):
 </FlexStatementResponse>""",
         )
     )
-    client = FlexClient(token="bad", base_url="https://gdcdyn.interactivebrokers.com")
+    client = FlexClient(token="bad", base_url="https://ndcdyn.interactivebrokers.com")
     with pytest.raises(FlexAuthError):
         await client.send_request(query_id="1234567")
 
@@ -79,11 +79,11 @@ async def test_poll_statement_times_out_after_5min(monkeypatch):
         b"</FlexStatementResponse>"
     )
 
-    with respx.mock(base_url="https://gdcdyn.interactivebrokers.com") as mock_router:
-        mock_router.get("/Universal/servlet/FlexStatementService.GetStatement").mock(
+    with respx.mock(base_url="https://ndcdyn.interactivebrokers.com") as mock_router:
+        mock_router.get("/AccountManagement/FlexWebService/GetStatement").mock(
             return_value=Response(200, content=pending_body)
         )
-        client = FlexClient(token="x", base_url="https://gdcdyn.interactivebrokers.com")
+        client = FlexClient(token="x", base_url="https://ndcdyn.interactivebrokers.com")
         with pytest.raises(FlexPollTimeoutError):
             await client.poll_statement(reference_code="9999", max_wait_seconds=300)
 
@@ -115,14 +115,14 @@ async def test_poll_statement_succeeds_after_few_polls(monkeypatch):
         b"</FlexQueryResponse>"
     )
 
-    with respx.mock(base_url="https://gdcdyn.interactivebrokers.com") as mock_router:
-        route = mock_router.get("/Universal/servlet/FlexStatementService.GetStatement").mock(
+    with respx.mock(base_url="https://ndcdyn.interactivebrokers.com") as mock_router:
+        route = mock_router.get("/AccountManagement/FlexWebService/GetStatement").mock(
             side_effect=[
                 Response(200, content=pending_body),
                 Response(200, content=ready_body),
             ]
         )
-        client = FlexClient(token="x", base_url="https://gdcdyn.interactivebrokers.com")
+        client = FlexClient(token="x", base_url="https://ndcdyn.interactivebrokers.com")
         xml = await client.poll_statement(reference_code="9999")
         assert b"FlexQueryResponse" in xml
         assert route.call_count == 2
