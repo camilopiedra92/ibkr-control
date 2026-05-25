@@ -90,23 +90,37 @@ async def _run_manual(kind: str, user_id: int, job_id: int) -> None:
     session_local = async_sessionmaker(engine, expire_on_commit=False)
     tracker = get_tracker()
 
+    # Tracks the substep that is currently running so a crash mid-substep
+    # surfaces with status="failed" on the right row in the UI.
+    current_step: str | None = None
     try:
         if kind in ("trm", "both"):
-            tracker.emit(job_id, {"step": "trm", "status": "running"})
+            current_step = "trm_backfill"
+            tracker.emit(job_id, {"step": current_step, "status": "running"})
             r = await trm_job_mod.run(session_local, trigger="manual")
-            tracker.emit(job_id, {"step": "trm", "status": "ok", "n_days": r["n_days"]})
+            tracker.emit(
+                job_id,
+                {"step": current_step, "status": "ok", "n_days": r["n_days"]},
+            )
 
         if kind in ("flex", "both"):
-            tracker.emit(job_id, {"step": "flex", "status": "running"})
+            current_step = "flex_ytd"
+            tracker.emit(job_id, {"step": current_step, "status": "running"})
             await flex_job_mod.run(session_local, user_id=user_id, trigger="manual")
-            tracker.emit(job_id, {"step": "flex", "status": "ok"})
+            tracker.emit(job_id, {"step": current_step, "status": "ok"})
 
+        current_step = None
         tracker.emit(job_id, {"step": "done"})
     except Exception as e:
         # Must stay broad: this is the SSE background task catch-all. Any
         # unhandled exception (network, parse, DB, lock) must surface to the
         # client via the tracker event so the UI can display the error message.
-        tracker.emit(job_id, {"step": "error", "error": str(e)[:500]})
+        # When the crash happened inside a substep we tag the failure with that
+        # substep so the frontend (ManualRefreshButton) can red-flag the right
+        # row; otherwise we fall back to a synthetic "error" step.
+        payload: dict = {"status": "failed", "error": str(e)[:500]}
+        payload["step"] = current_step if current_step is not None else "error"
+        tracker.emit(job_id, payload)
     finally:
         tracker.mark_done(job_id)
 

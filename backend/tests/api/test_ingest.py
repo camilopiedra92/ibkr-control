@@ -65,6 +65,66 @@ async def test_stream_emits_done_event(client: AsyncClient, auth_headers: dict):
     assert "done" in body
 
 
+async def test_run_manual_emits_substep_keys_matching_frontend(monkeypatch):
+    """Contract lock with ManualRefreshButton.tsx: step must be 'trm_backfill' /
+    'flex_ytd' (not the bare 'trm'/'flex'), and ok payloads carry n_days so the
+    UI can render '7 dias'.
+    """
+    from ibkr_control.api import ingest as ingest_mod
+    from ibkr_control.ingest.job_tracker import get_tracker
+
+    async def fake_trm_run(*_a, **_kw):
+        return {"status": "ok", "n_rows_api": 1, "n_days": 7}
+
+    async def fake_flex_run(*_a, **_kw):
+        return None
+
+    monkeypatch.setattr("ibkr_control.ingest.trm.job.run", fake_trm_run)
+    monkeypatch.setattr("ibkr_control.ingest.flex.job.run", fake_flex_run)
+    monkeypatch.setattr(ingest_mod, "get_engine", lambda: object())
+
+    tracker = get_tracker()
+    job_id = tracker.create_job()
+    await ingest_mod._run_manual(kind="both", user_id=1, job_id=job_id)
+
+    events = [e.payload for e in tracker.events_since(job_id, after_id=-1)]
+    assert [(e["step"], e.get("status")) for e in events] == [
+        ("trm_backfill", "running"),
+        ("trm_backfill", "ok"),
+        ("flex_ytd", "running"),
+        ("flex_ytd", "ok"),
+        ("done", None),
+    ]
+    trm_ok = next(
+        e for e in events if e["step"] == "trm_backfill" and e.get("status") == "ok"
+    )
+    assert trm_ok["n_days"] == 7
+
+
+async def test_run_manual_marks_failing_substep_as_failed(monkeypatch):
+    """When a substep raises, the tracker event must carry status='failed' AND
+    keep step='<substep>' so the UI can red-flag the right row. The previous
+    contract emitted step='error' which the frontend silently dropped.
+    """
+    from ibkr_control.api import ingest as ingest_mod
+    from ibkr_control.ingest.job_tracker import get_tracker
+
+    async def fake_trm_run(*_a, **_kw):
+        raise RuntimeError("boom from socrata")
+
+    monkeypatch.setattr("ibkr_control.ingest.trm.job.run", fake_trm_run)
+    monkeypatch.setattr(ingest_mod, "get_engine", lambda: object())
+
+    tracker = get_tracker()
+    job_id = tracker.create_job()
+    await ingest_mod._run_manual(kind="trm", user_id=1, job_id=job_id)
+
+    events = [e.payload for e in tracker.events_since(job_id, after_id=-1)]
+    failed = next(e for e in events if e.get("status") == "failed")
+    assert failed["step"] == "trm_backfill"
+    assert "boom" in failed["error"]
+
+
 async def test_trigger_persists_timestamp_in_user_row(
     client: AsyncClient, auth_headers: dict, monkeypatch
 ):
