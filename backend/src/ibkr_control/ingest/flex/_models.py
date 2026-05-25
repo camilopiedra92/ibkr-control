@@ -57,6 +57,7 @@ class ParsedOpenPositionLot:
 
 @dataclass
 class ParsedCashTransaction:
+    transaction_id: str
     ibkr_account_id: str
     type: str
     currency: str
@@ -68,6 +69,7 @@ class ParsedCashTransaction:
 
 @dataclass
 class ParsedTransfer:
+    transaction_id: str
     transfer_date: date
     direction: str
     src_ibkr_account_id: str | None

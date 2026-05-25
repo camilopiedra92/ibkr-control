@@ -352,6 +352,7 @@ def _parse_cash_transactions(elem) -> list[ParsedCashTransaction]:
         if tx_date is None:
             continue
         out.append(ParsedCashTransaction(
+            transaction_id=tx.get("transactionID") or "",
             ibkr_account_id=tx.get("accountId") or "",
             type=tx.get("type") or "",
             currency=tx.get("currency") or "USD",
@@ -493,6 +494,7 @@ def _parse_transfers(elem) -> list[ParsedTransfer]:
             dst = peer_account
 
         transfer = ParsedTransfer(
+            transaction_id=tr.get("transactionID") or "",
             transfer_date=transfer_date,
             direction=direction,
             src_ibkr_account_id=src,

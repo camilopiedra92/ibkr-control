@@ -208,3 +208,51 @@ def test_parse_account_info_handles_missing_optional_attrs():
     assert ai.account_alias is None
     assert ai.account_type is None
     assert ai.name is None
+
+
+def test_parse_cash_transaction_captures_transaction_id():
+    """Parser must extract transactionID attribute from <CashTransaction> elements
+    so the persister can UPSERT by natural key without spurious duplicates."""
+    from ibkr_control.ingest.flex.parser import parse
+    xml = b"""<?xml version="1.0" encoding="UTF-8"?>
+<FlexQueryResponse>
+  <FlexStatements>
+    <FlexStatement accountId="U99999001" period="20250101-20251231"
+                   fromDate="20250101" toDate="20251231">
+      <AccountInformation accountId="U99999001" currency="USD"/>
+      <CashTransactions>
+        <CashTransaction accountId="U99999001" type="Dividends"
+                         currency="USD" amount="100.00"
+                         description="AAPL DIV"
+                         dateTime="20250215;120000"
+                         transactionID="TXN-CASH-42"
+                         levelOfDetail="DETAIL"/>
+      </CashTransactions>
+    </FlexStatement>
+  </FlexStatements>
+</FlexQueryResponse>"""
+    parsed = parse(xml)
+    assert len(parsed.cash_transactions) == 1
+    assert parsed.cash_transactions[0].transaction_id == "TXN-CASH-42"
+
+
+def test_parse_transfer_captures_transaction_id():
+    """Parser must extract transactionID attribute from <Transfer> elements."""
+    from ibkr_control.ingest.flex.parser import parse
+    xml = b"""<?xml version="1.0" encoding="UTF-8"?>
+<FlexQueryResponse>
+  <FlexStatements>
+    <FlexStatement accountId="U99999001" period="20250101-20251231"
+                   fromDate="20250101" toDate="20251231">
+      <AccountInformation accountId="U99999001" currency="USD"/>
+      <Transfers>
+        <Transfer accountId="U99999001" date="20250301"
+                  direction="IN" symbol="MSFT" quantity="100"
+                  type="ACATS" transactionID="TXN-XFER-99"/>
+      </Transfers>
+    </FlexStatement>
+  </FlexStatements>
+</FlexQueryResponse>"""
+    parsed = parse(xml)
+    assert len(parsed.transfers) == 1
+    assert parsed.transfers[0].transaction_id == "TXN-XFER-99"

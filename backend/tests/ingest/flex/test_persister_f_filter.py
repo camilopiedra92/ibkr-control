@@ -50,6 +50,7 @@ def _make_trade(account_id: str, txn_suffix: str) -> ParsedTrade:
 
 def _make_cash_tx(account_id: str, amount: str, description: str) -> ParsedCashTransaction:
     return ParsedCashTransaction(
+        transaction_id="TXN-CASH-test-001",
         ibkr_account_id=account_id,
         type="Commissions",
         currency="USD",
