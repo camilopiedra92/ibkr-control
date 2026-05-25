@@ -456,7 +456,7 @@ from unittest.mock import AsyncMock
 
 @pytest.mark.asyncio
 async def test_run_logs_info_on_ok_hash_skip(
-    monkeypatch, caplog, db_session, sample_user,
+    monkeypatch, caplog, db_session, db_engine, sample_user,
 ):
     """run() encuentra hash con status='ok' -> skip + info log."""
     from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -490,8 +490,7 @@ async def test_run_logs_info_on_ok_hash_skip(
     ))
     await db_session.commit()
 
-    engine = db_session.bind
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
 
     from ibkr_control.ingest.flex import client as client_mod
     monkeypatch.setattr(
@@ -510,7 +509,7 @@ async def test_run_logs_info_on_ok_hash_skip(
 
 @pytest.mark.asyncio
 async def test_run_logs_warning_on_poison_hash_skip(
-    monkeypatch, caplog, db_session, sample_user,
+    monkeypatch, caplog, db_session, db_engine, sample_user,
 ):
     """run() encuentra hash con status='poison' -> skip + warning log con recovery hint."""
     from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -544,8 +543,7 @@ async def test_run_logs_warning_on_poison_hash_skip(
     ))
     await db_session.commit()
 
-    engine = db_session.bind
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
 
     monkeypatch.setattr(
         client_mod.FlexClient, "send_request", AsyncMock(return_value="ref-poison")
