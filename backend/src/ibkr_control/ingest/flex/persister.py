@@ -242,6 +242,7 @@ async def _upsert_all_children(
             "symbol": cl.symbol,
             "open_date": cl.open_date,
             "close_date": cl.close_date,
+            "close_datetime": cl.close_datetime,
             "qty": cl.qty,
             "cost_basis_usd": cl.cost_basis_usd,
             "proceeds_usd": cl.proceeds_usd,
@@ -253,8 +254,14 @@ async def _upsert_all_children(
         for i, cl in enumerate(parsed.closed_lots)
         if not _is_shadow_account(cl.ibkr_account_id)
     ]
+    # A3 amendment #3: natural key includes close_datetime + qty + fifo_pnl_usd
+    # to preserve IBKR's multiple <Lot> rows sharing the same transactionID:
+    # - Multi-execution closes against the same open_lot at different times
+    # - Same close timestamp + qty but different realized PnL (wash-sale or
+    #   accounting adjustments — seen on IBIT 2024-10-02 in fixture 2024).
     n_new_closed = await _upsert_immutable(
-        session, ClosedLot.__table__, closed_rows, ["transaction_id"]
+        session, ClosedLot.__table__, closed_rows,
+        ["transaction_id", "close_datetime", "qty", "fifo_pnl_usd"],
     )
 
     # === CashTransactions (immutable) ===

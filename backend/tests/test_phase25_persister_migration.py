@@ -149,9 +149,15 @@ async def test_phase25_rev2_promotes_transaction_id_not_null(alembic_db_session)
 
 @pytest.mark.asyncio
 async def test_phase25_rev2_adds_unique_constraints(alembic_db_session):
-    """All 6 UNIQUE constraints from spec A3 + transaction_id must exist."""
+    """All 6 UNIQUE constraints from spec A3 + transaction_id must exist.
+
+    NOTE: closed_lots_transaction_id_key (single-column UNIQUE created in
+    Rev2) is dropped by Rev5 (A3 amendment #3) and replaced with the
+    composite closed_lots_natural_key in Rev6 — verified by
+    test_phase25_rev6_closed_lots_natural_key_has_close_datetime below.
+    """
     expected_constraints = {
-        'closed_lots_transaction_id_key',
+        'closed_lots_natural_key',
         'cash_transactions_transaction_id_key',
         'transfers_transaction_id_key',
         'open_position_lots_natural_key',
@@ -163,6 +169,31 @@ async def test_phase25_rev2_adds_unique_constraints(alembic_db_session):
     ).bindparams(names=list(expected_constraints)))
     found = {row[0] for row in result.all()}
     assert found == expected_constraints, f"Missing: {expected_constraints - found}"
+
+
+@pytest.mark.asyncio
+async def test_phase25_rev6_closed_lots_natural_key_has_close_datetime(alembic_db_session):
+    """Verify the natural key includes close_datetime + qty + fifo_pnl_usd per A3 #3."""
+    result = await alembic_db_session.execute(text("""
+        SELECT a.attname FROM pg_attribute a
+        JOIN pg_constraint c ON a.attnum = ANY(c.conkey)
+        WHERE c.conname = 'closed_lots_natural_key'
+          AND a.attrelid = c.conrelid
+        ORDER BY array_position(c.conkey, a.attnum)
+    """))
+    cols = [row[0] for row in result.all()]
+    assert cols == ['transaction_id', 'close_datetime', 'qty', 'fifo_pnl_usd']
+
+
+@pytest.mark.asyncio
+async def test_phase25_rev6_close_datetime_not_null(alembic_db_session):
+    result = await alembic_db_session.execute(text(
+        "SELECT is_nullable FROM information_schema.columns "
+        "WHERE table_name = 'closed_lots' AND column_name = 'close_datetime'"
+    ))
+    row = result.first()
+    assert row is not None
+    assert row[0] == 'NO'
 
 
 @pytest.mark.asyncio

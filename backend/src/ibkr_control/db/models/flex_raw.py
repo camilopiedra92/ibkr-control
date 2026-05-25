@@ -96,19 +96,27 @@ class ClosedLot(Base):
     __tablename__ = "closed_lots"
     __table_args__ = (
         Index("closed_lots_account_symbol_idx", "account_id", "symbol"),
+        UniqueConstraint(
+            "transaction_id", "close_datetime", "qty", "fifo_pnl_usd",
+            name="closed_lots_natural_key",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     flex_import_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )
-    transaction_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    transaction_id: Mapped[str] = mapped_column(String, nullable=False)
     account_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("accounts.id"), nullable=False
     )
     symbol: Mapped[str] = mapped_column(String, nullable=False)
     open_date: Mapped[date] = mapped_column(Date, nullable=False)
     close_date: Mapped[date] = mapped_column(Date, nullable=False)
+    # A3 amendment #3: per-execution timestamp discriminator (multiple <Lot>
+    # rows can share the same transaction_id when a close trade closes
+    # fractions of one open_lot across separate execution events).
+    close_datetime: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
     qty: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
     cost_basis_usd: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
     proceeds_usd: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)

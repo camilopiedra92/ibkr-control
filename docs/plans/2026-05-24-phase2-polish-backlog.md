@@ -437,11 +437,14 @@ real per-row.
 
 **Fix (Phase 2.5):** rewrite del persister a UPSERT por natural key per-entity,
 con semántica diferenciada immutable (DO NOTHING, first-seen) vs snapshot
-(DO UPDATE, last-updated-by). Decisiones A0-A8 lockeadas + 2 amendments durante
+(DO UPDATE, last-updated-by). Decisiones A0-A8 lockeadas + 3 amendments durante
 implementación (A3 #1 para `originating_transaction_id` en open_position_lots,
-A3 #2 para `code` en accruals). Spec: `docs/specs/2026-05-25-flex-persister-idempotent-design.md`.
-Plan: `docs/plans/2026-05-25-flex-persister-rewrite.md`. 4 Alembic revisions +
-script manual de wipe entre Rev1 y Rev2. Tests: 215 → ~240+.
+A3 #2 para `code` en accruals, A3 #3 para `close_datetime + fifo_pnl_usd` en
+closed_lots). Spec: `docs/specs/2026-05-25-flex-persister-idempotent-design.md`.
+Plan: `docs/plans/2026-05-25-flex-persister-rewrite.md`. 6 Alembic revisions +
+script manual de wipe entre Rev1 y Rev2 + script de backfill closed_lots entre
+Rev5 y Rev6 (replay desde xml_bytes via A0, sin re-upload del usuario). Tests:
+215 → 245.
 
 **Lecciones (escritas para evitar repetir):**
 

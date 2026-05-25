@@ -1,6 +1,6 @@
 """Dataclasses que el parser produce a partir del XML (intermediarias, no DB)."""
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 
@@ -36,6 +36,7 @@ class ParsedClosedLot:
     symbol: str
     open_date: date
     close_date: date
+    close_datetime: datetime  # A3 amendment #3: per-execution timestamp, discriminator for natural key
     qty: Decimal
     cost_basis_usd: Decimal
     proceeds_usd: Decimal

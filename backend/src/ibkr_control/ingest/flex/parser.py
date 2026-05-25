@@ -13,7 +13,7 @@ Notas sobre el formato Activity XML de IBKR:
   (timestamp con separador punto y coma).
 - Transfers usan "account" (no "transferAccount") como peer account ID.
 """
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from lxml import etree
@@ -50,6 +50,27 @@ def _parse_date_required(s: str | None, field_name: str = "date") -> date:
     if result is None:
         raise ValueError(f"Required date field '{field_name}' is missing or empty")
     return result
+
+
+def _parse_datetime(s: str | None) -> datetime | None:
+    """Parse IBKR full datetime "YYYYMMDD;HHMMSS" or fallback to date-only.
+
+    Returns None if input is empty/None. Date-only input gets time set to 00:00:00.
+    """
+    if s is None or s == "":
+        return None
+    s = s.strip()
+    if ";" in s:
+        date_part, time_part = s.split(";", 1)
+        if len(date_part) == 8 and date_part.isdigit() and len(time_part) == 6 and time_part.isdigit():
+            return datetime(
+                int(date_part[:4]), int(date_part[4:6]), int(date_part[6:8]),
+                int(time_part[:2]), int(time_part[2:4]), int(time_part[4:6]),
+            )
+    if len(s) == 8 and s.isdigit():
+        return datetime(int(s[:4]), int(s[4:6]), int(s[6:8]))
+    # ISO format fallback
+    return datetime.fromisoformat(s)
 
 
 def _dec(s: str | None, default: str = "0") -> Decimal:
@@ -248,11 +269,15 @@ def _parse_lot_as_closed_lot(elem) -> ParsedClosedLot | None:
     open_date = _parse_date(elem.get("openDateTime") or elem.get("holdingPeriodDateTime"))
     if open_date is None:
         return None
-    close_date = _parse_date(
-        elem.get("dateTime") or elem.get("tradeDate")
-    )
+    close_dt_raw = elem.get("dateTime") or elem.get("tradeDate")
+    close_date = _parse_date(close_dt_raw)
     if close_date is None:
         return None
+    # A3 amendment #3: per-execution timestamp discriminator. Falls back to
+    # midnight if IBKR emits date-only (rare, _parse_datetime handles both).
+    close_datetime = _parse_datetime(close_dt_raw)
+    if close_datetime is None:
+        close_datetime = datetime.combine(close_date, datetime.min.time())
 
     cost_basis = _dec(elem.get("cost"))
     fifo_pnl = _dec(elem.get("fifoPnlRealized"))
@@ -264,6 +289,7 @@ def _parse_lot_as_closed_lot(elem) -> ParsedClosedLot | None:
         symbol=elem.get("symbol") or "",
         open_date=open_date,
         close_date=close_date,
+        close_datetime=close_datetime,
         qty=_dec(elem.get("quantity")),
         cost_basis_usd=cost_basis,
         proceeds_usd=proceeds,
@@ -283,11 +309,13 @@ def _parse_closed_lots_wrapper(elem) -> list[ParsedClosedLot]:
         open_date = _parse_date(
             lot.get("openDateTime") or lot.get("openDate")
         )
-        close_date = _parse_date(
-            lot.get("dateTime") or lot.get("closeDate") or lot.get("tradeDate")
-        )
+        close_dt_raw = lot.get("dateTime") or lot.get("closeDate") or lot.get("tradeDate")
+        close_date = _parse_date(close_dt_raw)
         if open_date is None or close_date is None:
             continue
+        close_datetime = _parse_datetime(close_dt_raw) or datetime.combine(
+            close_date, datetime.min.time()
+        )
         cost_basis = _dec(lot.get("costBasis"))
         fifo_pnl = _dec(lot.get("fifoPnlRealized"))
         proceeds_raw = lot.get("proceeds")
@@ -298,6 +326,7 @@ def _parse_closed_lots_wrapper(elem) -> list[ParsedClosedLot]:
             symbol=lot.get("symbol") or "",
             open_date=open_date,
             close_date=close_date,
+            close_datetime=close_datetime,
             qty=_dec(lot.get("quantity")),
             cost_basis_usd=cost_basis,
             proceeds_usd=proceeds,
