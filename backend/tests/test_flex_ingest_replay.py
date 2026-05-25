@@ -16,9 +16,11 @@ Nota: el plan original pedía 3 fixtures (2024 + 2025 + 2026_ytd), pero solo hay
 2 sanitizados en el repo. La intención del spec R3 (idempotency + count parity
 × múltiples fixtures reales) está cubierta con los 2 disponibles.
 """
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
 import pytest
+from lxml import etree
 from sqlalchemy import func, select, insert
 
 from ibkr_control.auth.models import User
@@ -165,3 +167,60 @@ async def test_counts_match_fixture_metadata(
                     f"{fixture_name}.{entity_name}: "
                     f"expected {expected[entity_name]}, got {actual}"
                 )
+
+
+@pytest.mark.asyncio
+async def test_closed_lots_sum_matches_pool_2025(ephemeral_session_factory):
+    """FIFO parity (R3 part 3): Σ closed_lots.fifo_pnl_usd in DB equals
+    Σ <Lot levelOfDetail="CLOSED_LOT">.fifoPnlRealized from raw XML.
+
+    Heredado de renta/_invariants.py — the gold standard for verifying that
+    persister doesn't drift from the XML source of truth.
+
+    Note: in IBKR Flex XMLs the closed-lot records are <Lot> elements with
+    levelOfDetail="CLOSED_LOT" nested under <Trades>, NOT a separate
+    <ClosedLot> tag.  The filter on levelOfDetail is required because sibling
+    <Lot> elements carry other levelOfDetail values (e.g. "LOT", "ORDER") that
+    should not be summed.
+    """
+    xml = (FIXTURES_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
+    user_id = await _create_user(ephemeral_session_factory)
+
+    # Persist
+    async with ephemeral_session_factory() as session:
+        parsed = parse(xml)
+        await persist(
+            session, parsed=parsed, user_id=user_id,
+            xml_bytes=xml, source="web_service",
+        )
+        await session.commit()
+
+    # Sum from DB (Decimal)
+    async with ephemeral_session_factory() as session:
+        db_sum = await session.scalar(
+            select(func.coalesce(func.sum(ClosedLot.fifo_pnl_usd), 0))
+        )
+    db_sum = Decimal(str(db_sum))  # session.scalar may return Decimal or numeric str
+
+    # Sum from raw XML: <Lot levelOfDetail="CLOSED_LOT" fifoPnlRealized="...">
+    # Only CLOSED_LOT rows are persisted; other levelOfDetail values (LOT, ORDER,
+    # SYMBOL_SUMMARY, etc.) must be excluded to avoid double-counting.
+    #
+    # Each XML value is quantized to 4 decimal places before summing because
+    # the DB column is Numeric(20, 4) — Postgres rounds each value to 4dp on
+    # INSERT (ROUND_HALF_UP).  Summing the full-precision XML values and then
+    # comparing to the DB sum would produce a false delta due to accumulated
+    # sub-cent truncation across 146 rows.
+    _FOUR_DP = Decimal("0.0001")
+    tree = etree.fromstring(xml)
+    xml_sum = Decimal("0")
+    for el in tree.iter("Lot"):
+        if el.get("levelOfDetail") != "CLOSED_LOT":
+            continue
+        v = el.get("fifoPnlRealized")
+        if v:
+            xml_sum += Decimal(v).quantize(_FOUR_DP, rounding=ROUND_HALF_UP)
+
+    assert db_sum == xml_sum, (
+        f"DB sum {db_sum} != XML sum {xml_sum} (delta: {db_sum - xml_sum})"
+    )
