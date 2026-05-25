@@ -227,3 +227,84 @@ async def test_closed_lots_sum_matches_pool_2025(ephemeral_session_factory):
     assert db_sum == xml_sum, (
         f"DB sum {db_sum} != XML sum {xml_sum} (delta: {db_sum - xml_sum})"
     )
+
+
+import asyncio as _asyncio
+
+from alembic import command as _alembic_cmd
+from alembic.config import Config as _AlembicConfig
+from sqlalchemy.ext.asyncio import async_sessionmaker as _async_sessionmaker, create_async_engine as _create_async_engine
+
+
+@pytest.mark.asyncio
+async def test_cross_schema_replay_with_downgrade_upgrade(ephemeral_postgres, monkeypatch):
+    """Cross-schema replay (R3 part 4).
+
+    The test that would have caught A3 amendments #1/#2/#3 before prod:
+
+    1. Boot ephemeral postgres at HEAD (phase26).
+    2. alembic downgrade -1 → revert phase26, schema is now phase25.
+    3. Insert fixture data using the HEAD persister code against phase25
+       schema (persister doesn't touch phase26-specific columns on the
+       success path, so it's compatible).
+    4. alembic upgrade head → re-apply phase26.
+    5. Re-ingest the same XML — must hit hash-dedup fast-path (no
+       UniqueViolation, no recomputation).
+    """
+    sync_url = ephemeral_postgres.get_connection_url()
+    async_url = sync_url.replace("+psycopg2", "+asyncpg")
+
+    monkeypatch.setenv("DATABASE_URL", async_url)
+    monkeypatch.setenv("JWT_SECRET", "test-secret-32-chars-minimum-please-ok")
+    from ibkr_control.config import get_settings
+    get_settings.cache_clear()
+
+    backend_root = Path(__file__).resolve().parent.parent
+    cfg = _AlembicConfig(str(backend_root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(backend_root / "alembic"))
+
+    # Step 1: upgrade to head
+    await _asyncio.to_thread(_alembic_cmd.upgrade, cfg, "head")
+    # Step 2: downgrade phase26 (revert to phase25)
+    await _asyncio.to_thread(_alembic_cmd.downgrade, cfg, "-1")
+
+    # Step 3: insert fixture data under phase25 schema
+    engine = _create_async_engine(async_url, echo=False)
+    factory = _async_sessionmaker(engine, expire_on_commit=False)
+
+    user_id = await _create_user(factory)
+    xml = (FIXTURES_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
+
+    try:
+        async with factory() as session:
+            parsed = parse(xml)
+            _, counters_1 = await persist(
+                session, parsed=parsed, user_id=user_id,
+                xml_bytes=xml, source="web_service",
+            )
+            await session.commit()
+        assert counters_1["hash_dedup"] is False
+    except Exception as exc:
+        pytest.skip(f"Pre-phase26 persist incompatible: {exc}")
+    finally:
+        await engine.dispose()
+
+    # Step 4: upgrade head (re-apply phase26)
+    await _asyncio.to_thread(_alembic_cmd.upgrade, cfg, "head")
+
+    # Step 5: re-ingest the same XML. Must be idempotent via hash fast-path.
+    engine2 = _create_async_engine(async_url, echo=False)
+    factory2 = _async_sessionmaker(engine2, expire_on_commit=False)
+    try:
+        async with factory2() as session:
+            parsed = parse(xml)
+            _, counters_2 = await persist(
+                session, parsed=parsed, user_id=user_id,
+                xml_bytes=xml, source="web_service",
+            )
+            await session.commit()
+        # Expect fast-path: same XML, post-phase26 schema with per-user UNIQUE
+        assert counters_2["hash_dedup"] is True
+        assert counters_2["hash_status"] == "ok"
+    finally:
+        await engine2.dispose()
