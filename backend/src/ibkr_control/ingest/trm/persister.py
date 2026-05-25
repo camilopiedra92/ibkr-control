@@ -15,6 +15,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ibkr_control.db.models.trm import TrmDay, TrmImport
 
+# Postgres binds use int16 for parameter count (hard cap 32767). Each row carries
+# 4 explicit params (date, value_cop, vigencia_desde, vigencia_hasta) — fetched_at
+# uses NOW() literal. Full Socrata backfill expands to ~12.5k days = ~50k params,
+# blowing the limit in a single INSERT. We chunk well below the cap so adding a
+# column to the insert later does not silently re-introduce the failure.
+_BATCH_SIZE = 5000
+
 
 async def bulk_upsert_days(session: AsyncSession, expanded: list[dict]) -> int:
     """Inserta o actualiza rows en trm_days. Devuelve N rows procesados.
@@ -29,17 +36,19 @@ async def bulk_upsert_days(session: AsyncSession, expanded: list[dict]) -> int:
     if not expanded:
         return 0
 
-    stmt = pg_insert(TrmDay).values(expanded)
-    stmt = stmt.on_conflict_do_update(
-        index_elements=["date"],
-        set_={
-            "value_cop": stmt.excluded.value_cop,
-            "vigencia_desde": stmt.excluded.vigencia_desde,
-            "vigencia_hasta": stmt.excluded.vigencia_hasta,
-            "fetched_at": text("NOW()"),
-        },
-    )
-    await session.execute(stmt)
+    for start in range(0, len(expanded), _BATCH_SIZE):
+        chunk = expanded[start : start + _BATCH_SIZE]
+        stmt = pg_insert(TrmDay).values(chunk)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["date"],
+            set_={
+                "value_cop": stmt.excluded.value_cop,
+                "vigencia_desde": stmt.excluded.vigencia_desde,
+                "vigencia_hasta": stmt.excluded.vigencia_hasta,
+                "fetched_at": text("NOW()"),
+            },
+        )
+        await session.execute(stmt)
     await session.flush()
     return len(expanded)
 
