@@ -5,6 +5,9 @@ import { Stepper } from "@/components/wizard/Stepper";
 import { Step1Credentials } from "@/components/wizard/Step1Credentials";
 import { Step2Detect } from "@/components/wizard/Step2Detect";
 import { Step2ConfigureAccounts } from "@/components/wizard/Step2ConfigureAccounts";
+import { Step3Upload } from "@/components/wizard/Step3Upload";
+import { Step3NewAccountsModal } from "@/components/wizard/Step3NewAccountsModal";
+import { Step3Commit } from "@/components/wizard/Step3Commit";
 import { StepFinish } from "@/components/wizard/StepFinish";
 import { useSetupState } from "@/hooks/useSetupState";
 import {
@@ -12,6 +15,7 @@ import {
   type WizardScreen,
   type WizardTransientState,
 } from "@/hooks/useWizardNav";
+import { step3CommitApiSetupStep3CommitPost } from "@/lib/api";
 import type { DetectedAccount } from "@/lib/api";
 
 const WIZARD_LABELS: [string, string, string, string] = [
@@ -126,25 +130,33 @@ export function WizardPage() {
       )}
 
       {screen === "step3_upload" && (
-        <div className="rounded border p-4 text-sm text-muted-foreground">
-          [TASK 14 PLACEHOLDER] Step3Upload component goes here. It will
-          consume <code>setPendingTempIds</code> and{" "}
-          <code>setUnresolvedNewAccounts</code> from WizardPage state.
-        </div>
+        <Step3Upload
+          onUploaded={(tempIds, newAccts) => {
+            setPendingTempIds(tempIds);
+            setUnresolvedNewAccounts(newAccts);
+          }}
+          onSkip={async () => {
+            await step3CommitApiSetupStep3CommitPost({ temp_ids: [] });
+            refetch();
+          }}
+        />
       )}
 
       {screen === "step3_new_accounts" && (
-        <div className="rounded border p-4 text-sm text-muted-foreground">
-          [TASK 14 PLACEHOLDER] Step3NewAccountsModal component goes here.
-          unresolvedNewAccounts.length = {unresolvedNewAccounts.length}
-        </div>
+        <Step3NewAccountsModal
+          accounts={unresolvedNewAccounts}
+          onSaved={() => setUnresolvedNewAccounts([])}
+        />
       )}
 
       {screen === "step3_commit" && (
-        <div className="rounded border p-4 text-sm text-muted-foreground">
-          [TASK 14 PLACEHOLDER] Step3Commit component goes here.
-          pendingTempIds.length = {pendingTempIds.length}
-        </div>
+        <Step3Commit
+          tempIds={pendingTempIds}
+          onCommitted={() => {
+            setPendingTempIds([]);
+            refetch();
+          }}
+        />
       )}
 
       {screen === "finish" && <StepFinish />}
