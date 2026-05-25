@@ -81,8 +81,6 @@ interface ManualRefreshButtonProps {
 export function ManualRefreshButton({ onDone }: ManualRefreshButtonProps) {
   const [jobId, setJobId] = useState<number | null>(null);
   const [triggerError, setTriggerError] = useState<string | null>(null);
-  const [hasFailed, setHasFailed] = useState(false);
-  const [finished, setFinished] = useState(false);
 
   const { events, isDone, error: streamError } = useIngestStream(jobId);
 
@@ -92,9 +90,6 @@ export function ManualRefreshButton({ onDone }: ManualRefreshButtonProps) {
     onSuccess: (data) => {
       const d = data as IngestJobStarted;
       if (d?.job_id !== undefined) {
-        // Reset state for this new run
-        setHasFailed(false);
-        setFinished(false);
         setTriggerError(null);
         setJobId(d.job_id);
       }
@@ -107,31 +102,23 @@ export function ManualRefreshButton({ onDone }: ManualRefreshButtonProps) {
     },
   });
 
-  // Detect failure
-  useEffect(() => {
-    if (events.some((ev) => ev.status === "failed")) {
-      setHasFailed(true);
-    }
-  }, [events]);
-
-  // Detect success
-  useEffect(() => {
-    if (isDone && !hasFailed) {
-      setFinished(true);
-      onDone?.();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDone, hasFailed]);
-
+  // Derive flags from events/isDone in render — avoids the race where two
+  // useEffects read each other's stale state when the failed+done events land
+  // in the same React batch (then finished would latch true alongside a red row).
+  const hasFailed = events.some((ev) => ev.status === "failed");
+  const finished = isDone && !hasFailed && !streamError;
   const isRunning = jobId !== null && !isDone && !hasFailed;
   const substepStates = buildSubstepStates(events);
   const showSubsteps = jobId !== null;
 
+  useEffect(() => {
+    if (finished) onDone?.();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finished]);
+
   function handleTrigger() {
     setJobId(null);
     setTriggerError(null);
-    setHasFailed(false);
-    setFinished(false);
     triggerIngest();
   }
 
