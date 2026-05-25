@@ -1,16 +1,9 @@
-"""Tests for POST /api/setup/step1/save — no IBKR call, just persist creds."""
-import base64
+"""Tests for POST /api/setup/step1/save — no IBKR call, just persist creds.
 
+Note: the `set_token_key` autouse fixture is inherited from tests/api/conftest.py.
+"""
 import pytest
 from httpx import AsyncClient
-
-
-@pytest.fixture(autouse=True)
-def set_token_key(monkeypatch):
-    """AES-GCM key for encrypt_token used by step1/save (base64 of 32 bytes)."""
-    monkeypatch.setenv(
-        "TOKEN_ENCRYPTION_KEY", base64.b64encode(b"X" * 32).decode("ascii")
-    )
 
 
 async def test_step1_save_persists_creds_without_ibkr_call(
