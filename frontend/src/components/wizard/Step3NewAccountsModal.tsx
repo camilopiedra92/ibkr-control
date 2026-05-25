@@ -27,6 +27,16 @@ export function Step3NewAccountsModal({ accounts, onSaved }: Props) {
   );
   const [error, setError] = useState<string | null>(null);
 
+  const validatePct = (raw: string): boolean => {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return false;
+    if (n < 0 || n > 1) return false;
+    // Up to 4 decimals (matches Numeric(5,4) backend column).
+    const decimals = raw.includes(".") ? raw.split(".")[1].length : 0;
+    if (decimals > 4) return false;
+    return true;
+  };
+
   const { mutate, isPending } = useMutation({
     mutationFn: () =>
       step3SaveNewAccountsApiSetupStep3SaveNewAccountsPost({
@@ -38,10 +48,49 @@ export function Step3NewAccountsModal({ accounts, onSaved }: Props) {
       }),
     onSuccess: () => onSaved(),
     onError: (err: unknown) => {
-      const e = err as { response?: { data?: { detail?: string } } };
-      setError(e?.response?.data?.detail ?? "Error al guardar cuentas nuevas");
+      const e = err as {
+        response?: {
+          data?: {
+            detail?:
+              | { code?: string; ibkr_account_id?: string }
+              | Array<{ loc?: unknown; msg?: string; type?: string }>
+              | string;
+          };
+        };
+      };
+      const detail = e?.response?.data?.detail;
+      if (Array.isArray(detail)) {
+        // Pydantic 422 — list of validation errors.
+        setError("Datos inválidos: verificá alias y porcentaje");
+        return;
+      }
+      if (typeof detail === "object" && detail !== null) {
+        if (detail.code === "SHADOW_ACCOUNT_REJECTED") {
+          setError(
+            `Cuenta ${detail.ibkr_account_id} es shadow (F-suffix), no se puede configurar`,
+          );
+          return;
+        }
+      }
+      if (typeof detail === "string") {
+        setError(detail);
+        return;
+      }
+      setError("Error al guardar cuentas nuevas");
     },
   });
+
+  const handleSubmit = () => {
+    setError(null);
+    const invalid = rows.find((r) => !validatePct(r.pct));
+    if (invalid) {
+      setError(
+        `Porcentaje inválido para ${invalid.ibkr_account_id}: debe estar entre 0 y 1 con hasta 4 decimales`,
+      );
+      return;
+    }
+    mutate();
+  };
 
   return (
     <div className="space-y-4">
@@ -92,7 +141,7 @@ export function Step3NewAccountsModal({ accounts, onSaved }: Props) {
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <Button onClick={() => mutate()} disabled={isPending}>
+      <Button onClick={handleSubmit} disabled={isPending}>
         {isPending ? "Guardando…" : "Continuar →"}
       </Button>
     </div>
