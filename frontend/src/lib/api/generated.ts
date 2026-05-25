@@ -24,13 +24,6 @@ import type {
 } from '@tanstack/react-query';
 
 import { axiosMutator } from './mutator';
-export interface AccountInWizard {
-  /** @pattern ^U\d{8}$ */
-  ibkr_account_id: string;
-  alias?: string | null;
-  pct: number | string;
-}
-
 export interface BearerResponse {
   access_token: string;
   token_type: string;
@@ -45,8 +38,23 @@ export interface BodyAuthJwtLoginApiAuthJwtLoginPost {
   client_secret?: string | null;
 }
 
+export interface BodyStep2DetectFromXmlApiSetupStep2DetectFromXmlPost {
+  file: Blob;
+}
+
+export interface BodyStep3UploadApiSetupStep3UploadPost {
+  file: Blob;
+}
+
 export interface BodyUploadXmlApiImportsUploadPost {
   file: Blob;
+}
+
+export interface DetectedAccount {
+  ibkr_account_id: string;
+  suggested_alias: string | null;
+  account_type: string | null;
+  account_holder: string | null;
 }
 
 export type ErrorModelDetail = string | {[key: string]: string};
@@ -113,29 +121,58 @@ export interface IngestTrigger {
   kind: string;
 }
 
-export interface SetupJobStarted {
-  job_id: number;
+export interface Step2DetectFromXmlResponse {
+  detected_accounts: DetectedAccount[];
+  parsed_only?: boolean;
 }
 
-export type SetupStateStep4Substeps = {[key: string]: string};
+export type Step2DetectResponseIngestSummary = { [key: string]: unknown };
 
-export interface SetupState {
-  step1_credentials?: boolean;
-  step2_accounts?: boolean;
-  step3_xmls?: boolean;
-  step3_n_xmls_uploaded?: number;
-  step4_started_at?: string | null;
-  step4_job_id?: number | null;
-  step4_substeps?: SetupStateStep4Substeps;
-  setup_completed_at?: string | null;
+export interface Step2DetectResponse {
+  detected_accounts: DetectedAccount[];
+  flex_import_id: number;
+  ingest_summary: Step2DetectResponseIngestSummary;
 }
 
-export interface SetupStep2Save {
+export interface Step2SaveAccountItem {
   /**
-     * @minItems 1
-     * @maxItems 20
+     * @minLength 9
+     * @maxLength 12
+     * @pattern ^U\d{8,11}$
      */
-  accounts: AccountInWizard[];
+  ibkr_account_id: string;
+  alias?: string | null;
+  pct: number | string;
+}
+
+export interface Step2SaveRequest {
+  /** @minItems 1 */
+  accounts: Step2SaveAccountItem[];
+}
+
+export interface Step3CommitRequest {
+  temp_ids: string[];
+}
+
+export interface Step3CommitResponse {
+  flex_import_ids: number[];
+  total_rows_inserted: number;
+}
+
+export interface Step3SaveNewAccountsRequest {
+  /** @minItems 1 */
+  accounts: Step2SaveAccountItem[];
+}
+
+export type Step3UploadResponsePeriod = { [key: string]: unknown };
+
+export interface Step3UploadResponse {
+  flex_import_temp_id: string;
+  detected_accounts: DetectedAccount[];
+  new_accounts: DetectedAccount[];
+  period: Step3UploadResponsePeriod;
+  anyo: number;
+  sha256: string;
 }
 
 export interface UserCreate {
@@ -180,15 +217,27 @@ export interface UserUpdate {
   name?: string | null;
 }
 
+export interface WizardStateResponse {
+  step1_credentials: boolean;
+  step2_accounts: boolean;
+  step3_xmls: boolean;
+  step3_n_xmls_uploaded: number;
+  setup_completed_at: string | null;
+  detected_accounts?: DetectedAccount[] | null;
+  pending_stash_temp_ids?: string[];
+}
+
 export type HealthHealthGet200 = {[key: string]: string};
 
 export type UpdateFlexCredentialsApiCredentialsFlexPut200 = { [key: string]: unknown };
 
-export type Step1ValidateApiSetupStep1ValidatePost200 = { [key: string]: unknown };
+export type Step1SaveApiSetupStep1SavePost200 = { [key: string]: unknown };
 
 export type Step2SaveApiSetupStep2SavePost200 = { [key: string]: unknown };
 
-export type Step3CompleteApiSetupStep3CompletePost200 = { [key: string]: unknown };
+export type Step3SaveNewAccountsApiSetupStep3SaveNewAccountsPost200 = { [key: string]: unknown };
+
+export type FinishApiSetupFinishPost200 = { [key: string]: unknown };
 
 export type UploadXmlApiImportsUploadPost200 = { [key: string]: unknown };
 
@@ -1298,7 +1347,7 @@ export const getStateApiSetupStateGet = (
 ) => {
 
 
-      return axiosMutator<SetupState>(
+      return axiosMutator<WizardStateResponse>(
       {url: `/api/setup/state`, method: 'GET', signal
     },
       );
@@ -1352,16 +1401,17 @@ export const useGetStateApiSetupStateGet = <TError = unknown,
     }
 
 /**
- * @summary Step1 Validate
+ * Save creds (encrypt token). Does NOT call IBKR per spec D5.
+ * @summary Step1 Save
  */
-export const step1ValidateApiSetupStep1ValidatePost = (
+export const step1SaveApiSetupStep1SavePost = (
     flexCredentialsValidate: FlexCredentialsValidate,
  signal?: AbortSignal
 ) => {
 
 
-      return axiosMutator<Step1ValidateApiSetupStep1ValidatePost200>(
-      {url: `/api/setup/step1/validate`, method: 'POST',
+      return axiosMutator<Step1SaveApiSetupStep1SavePost200>(
+      {url: `/api/setup/step1/save`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: flexCredentialsValidate, signal
     },
@@ -1371,69 +1421,69 @@ export const step1ValidateApiSetupStep1ValidatePost = (
 
 
 
-export const getStep1ValidateApiSetupStep1ValidatePostQueryKey = (flexCredentialsValidate?: FlexCredentialsValidate,) => {
+export const getStep1SaveApiSetupStep1SavePostQueryKey = (flexCredentialsValidate?: FlexCredentialsValidate,) => {
     return [
-    'POST', `/api/setup/step1/validate`, flexCredentialsValidate
+    'POST', `/api/setup/step1/save`, flexCredentialsValidate
     ] as const;
     }
 
 
-export const getStep1ValidateApiSetupStep1ValidatePostQueryOptions = <TData = Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>, TError = HTTPValidationError>(flexCredentialsValidate: FlexCredentialsValidate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>, TError, TData>>, }
+export const getStep1SaveApiSetupStep1SavePostQueryOptions = <TData = Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError = HTTPValidationError>(flexCredentialsValidate: FlexCredentialsValidate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError, TData>>, }
 ) => {
 
 const {query: queryOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getStep1ValidateApiSetupStep1ValidatePostQueryKey(flexCredentialsValidate);
+  const queryKey =  queryOptions?.queryKey ?? getStep1SaveApiSetupStep1SavePostQueryKey(flexCredentialsValidate);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>> = ({ signal }) => step1ValidateApiSetupStep1ValidatePost(flexCredentialsValidate, signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>> = ({ signal }) => step1SaveApiSetupStep1SavePost(flexCredentialsValidate, signal);
 
 
 
 
 
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export type Step1ValidateApiSetupStep1ValidatePostQueryResult = NonNullable<Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>>
-export type Step1ValidateApiSetupStep1ValidatePostQueryError = HTTPValidationError
+export type Step1SaveApiSetupStep1SavePostQueryResult = NonNullable<Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>>
+export type Step1SaveApiSetupStep1SavePostQueryError = HTTPValidationError
 
 
-export function useStep1ValidateApiSetupStep1ValidatePost<TData = Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>, TError = HTTPValidationError>(
- flexCredentialsValidate: FlexCredentialsValidate, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>, TError, TData>> & Pick<
+export function useStep1SaveApiSetupStep1SavePost<TData = Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError = HTTPValidationError>(
+ flexCredentialsValidate: FlexCredentialsValidate, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>,
+          Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>,
           TError,
-          Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>
+          Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>
         > , 'initialData'
       >, }
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useStep1ValidateApiSetupStep1ValidatePost<TData = Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>, TError = HTTPValidationError>(
- flexCredentialsValidate: FlexCredentialsValidate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>, TError, TData>> & Pick<
+export function useStep1SaveApiSetupStep1SavePost<TData = Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError = HTTPValidationError>(
+ flexCredentialsValidate: FlexCredentialsValidate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>,
+          Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>,
           TError,
-          Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>
+          Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>
         > , 'initialData'
       >, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useStep1ValidateApiSetupStep1ValidatePost<TData = Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>, TError = HTTPValidationError>(
- flexCredentialsValidate: FlexCredentialsValidate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>, TError, TData>>, }
+export function useStep1SaveApiSetupStep1SavePost<TData = Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError = HTTPValidationError>(
+ flexCredentialsValidate: FlexCredentialsValidate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Step1 Validate
+ * @summary Step1 Save
  */
 
-export function useStep1ValidateApiSetupStep1ValidatePost<TData = Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>, TError = HTTPValidationError>(
- flexCredentialsValidate: FlexCredentialsValidate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1ValidateApiSetupStep1ValidatePost>>, TError, TData>>, }
+export function useStep1SaveApiSetupStep1SavePost<TData = Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError = HTTPValidationError>(
+ flexCredentialsValidate: FlexCredentialsValidate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError, TData>>, }
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getStep1ValidateApiSetupStep1ValidatePostQueryOptions(flexCredentialsValidate,options)
+  const queryOptions = getStep1SaveApiSetupStep1SavePostQueryOptions(flexCredentialsValidate,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -1447,18 +1497,19 @@ export function useStep1ValidateApiSetupStep1ValidatePost<TData = Awaited<Return
 
 
 /**
- * @summary Step2 Save
+ * Fetch + parse + persist YTD. Returns detected accounts (sin F).
+ *
+ * Retry policy per spec D10: server-side retry on 1001 with backoff [5, 15, 30]s.
+ * @summary Step2 Detect
  */
-export const step2SaveApiSetupStep2SavePost = (
-    setupStep2Save: SetupStep2Save,
+export const step2DetectApiSetupStep2DetectPost = (
+
  signal?: AbortSignal
 ) => {
 
 
-      return axiosMutator<Step2SaveApiSetupStep2SavePost200>(
-      {url: `/api/setup/step2/save`, method: 'POST',
-      headers: {'Content-Type': 'application/json', },
-      data: setupStep2Save, signal
+      return axiosMutator<Step2DetectResponse>(
+      {url: `/api/setup/step2/detect`, method: 'POST', signal
     },
       );
     }
@@ -1466,23 +1517,217 @@ export const step2SaveApiSetupStep2SavePost = (
 
 
 
-export const getStep2SaveApiSetupStep2SavePostQueryKey = (setupStep2Save?: SetupStep2Save,) => {
+export const getStep2DetectApiSetupStep2DetectPostQueryKey = () => {
     return [
-    'POST', `/api/setup/step2/save`, setupStep2Save
+    'POST', `/api/setup/step2/detect`
     ] as const;
     }
 
 
-export const getStep2SaveApiSetupStep2SavePostQueryOptions = <TData = Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError = HTTPValidationError>(setupStep2Save: SetupStep2Save, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError, TData>>, }
+export const getStep2DetectApiSetupStep2DetectPostQueryOptions = <TData = Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError, TData>>, }
 ) => {
 
 const {query: queryOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getStep2SaveApiSetupStep2SavePostQueryKey(setupStep2Save);
+  const queryKey =  queryOptions?.queryKey ?? getStep2DetectApiSetupStep2DetectPostQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>> = ({ signal }) => step2SaveApiSetupStep2SavePost(setupStep2Save, signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>> = ({ signal }) => step2DetectApiSetupStep2DetectPost(signal);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type Step2DetectApiSetupStep2DetectPostQueryResult = NonNullable<Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>>
+export type Step2DetectApiSetupStep2DetectPostQueryError = unknown
+
+
+export function useStep2DetectApiSetupStep2DetectPost<TData = Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError = unknown>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>,
+          TError,
+          Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useStep2DetectApiSetupStep2DetectPost<TData = Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>,
+          TError,
+          Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useStep2DetectApiSetupStep2DetectPost<TData = Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Step2 Detect
+ */
+
+export function useStep2DetectApiSetupStep2DetectPost<TData = Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getStep2DetectApiSetupStep2DetectPostQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+/**
+ * Parse uploaded XML, return detected accounts. NO persist (fallback when IBKR offline).
+ * @summary Step2 Detect From Xml
+ */
+export const step2DetectFromXmlApiSetupStep2DetectFromXmlPost = (
+    bodyStep2DetectFromXmlApiSetupStep2DetectFromXmlPost: BodyStep2DetectFromXmlApiSetupStep2DetectFromXmlPost,
+ signal?: AbortSignal
+) => {
+
+      const formData = new FormData();
+formData.append(`file`, bodyStep2DetectFromXmlApiSetupStep2DetectFromXmlPost.file);
+
+      return axiosMutator<Step2DetectFromXmlResponse>(
+      {url: `/api/setup/step2/detect_from_xml`, method: 'POST',
+      headers: {'Content-Type': 'multipart/form-data', },
+       data: formData, signal
+    },
+      );
+    }
+
+
+
+
+export const getStep2DetectFromXmlApiSetupStep2DetectFromXmlPostQueryKey = (bodyStep2DetectFromXmlApiSetupStep2DetectFromXmlPost?: BodyStep2DetectFromXmlApiSetupStep2DetectFromXmlPost,) => {
+    return [
+    'POST', `/api/setup/step2/detect_from_xml`, bodyStep2DetectFromXmlApiSetupStep2DetectFromXmlPost
+    ] as const;
+    }
+
+
+export const getStep2DetectFromXmlApiSetupStep2DetectFromXmlPostQueryOptions = <TData = Awaited<ReturnType<typeof step2DetectFromXmlApiSetupStep2DetectFromXmlPost>>, TError = HTTPValidationError>(bodyStep2DetectFromXmlApiSetupStep2DetectFromXmlPost: BodyStep2DetectFromXmlApiSetupStep2DetectFromXmlPost, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2DetectFromXmlApiSetupStep2DetectFromXmlPost>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getStep2DetectFromXmlApiSetupStep2DetectFromXmlPostQueryKey(bodyStep2DetectFromXmlApiSetupStep2DetectFromXmlPost);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof step2DetectFromXmlApiSetupStep2DetectFromXmlPost>>> = ({ signal }) => step2DetectFromXmlApiSetupStep2DetectFromXmlPost(bodyStep2DetectFromXmlApiSetupStep2DetectFromXmlPost, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof step2DetectFromXmlApiSetupStep2DetectFromXmlPost>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type Step2DetectFromXmlApiSetupStep2DetectFromXmlPostQueryResult = NonNullable<Awaited<ReturnType<typeof step2DetectFromXmlApiSetupStep2DetectFromXmlPost>>>
+export type Step2DetectFromXmlApiSetupStep2DetectFromXmlPostQueryError = HTTPValidationError
+
+
+export function useStep2DetectFromXmlApiSetupStep2DetectFromXmlPost<TData = Awaited<ReturnType<typeof step2DetectFromXmlApiSetupStep2DetectFromXmlPost>>, TError = HTTPValidationError>(
+ bodyStep2DetectFromXmlApiSetupStep2DetectFromXmlPost: BodyStep2DetectFromXmlApiSetupStep2DetectFromXmlPost, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2DetectFromXmlApiSetupStep2DetectFromXmlPost>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof step2DetectFromXmlApiSetupStep2DetectFromXmlPost>>,
+          TError,
+          Awaited<ReturnType<typeof step2DetectFromXmlApiSetupStep2DetectFromXmlPost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useStep2DetectFromXmlApiSetupStep2DetectFromXmlPost<TData = Awaited<ReturnType<typeof step2DetectFromXmlApiSetupStep2DetectFromXmlPost>>, TError = HTTPValidationError>(
+ bodyStep2DetectFromXmlApiSetupStep2DetectFromXmlPost: BodyStep2DetectFromXmlApiSetupStep2DetectFromXmlPost, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2DetectFromXmlApiSetupStep2DetectFromXmlPost>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof step2DetectFromXmlApiSetupStep2DetectFromXmlPost>>,
+          TError,
+          Awaited<ReturnType<typeof step2DetectFromXmlApiSetupStep2DetectFromXmlPost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useStep2DetectFromXmlApiSetupStep2DetectFromXmlPost<TData = Awaited<ReturnType<typeof step2DetectFromXmlApiSetupStep2DetectFromXmlPost>>, TError = HTTPValidationError>(
+ bodyStep2DetectFromXmlApiSetupStep2DetectFromXmlPost: BodyStep2DetectFromXmlApiSetupStep2DetectFromXmlPost, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2DetectFromXmlApiSetupStep2DetectFromXmlPost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Step2 Detect From Xml
+ */
+
+export function useStep2DetectFromXmlApiSetupStep2DetectFromXmlPost<TData = Awaited<ReturnType<typeof step2DetectFromXmlApiSetupStep2DetectFromXmlPost>>, TError = HTTPValidationError>(
+ bodyStep2DetectFromXmlApiSetupStep2DetectFromXmlPost: BodyStep2DetectFromXmlApiSetupStep2DetectFromXmlPost, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2DetectFromXmlApiSetupStep2DetectFromXmlPost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getStep2DetectFromXmlApiSetupStep2DetectFromXmlPostQueryOptions(bodyStep2DetectFromXmlApiSetupStep2DetectFromXmlPost,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+/**
+ * Persist accounts + participations. Dispatches TRM backfill in background (per D6).
+ * @summary Step2 Save
+ */
+export const step2SaveApiSetupStep2SavePost = (
+    step2SaveRequest: Step2SaveRequest,
+ signal?: AbortSignal
+) => {
+
+
+      return axiosMutator<Step2SaveApiSetupStep2SavePost200>(
+      {url: `/api/setup/step2/save`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: step2SaveRequest, signal
+    },
+      );
+    }
+
+
+
+
+export const getStep2SaveApiSetupStep2SavePostQueryKey = (step2SaveRequest?: Step2SaveRequest,) => {
+    return [
+    'POST', `/api/setup/step2/save`, step2SaveRequest
+    ] as const;
+    }
+
+
+export const getStep2SaveApiSetupStep2SavePostQueryOptions = <TData = Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError = HTTPValidationError>(step2SaveRequest: Step2SaveRequest, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getStep2SaveApiSetupStep2SavePostQueryKey(step2SaveRequest);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>> = ({ signal }) => step2SaveApiSetupStep2SavePost(step2SaveRequest, signal);
 
 
 
@@ -1496,7 +1741,7 @@ export type Step2SaveApiSetupStep2SavePostQueryError = HTTPValidationError
 
 
 export function useStep2SaveApiSetupStep2SavePost<TData = Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError = HTTPValidationError>(
- setupStep2Save: SetupStep2Save, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError, TData>> & Pick<
+ step2SaveRequest: Step2SaveRequest, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>,
           TError,
@@ -1506,7 +1751,7 @@ export function useStep2SaveApiSetupStep2SavePost<TData = Awaited<ReturnType<typ
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useStep2SaveApiSetupStep2SavePost<TData = Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError = HTTPValidationError>(
- setupStep2Save: SetupStep2Save, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError, TData>> & Pick<
+ step2SaveRequest: Step2SaveRequest, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>,
           TError,
@@ -1516,7 +1761,7 @@ export function useStep2SaveApiSetupStep2SavePost<TData = Awaited<ReturnType<typ
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useStep2SaveApiSetupStep2SavePost<TData = Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError = HTTPValidationError>(
- setupStep2Save: SetupStep2Save, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError, TData>>, }
+ step2SaveRequest: Step2SaveRequest, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1524,11 +1769,11 @@ export function useStep2SaveApiSetupStep2SavePost<TData = Awaited<ReturnType<typ
  */
 
 export function useStep2SaveApiSetupStep2SavePost<TData = Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError = HTTPValidationError>(
- setupStep2Save: SetupStep2Save, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError, TData>>, }
+ step2SaveRequest: Step2SaveRequest, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2SaveApiSetupStep2SavePost>>, TError, TData>>, }
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getStep2SaveApiSetupStep2SavePostQueryOptions(setupStep2Save,options)
+  const queryOptions = getStep2SaveApiSetupStep2SavePostQueryOptions(step2SaveRequest,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -1542,16 +1787,21 @@ export function useStep2SaveApiSetupStep2SavePost<TData = Awaited<ReturnType<typ
 
 
 /**
- * @summary Step3 Complete
+ * Stash one XML in memory. Detect new accounts vs already-configured.
+ * @summary Step3 Upload
  */
-export const step3CompleteApiSetupStep3CompletePost = (
-
+export const step3UploadApiSetupStep3UploadPost = (
+    bodyStep3UploadApiSetupStep3UploadPost: BodyStep3UploadApiSetupStep3UploadPost,
  signal?: AbortSignal
 ) => {
 
+      const formData = new FormData();
+formData.append(`file`, bodyStep3UploadApiSetupStep3UploadPost.file);
 
-      return axiosMutator<Step3CompleteApiSetupStep3CompletePost200>(
-      {url: `/api/setup/step3/complete`, method: 'POST', signal
+      return axiosMutator<Step3UploadResponse>(
+      {url: `/api/setup/step3/upload`, method: 'POST',
+      headers: {'Content-Type': 'multipart/form-data', },
+       data: formData, signal
     },
       );
     }
@@ -1559,69 +1809,69 @@ export const step3CompleteApiSetupStep3CompletePost = (
 
 
 
-export const getStep3CompleteApiSetupStep3CompletePostQueryKey = () => {
+export const getStep3UploadApiSetupStep3UploadPostQueryKey = (bodyStep3UploadApiSetupStep3UploadPost?: BodyStep3UploadApiSetupStep3UploadPost,) => {
     return [
-    'POST', `/api/setup/step3/complete`
+    'POST', `/api/setup/step3/upload`, bodyStep3UploadApiSetupStep3UploadPost
     ] as const;
     }
 
 
-export const getStep3CompleteApiSetupStep3CompletePostQueryOptions = <TData = Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>, TError, TData>>, }
+export const getStep3UploadApiSetupStep3UploadPostQueryOptions = <TData = Awaited<ReturnType<typeof step3UploadApiSetupStep3UploadPost>>, TError = HTTPValidationError>(bodyStep3UploadApiSetupStep3UploadPost: BodyStep3UploadApiSetupStep3UploadPost, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3UploadApiSetupStep3UploadPost>>, TError, TData>>, }
 ) => {
 
 const {query: queryOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getStep3CompleteApiSetupStep3CompletePostQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getStep3UploadApiSetupStep3UploadPostQueryKey(bodyStep3UploadApiSetupStep3UploadPost);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>> = ({ signal }) => step3CompleteApiSetupStep3CompletePost(signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof step3UploadApiSetupStep3UploadPost>>> = ({ signal }) => step3UploadApiSetupStep3UploadPost(bodyStep3UploadApiSetupStep3UploadPost, signal);
 
 
 
 
 
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof step3UploadApiSetupStep3UploadPost>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export type Step3CompleteApiSetupStep3CompletePostQueryResult = NonNullable<Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>>
-export type Step3CompleteApiSetupStep3CompletePostQueryError = unknown
+export type Step3UploadApiSetupStep3UploadPostQueryResult = NonNullable<Awaited<ReturnType<typeof step3UploadApiSetupStep3UploadPost>>>
+export type Step3UploadApiSetupStep3UploadPostQueryError = HTTPValidationError
 
 
-export function useStep3CompleteApiSetupStep3CompletePost<TData = Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>, TError = unknown>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>, TError, TData>> & Pick<
+export function useStep3UploadApiSetupStep3UploadPost<TData = Awaited<ReturnType<typeof step3UploadApiSetupStep3UploadPost>>, TError = HTTPValidationError>(
+ bodyStep3UploadApiSetupStep3UploadPost: BodyStep3UploadApiSetupStep3UploadPost, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3UploadApiSetupStep3UploadPost>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>,
+          Awaited<ReturnType<typeof step3UploadApiSetupStep3UploadPost>>,
           TError,
-          Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>
+          Awaited<ReturnType<typeof step3UploadApiSetupStep3UploadPost>>
         > , 'initialData'
       >, }
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useStep3CompleteApiSetupStep3CompletePost<TData = Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>, TError, TData>> & Pick<
+export function useStep3UploadApiSetupStep3UploadPost<TData = Awaited<ReturnType<typeof step3UploadApiSetupStep3UploadPost>>, TError = HTTPValidationError>(
+ bodyStep3UploadApiSetupStep3UploadPost: BodyStep3UploadApiSetupStep3UploadPost, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3UploadApiSetupStep3UploadPost>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>,
+          Awaited<ReturnType<typeof step3UploadApiSetupStep3UploadPost>>,
           TError,
-          Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>
+          Awaited<ReturnType<typeof step3UploadApiSetupStep3UploadPost>>
         > , 'initialData'
       >, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useStep3CompleteApiSetupStep3CompletePost<TData = Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>, TError, TData>>, }
+export function useStep3UploadApiSetupStep3UploadPost<TData = Awaited<ReturnType<typeof step3UploadApiSetupStep3UploadPost>>, TError = HTTPValidationError>(
+ bodyStep3UploadApiSetupStep3UploadPost: BodyStep3UploadApiSetupStep3UploadPost, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3UploadApiSetupStep3UploadPost>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Step3 Complete
+ * @summary Step3 Upload
  */
 
-export function useStep3CompleteApiSetupStep3CompletePost<TData = Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3CompleteApiSetupStep3CompletePost>>, TError, TData>>, }
+export function useStep3UploadApiSetupStep3UploadPost<TData = Awaited<ReturnType<typeof step3UploadApiSetupStep3UploadPost>>, TError = HTTPValidationError>(
+ bodyStep3UploadApiSetupStep3UploadPost: BodyStep3UploadApiSetupStep3UploadPost, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3UploadApiSetupStep3UploadPost>>, TError, TData>>, }
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getStep3CompleteApiSetupStep3CompletePostQueryOptions(options)
+  const queryOptions = getStep3UploadApiSetupStep3UploadPostQueryOptions(bodyStep3UploadApiSetupStep3UploadPost,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -1635,16 +1885,19 @@ export function useStep3CompleteApiSetupStep3CompletePost<TData = Awaited<Return
 
 
 /**
- * @summary Step4 Start
+ * Persist accounts + participations for newly-detected IDs from Step 3 uploads.
+ * @summary Step3 Save New Accounts
  */
-export const step4StartApiSetupStep4StartPost = (
-
+export const step3SaveNewAccountsApiSetupStep3SaveNewAccountsPost = (
+    step3SaveNewAccountsRequest: Step3SaveNewAccountsRequest,
  signal?: AbortSignal
 ) => {
 
 
-      return axiosMutator<SetupJobStarted>(
-      {url: `/api/setup/step4/start`, method: 'POST', signal
+      return axiosMutator<Step3SaveNewAccountsApiSetupStep3SaveNewAccountsPost200>(
+      {url: `/api/setup/step3/save_new_accounts`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: step3SaveNewAccountsRequest, signal
     },
       );
     }
@@ -1652,69 +1905,262 @@ export const step4StartApiSetupStep4StartPost = (
 
 
 
-export const getStep4StartApiSetupStep4StartPostQueryKey = () => {
+export const getStep3SaveNewAccountsApiSetupStep3SaveNewAccountsPostQueryKey = (step3SaveNewAccountsRequest?: Step3SaveNewAccountsRequest,) => {
     return [
-    'POST', `/api/setup/step4/start`
+    'POST', `/api/setup/step3/save_new_accounts`, step3SaveNewAccountsRequest
     ] as const;
     }
 
 
-export const getStep4StartApiSetupStep4StartPostQueryOptions = <TData = Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>, TError, TData>>, }
+export const getStep3SaveNewAccountsApiSetupStep3SaveNewAccountsPostQueryOptions = <TData = Awaited<ReturnType<typeof step3SaveNewAccountsApiSetupStep3SaveNewAccountsPost>>, TError = HTTPValidationError>(step3SaveNewAccountsRequest: Step3SaveNewAccountsRequest, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3SaveNewAccountsApiSetupStep3SaveNewAccountsPost>>, TError, TData>>, }
 ) => {
 
 const {query: queryOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getStep4StartApiSetupStep4StartPostQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getStep3SaveNewAccountsApiSetupStep3SaveNewAccountsPostQueryKey(step3SaveNewAccountsRequest);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>> = ({ signal }) => step4StartApiSetupStep4StartPost(signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof step3SaveNewAccountsApiSetupStep3SaveNewAccountsPost>>> = ({ signal }) => step3SaveNewAccountsApiSetupStep3SaveNewAccountsPost(step3SaveNewAccountsRequest, signal);
 
 
 
 
 
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof step3SaveNewAccountsApiSetupStep3SaveNewAccountsPost>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export type Step4StartApiSetupStep4StartPostQueryResult = NonNullable<Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>>
-export type Step4StartApiSetupStep4StartPostQueryError = unknown
+export type Step3SaveNewAccountsApiSetupStep3SaveNewAccountsPostQueryResult = NonNullable<Awaited<ReturnType<typeof step3SaveNewAccountsApiSetupStep3SaveNewAccountsPost>>>
+export type Step3SaveNewAccountsApiSetupStep3SaveNewAccountsPostQueryError = HTTPValidationError
 
 
-export function useStep4StartApiSetupStep4StartPost<TData = Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>, TError = unknown>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>, TError, TData>> & Pick<
+export function useStep3SaveNewAccountsApiSetupStep3SaveNewAccountsPost<TData = Awaited<ReturnType<typeof step3SaveNewAccountsApiSetupStep3SaveNewAccountsPost>>, TError = HTTPValidationError>(
+ step3SaveNewAccountsRequest: Step3SaveNewAccountsRequest, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3SaveNewAccountsApiSetupStep3SaveNewAccountsPost>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>,
+          Awaited<ReturnType<typeof step3SaveNewAccountsApiSetupStep3SaveNewAccountsPost>>,
           TError,
-          Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>
+          Awaited<ReturnType<typeof step3SaveNewAccountsApiSetupStep3SaveNewAccountsPost>>
         > , 'initialData'
       >, }
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useStep4StartApiSetupStep4StartPost<TData = Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>, TError, TData>> & Pick<
+export function useStep3SaveNewAccountsApiSetupStep3SaveNewAccountsPost<TData = Awaited<ReturnType<typeof step3SaveNewAccountsApiSetupStep3SaveNewAccountsPost>>, TError = HTTPValidationError>(
+ step3SaveNewAccountsRequest: Step3SaveNewAccountsRequest, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3SaveNewAccountsApiSetupStep3SaveNewAccountsPost>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>,
+          Awaited<ReturnType<typeof step3SaveNewAccountsApiSetupStep3SaveNewAccountsPost>>,
           TError,
-          Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>
+          Awaited<ReturnType<typeof step3SaveNewAccountsApiSetupStep3SaveNewAccountsPost>>
         > , 'initialData'
       >, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useStep4StartApiSetupStep4StartPost<TData = Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>, TError, TData>>, }
+export function useStep3SaveNewAccountsApiSetupStep3SaveNewAccountsPost<TData = Awaited<ReturnType<typeof step3SaveNewAccountsApiSetupStep3SaveNewAccountsPost>>, TError = HTTPValidationError>(
+ step3SaveNewAccountsRequest: Step3SaveNewAccountsRequest, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3SaveNewAccountsApiSetupStep3SaveNewAccountsPost>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Step4 Start
+ * @summary Step3 Save New Accounts
  */
 
-export function useStep4StartApiSetupStep4StartPost<TData = Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step4StartApiSetupStep4StartPost>>, TError, TData>>, }
+export function useStep3SaveNewAccountsApiSetupStep3SaveNewAccountsPost<TData = Awaited<ReturnType<typeof step3SaveNewAccountsApiSetupStep3SaveNewAccountsPost>>, TError = HTTPValidationError>(
+ step3SaveNewAccountsRequest: Step3SaveNewAccountsRequest, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3SaveNewAccountsApiSetupStep3SaveNewAccountsPost>>, TError, TData>>, }
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getStep4StartApiSetupStep4StartPostQueryOptions(options)
+  const queryOptions = getStep3SaveNewAccountsApiSetupStep3SaveNewAccountsPostQueryOptions(step3SaveNewAccountsRequest,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+/**
+ * Drain stash, persist all selected XMLs in one transaction.
+ *
+ * Validates first that every detected (non-shadow) account in each stashed
+ * XML is already configured (via step3/save_new_accounts or earlier steps).
+ * @summary Step3 Commit
+ */
+export const step3CommitApiSetupStep3CommitPost = (
+    step3CommitRequest: Step3CommitRequest,
+ signal?: AbortSignal
+) => {
+
+
+      return axiosMutator<Step3CommitResponse>(
+      {url: `/api/setup/step3/commit`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: step3CommitRequest, signal
+    },
+      );
+    }
+
+
+
+
+export const getStep3CommitApiSetupStep3CommitPostQueryKey = (step3CommitRequest?: Step3CommitRequest,) => {
+    return [
+    'POST', `/api/setup/step3/commit`, step3CommitRequest
+    ] as const;
+    }
+
+
+export const getStep3CommitApiSetupStep3CommitPostQueryOptions = <TData = Awaited<ReturnType<typeof step3CommitApiSetupStep3CommitPost>>, TError = HTTPValidationError>(step3CommitRequest: Step3CommitRequest, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3CommitApiSetupStep3CommitPost>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getStep3CommitApiSetupStep3CommitPostQueryKey(step3CommitRequest);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof step3CommitApiSetupStep3CommitPost>>> = ({ signal }) => step3CommitApiSetupStep3CommitPost(step3CommitRequest, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof step3CommitApiSetupStep3CommitPost>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type Step3CommitApiSetupStep3CommitPostQueryResult = NonNullable<Awaited<ReturnType<typeof step3CommitApiSetupStep3CommitPost>>>
+export type Step3CommitApiSetupStep3CommitPostQueryError = HTTPValidationError
+
+
+export function useStep3CommitApiSetupStep3CommitPost<TData = Awaited<ReturnType<typeof step3CommitApiSetupStep3CommitPost>>, TError = HTTPValidationError>(
+ step3CommitRequest: Step3CommitRequest, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3CommitApiSetupStep3CommitPost>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof step3CommitApiSetupStep3CommitPost>>,
+          TError,
+          Awaited<ReturnType<typeof step3CommitApiSetupStep3CommitPost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useStep3CommitApiSetupStep3CommitPost<TData = Awaited<ReturnType<typeof step3CommitApiSetupStep3CommitPost>>, TError = HTTPValidationError>(
+ step3CommitRequest: Step3CommitRequest, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3CommitApiSetupStep3CommitPost>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof step3CommitApiSetupStep3CommitPost>>,
+          TError,
+          Awaited<ReturnType<typeof step3CommitApiSetupStep3CommitPost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useStep3CommitApiSetupStep3CommitPost<TData = Awaited<ReturnType<typeof step3CommitApiSetupStep3CommitPost>>, TError = HTTPValidationError>(
+ step3CommitRequest: Step3CommitRequest, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3CommitApiSetupStep3CommitPost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Step3 Commit
+ */
+
+export function useStep3CommitApiSetupStep3CommitPost<TData = Awaited<ReturnType<typeof step3CommitApiSetupStep3CommitPost>>, TError = HTTPValidationError>(
+ step3CommitRequest: Step3CommitRequest, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step3CommitApiSetupStep3CommitPost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getStep3CommitApiSetupStep3CommitPostQueryOptions(step3CommitRequest,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+/**
+ * Mark setup_completed_at. Validates preconditions (creds + at least 1 participation + step3 marked).
+ * @summary Finish
+ */
+export const finishApiSetupFinishPost = (
+
+ signal?: AbortSignal
+) => {
+
+
+      return axiosMutator<FinishApiSetupFinishPost200>(
+      {url: `/api/setup/finish`, method: 'POST', signal
+    },
+      );
+    }
+
+
+
+
+export const getFinishApiSetupFinishPostQueryKey = () => {
+    return [
+    'POST', `/api/setup/finish`
+    ] as const;
+    }
+
+
+export const getFinishApiSetupFinishPostQueryOptions = <TData = Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getFinishApiSetupFinishPostQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof finishApiSetupFinishPost>>> = ({ signal }) => finishApiSetupFinishPost(signal);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type FinishApiSetupFinishPostQueryResult = NonNullable<Awaited<ReturnType<typeof finishApiSetupFinishPost>>>
+export type FinishApiSetupFinishPostQueryError = unknown
+
+
+export function useFinishApiSetupFinishPost<TData = Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError = unknown>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof finishApiSetupFinishPost>>,
+          TError,
+          Awaited<ReturnType<typeof finishApiSetupFinishPost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useFinishApiSetupFinishPost<TData = Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof finishApiSetupFinishPost>>,
+          TError,
+          Awaited<ReturnType<typeof finishApiSetupFinishPost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useFinishApiSetupFinishPost<TData = Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Finish
+ */
+
+export function useFinishApiSetupFinishPost<TData = Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getFinishApiSetupFinishPostQueryOptions(options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -1825,6 +2271,12 @@ export function useUploadXmlApiImportsUploadPost<TData = Awaited<ReturnType<type
 
 
 /**
+ * Trigger manual del ingest. Rate-limited via UPDATE atomico condicional.
+ *
+ * El UPDATE solo afecta una fila si el cooldown ya pasó; rowcount=0 indica
+ * rate-limited y devolvemos 429 con el tiempo restante. Esto elimina el
+ * race condition TOCTOU del patron check-then-set y persiste el estado en
+ * DB (sobrevive container restart, multi-replica safe).
  * @summary Trigger Manual Refresh
  */
 export const triggerManualRefreshApiIngestTriggerPost = (

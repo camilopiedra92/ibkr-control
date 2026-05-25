@@ -28,6 +28,16 @@ from ibkr_control.ingest.flex._models import ParsedXML
 from ibkr_control.ingest.hash_dedup import xml_hash
 
 
+def _is_shadow_account(ibkr_account_id: str) -> bool:
+    """IB-UK Limited regulatory shadow account (NAV=0, no fiscal data).
+
+    Per spec section 1 + renta sibling: F-accounts only carry fees/journals;
+    never trades, open positions, or closed lots. Filtered at persist time
+    to keep `accounts` table free of accounts that shouldn't have participations.
+    """
+    return ibkr_account_id.endswith("F")
+
+
 async def persist(
     session: AsyncSession,
     *,
@@ -50,28 +60,37 @@ async def persist(
     if existing_id is not None:
         return existing_id
 
-    # Recopilar todos los ibkr_account_ids referenciados en el XML
+    # Recopilar todos los ibkr_account_ids referenciados en el XML.
+    # Skip F-suffix shadow accounts (IB-UK Limited, NAV=0) at every collection
+    # point so they never reach the `accounts` table — see _is_shadow_account.
     all_account_ids: set[str] = set()
     for a in parsed.accounts:
-        all_account_ids.add(a.ibkr_account_id)
+        if not _is_shadow_account(a.ibkr_account_id):
+            all_account_ids.add(a.ibkr_account_id)
     for t in parsed.trades:
-        all_account_ids.add(t.ibkr_account_id)
+        if not _is_shadow_account(t.ibkr_account_id):
+            all_account_ids.add(t.ibkr_account_id)
     for cl in parsed.closed_lots:
-        all_account_ids.add(cl.ibkr_account_id)
+        if not _is_shadow_account(cl.ibkr_account_id):
+            all_account_ids.add(cl.ibkr_account_id)
     for op in parsed.open_position_lots:
-        all_account_ids.add(op.ibkr_account_id)
+        if not _is_shadow_account(op.ibkr_account_id):
+            all_account_ids.add(op.ibkr_account_id)
     for ct in parsed.cash_transactions:
-        all_account_ids.add(ct.ibkr_account_id)
+        if not _is_shadow_account(ct.ibkr_account_id):
+            all_account_ids.add(ct.ibkr_account_id)
     # Transfers reference accounts via src/dst fields
     for tr in parsed.transfers:
-        if tr.src_ibkr_account_id:
+        if tr.src_ibkr_account_id and not _is_shadow_account(tr.src_ibkr_account_id):
             all_account_ids.add(tr.src_ibkr_account_id)
-        if tr.dst_ibkr_account_id:
+        if tr.dst_ibkr_account_id and not _is_shadow_account(tr.dst_ibkr_account_id):
             all_account_ids.add(tr.dst_ibkr_account_id)
     for da in parsed.change_in_dividend_accruals:
-        all_account_ids.add(da.ibkr_account_id)
+        if not _is_shadow_account(da.ibkr_account_id):
+            all_account_ids.add(da.ibkr_account_id)
     for oda in parsed.open_dividend_accruals:
-        all_account_ids.add(oda.ibkr_account_id)
+        if not _is_shadow_account(oda.ibkr_account_id):
+            all_account_ids.add(oda.ibkr_account_id)
 
     accounts_map = await _ensure_accounts(session, list(all_account_ids))
 
@@ -99,6 +118,8 @@ async def persist(
 
     # Insertar trades y capturar transaction_id → db id para linked closed lots
     for t in parsed.trades:
+        if _is_shadow_account(t.ibkr_account_id):
+            continue
         session.add(Trade(
             flex_import_id=fi.id,
             transaction_id=t.transaction_id,
@@ -130,6 +151,8 @@ async def persist(
         trade_id_map = {tid: tid_db for tid, tid_db in result.all()}
 
     for cl in parsed.closed_lots:
+        if _is_shadow_account(cl.ibkr_account_id):
+            continue
         source_trade_id = (
             trade_id_map.get(cl.transaction_id)
             if cl.transaction_id
@@ -149,6 +172,8 @@ async def persist(
         ))
 
     for op in parsed.open_position_lots:
+        if _is_shadow_account(op.ibkr_account_id):
+            continue
         session.add(OpenPositionLot(
             flex_import_id=fi.id,
             account_id=accounts_map[op.ibkr_account_id],
@@ -162,6 +187,8 @@ async def persist(
         ))
 
     for ct in parsed.cash_transactions:
+        if _is_shadow_account(ct.ibkr_account_id):
+            continue
         session.add(CashTransaction(
             flex_import_id=fi.id,
             account_id=accounts_map[ct.ibkr_account_id],
@@ -174,6 +201,10 @@ async def persist(
         ))
 
     for tr in parsed.transfers:
+        src_shadow = tr.src_ibkr_account_id and _is_shadow_account(tr.src_ibkr_account_id)
+        dst_shadow = tr.dst_ibkr_account_id and _is_shadow_account(tr.dst_ibkr_account_id)
+        if src_shadow or dst_shadow:
+            continue
         transfer = Transfer(
             flex_import_id=fi.id,
             transfer_date=tr.transfer_date,
@@ -203,6 +234,8 @@ async def persist(
             ))
 
     for da in parsed.change_in_dividend_accruals:
+        if _is_shadow_account(da.ibkr_account_id):
+            continue
         session.add(ChangeInDividendAccrual(
             flex_import_id=fi.id,
             account_id=accounts_map[da.ibkr_account_id],
@@ -229,6 +262,8 @@ async def persist(
         ))
 
     for oda in parsed.open_dividend_accruals:
+        if _is_shadow_account(oda.ibkr_account_id):
+            continue
         session.add(OpenDividendAccrual(
             flex_import_id=fi.id,
             account_id=accounts_map[oda.ibkr_account_id],

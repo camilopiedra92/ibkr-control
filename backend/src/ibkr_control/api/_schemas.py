@@ -69,3 +69,66 @@ class IngestLogRead(BaseModel):
     items_processed: int | None
     error_message: str | None
     trigger: str
+
+
+# ===== Wizard redesign schemas (v0.2.2) =====
+
+
+class DetectedAccount(BaseModel):
+    ibkr_account_id: str
+    suggested_alias: str | None
+    account_type: str | None
+    account_holder: str | None
+
+
+class Step2DetectResponse(BaseModel):
+    detected_accounts: list[DetectedAccount]
+    flex_import_id: int
+    ingest_summary: dict  # {n_trades, n_cash_tx, ...} -- opaque shape
+
+
+class Step2DetectFromXmlResponse(BaseModel):
+    detected_accounts: list[DetectedAccount]
+    parsed_only: bool = True
+
+
+class Step2SaveAccountItem(BaseModel):
+    ibkr_account_id: str = Field(min_length=9, max_length=12, pattern=r"^U\d{8,11}$")
+    alias: str | None = Field(default=None, max_length=200)
+    pct: Decimal = Field(ge=Decimal("0"), le=Decimal("1"), decimal_places=4)
+
+
+class Step2SaveRequest(BaseModel):
+    accounts: list[Step2SaveAccountItem] = Field(min_length=1)
+
+
+class Step3UploadResponse(BaseModel):
+    flex_import_temp_id: str
+    detected_accounts: list[DetectedAccount]
+    new_accounts: list[DetectedAccount]
+    period: dict  # {"from": "YYYY-MM-DD", "to": "YYYY-MM-DD"}
+    anyo: int
+    sha256: str
+
+
+class Step3SaveNewAccountsRequest(BaseModel):
+    accounts: list[Step2SaveAccountItem] = Field(min_length=1)
+
+
+class Step3CommitRequest(BaseModel):
+    temp_ids: list[str]  # empty list = skip historicos
+
+
+class Step3CommitResponse(BaseModel):
+    flex_import_ids: list[int]
+    total_rows_inserted: int
+
+
+class WizardStateResponse(BaseModel):
+    step1_credentials: bool
+    step2_accounts: bool
+    step3_xmls: bool
+    step3_n_xmls_uploaded: int
+    setup_completed_at: datetime | None
+    detected_accounts: list[DetectedAccount] | None = None
+    pending_stash_temp_ids: list[str] = Field(default_factory=list)

@@ -2,48 +2,21 @@
 
 ## ⏯ Cómo continuar (próxima sesión)
 
-**Phase 2 está 100% completa + post-polish persistent state (D5+D2 fixed) + wizard redesign spec+plan listos.**
-Branch `phase2/ingestion` ya mergeado a `main` (commit `6b97e46`).
-Polish backlog post-merge cerrado (10 items, ver `docs/plans/2026-05-24-phase2-polish-backlog.md`).
-Tag `v0.2.0-ingest` apunta al cierre original de polish (`a606be2`). Tag `v0.2.1-persistent-state` apunta a `172cc12` — incluye SQLAlchemyJobStore + DB-backed rate limit. **192/192 backend tests pasan, frontend builds clean.**
+**Phase 2 + wizard redesign completos (tags `v0.2.0-ingest`, `v0.2.1-persistent-state`, `v0.2.2-wizard-redesign`). Próximo: Phase 3.**
 
-**⚠ Próxima sesión: ejecutar plan de wizard redesign** (spec + plan ya escritos y commiteados — listos para `superpowers:subagent-driven-development`). Ver §"Próxima sesión — Wizard redesign" abajo.
+Branch `phase2/ingestion` ya mergeado a `main`. Branch `feat/wizard-redesign` (17 commits + docs/tag) terminada y lista para merge a `main` cuando el usuario lo decida.
+Tag `v0.2.0-ingest` apunta al cierre original de polish (`a606be2`). Tag `v0.2.1-persistent-state` apunta a `172cc12` — incluye SQLAlchemyJobStore + DB-backed rate limit. Tag `v0.2.2-wizard-redesign` apunta al cierre del rewrite del wizard (detect-first, F-filter en persister, Migration H wipea legacy). **207/207 backend tests pasan, frontend builds clean, 3 nuevos Playwright wizard specs.**
 
-La próxima sesión tiene **3 caminos** posibles. El A (wizard redesign) es el más urgente porque tiene plan listo + smoke test del 2026-05-24 ya reveló los bugs que motivan el redesign.
-
-### Próxima sesión — Wizard redesign (recomendado — plan ya escrito)
-
-Spec: `docs/specs/2026-05-24-wizard-redesign-design.md` (689 líneas, 12 decisiones D1-D12 locked).
-Plan: `docs/plans/2026-05-24-wizard-redesign.md` (3538 líneas, 16 tareas, target tag `v0.2.2-wizard-redesign`).
-
-Resuelve 5 bugs detectados durante smoke test del 2026-05-24:
-1. Wizard pedía IDs de cuenta ciegos (typos)
-2. No validaba contra cuentas reales del usuario
-3. Poblaba tabla `accounts` con 3 F-suffix shadow accounts orphan (IB-UK Limited, NAV=0)
-4. Re-validaba contra IBKR aunque ya hubieras guardado creds via `/settings` → error 1001
-5. `setup_progress` flags JSONB desync de la realidad de las tablas
-
-```
-Entry point exacto:
-1. git status → debe estar en main, working tree limpio, 12 commits ahead de origin
-2. git log --oneline -5 → último commit debe ser docs(plan): wizard redesign — 16-task...
-3. Leer docs/specs/2026-05-24-wizard-redesign-design.md (refresh design)
-4. Leer docs/plans/2026-05-24-wizard-redesign.md (refresh plan)
-5. Branch: git checkout -b feat/wizard-redesign (Task 1 step 1)
-6. Invocar superpowers:subagent-driven-development con prompt:
-   "Ejecutá el plan en docs/plans/2026-05-24-wizard-redesign.md.
-    16 tareas. Empezá por Task 1. TDD estricto donde el plan lo
-    indica. Bundle commits según indica cada task."
-```
-
-### Camino B — Planificar Phase 3 (si preferís diferir el wizard redesign)
+### Camino A — Planificar Phase 3 (recomendado)
 
 Phase 3 = domain layer + 3 pantallas (Lotes Abiertos/Cerrados/Alertas 730d). Spec maestro §6 + §4.2. Phase 3 NO requiere prod deploy ni datos reales — desarrolla 100% contra testcontainer + fixtures sanitizadas.
 
 ```
-1. Verificar Phase 2 cerrada: git tag -l "v0.2*" → debe mostrar v0.2.0-ingest + v0.2.1-persistent-state
+1. Verificar Phase 2 + wizard redesign cerradas:
+   git tag -l "v0.2*" → debe mostrar v0.2.0-ingest + v0.2.1-persistent-state + v0.2.2-wizard-redesign
 2. Leer este CLAUDE.md (lo cargás automáticamente)
-3. Leer docs/plans/2026-05-24-phase2-polish-backlog.md (entender deuda conocida D1-D11)
+3. Leer docs/plans/2026-05-24-phase2-polish-backlog.md (entender deuda conocida D1-D11
+   + apendice "Post-Phase-2: Wizard redesign")
 4. Invocar `superpowers:brainstorming` con prompt:
    "Phase 3 = domain layer + lotes. Decisiones abiertas listadas en
     CLAUDE.md §Roadmap Phase 3. Resolver una a una, luego escribir spec
@@ -54,14 +27,15 @@ Phase 3 = domain layer + 3 pantallas (Lotes Abiertos/Cerrados/Alertas 730d). Spe
 8. Branch: git checkout -b phase3/lotes main
 ```
 
-### Camino C — Deploy a Coolify + smoke test prod (tarea del usuario, no del agente)
+### Camino B — Deploy a Coolify + smoke test prod (tarea del usuario, no del agente)
 
 Independiente de Phase 3. La sesión Claude no puede hacer estos pasos (UI interactiva + credenciales reales):
 
 ```
-1. Push de Phase 2 a remote (~30s):
+1. Merge feat/wizard-redesign → main + push a remote (~30s):
+   git checkout main && git merge --no-ff feat/wizard-redesign
    git push origin main --follow-tags
-   # Esto sube main + tags v0.2.0-ingest + v0.2.1-persistent-state a GitHub
+   # Esto sube main + tags v0.2.0/v0.2.1/v0.2.2 a GitHub
 
 2. Configurar TOKEN_ENCRYPTION_KEY en Coolify (1 min):
    openssl rand -base64 32  # generar key
@@ -70,24 +44,27 @@ Independiente de Phase 3. La sesión Claude no puede hacer estos pasos (UI inter
 
 3. Trigger redeploy desde Coolify UI apuntando a main (~3 min build):
    # Verificar logs: "Registered 3 ingest jobs: flex_daily, trm_daily, cleanup_job_tracker"
-   # Si las 6 migrations no se aplican automáticamente:
+   # Migration H wipea data legacy — preserva flex_credentials + apscheduler_jobs
+   # Si las migrations no se aplican automáticamente:
    docker exec <backend-container> uv run alembic upgrade head
 
-4. Smoke test end-to-end (~20-30 min):
+4. Smoke test end-to-end del wizard redesign (~20-30 min):
    - Abrir URL prod del frontend → registrarte
-   - Wizard step 1: pegar tu Flex Token + YTD Query ID reales
-   - Step 2: ajustar % de la cuenta conjunta U99999001 al 50%
-   - Step 3: subir XMLs históricos desde ../renta/fuentes/2024/2025/compartidos/ibkr/
-   - Step 4: "Iniciar carga" → ver SSE progress
-   - Verificar dashboard llega
+   - Step 1: pegar tu Flex Token + YTD Query ID reales → guardar
+   - Step 2: ver auto-detect de cuentas (debe traer 3 cuentas U-prefix, filtrar 3 F-shadow)
+     · Ajustar % cuenta conjunta U99999001 al 50%, alias pre-poblado
+   - Step 3: drag-drop XMLs históricos desde ../renta/fuentes/2024/2025/compartidos/ibkr/
+     · Si el XML trae cuentas nuevas no detectadas, debe aparecer modal
+   - Finish: "Iniciar carga" → ver SSE progress
+   - Verificar dashboard llega + DB no tiene F-shadow accounts
    - Settings → log table tiene entries, click "Actualizar ahora" funciona
 ```
 
 ### Pre-Phase-3 checklist (verificar al arrancar la próxima sesión)
 
 - [ ] `git status` limpio en `main`
-- [ ] `git tag -l "v0.2*"` muestra `v0.2.0-ingest` + `v0.2.1-persistent-state`
-- [ ] `cd backend && uv run pytest -q` → 192 passed
+- [ ] `git tag -l "v0.2*"` muestra `v0.2.0-ingest` + `v0.2.1-persistent-state` + `v0.2.2-wizard-redesign`
+- [ ] `cd backend && uv run pytest -q` → 207 passed
 - [ ] `cd frontend && pnpm build` → exit 0
 - [ ] Leer `docs/plans/2026-05-24-phase2-polish-backlog.md` § "Deuda conocida (D1-D11)"
 - [ ] (Opcional) `docker compose ps` para confirmar postgres + backend healthy si vas a smoke test
@@ -148,6 +125,7 @@ Detalles útiles para evitar re-depurar en fases futuras:
 - **Polish backlog post-merge (10 items)** — audit post-Phase-2 detectó bugs + tech debt resueltos antes del cierre oficial: (1) DoS upload sin streaming size check, (2) IDs de cuentas reales leakeados a frontend defaults, (3) double-cast `as unknown as` en RotateTokenModal, (4) `except Exception` genéricos en scheduler/jobs, (5) `_is_summary_row` helper extraído, (6) `JobTracker.cleanup_old()` + cron job horario nuevo, (7) `MAX_XML_SIZE_BYTES` + `_COOLDOWN` movidos a Settings, (8) docstring de race condition `_ensure_accounts`, (9) coverage `api/credentials.py` 39%→100% + `api/setup.py` 34%→73%, (10) Migration F: widening precision `Numeric(20,2)→(20,4)` USD totals + `(20,6)→(20,8)` quantities (matches IBKR XML source + sub-cent FIFO room para Phase 3). Total: 186 tests (era 151, +35), coverage overall 88% (era 83%). Ver `docs/plans/2026-05-24-phase2-polish-backlog.md` para detalle + deuda conocida documentada (D1-D11).
 - **Formato de datos numéricos — decisión locked** — Phase 2 polish llegó a `Numeric(20,4)` para totales USD, `Numeric(20,8)` para quantities, `Numeric(20,6)` para prices, `Numeric(12,4)` para TRM. Rechazado integer minor units (Stripe-style) por (a) volumen bajo, (b) multi-currency USD/COP/TRM hace error-prone trackear scale por columna, (c) Python `Decimal` interop más limpio con NUMERIC. Match precisión del XML IBKR source + DIAN TRM.
 - **Post-Phase-2 persistent state migration (D5+D2 RESOLVED)** — sesión 2026-05-24 mergeó 5 commits (deps `c86e308` + D5 scheduler `70f9bd0` + D2 rate limit `45127f1` + docs `27f9442` + plan `8b823f8`) reabriendo dos decisiones "locked" del spec Phase 2: (a) APScheduler ahora usa `SQLAlchemyJobStore` persistente — tabla `apscheduler_jobs` auto-creada al boot, `misfire_grace_time=21600` (6h) en los 3 crons para recuperar runs perdidos por container restart; (b) rate limit del endpoint `POST /api/ingest/trigger` movido de dict in-memory `_LAST_TRIGGER` a columna `users.last_ingest_trigger_at` (Migration G) + UPDATE atómico condicional (`WHERE last_ingest_trigger_at IS NULL OR < now() - cooldown`) sin race TOCTOU. Nueva dep: `psycopg[binary]>=3.1` (driver sync que APScheduler 3.x requiere — el app sigue usando `asyncpg` para todo lo demás). APScheduler pinned a `==3.11.*` para evitar drift de schema del jobstore. Lecciones: (1) las decisiones "locked" pueden re-abrirse si el lift es chico y el upside es real — el patrón es documentar el cambio de criterio en commit + spec note "SUPERSEDED", no editar la decisión vieja; (2) APScheduler 3.x SQLAlchemyJobStore es sync incluso bajo `AsyncIOScheduler` (corre las ops del jobstore en el thread del scheduler, no en el event loop) — por eso necesitamos un driver sync separado del asyncpg de la app. Tests: 186 → 192. Ver `docs/plans/2026-05-24-d5-d2-persistent-state.md`.
+- **Wizard redesign post-deploy (2026-05-24, tag v0.2.2-wizard-redesign)** — el smoke test end-to-end con datos reales reveló que el wizard pedía IDs de cuenta ciegos (typos), no validaba contra cuentas reales del usuario, y poblaba `accounts` con 3 F-suffix shadow accounts IB-UK Limited (NAV=0, fees/journals only). Reescritura "detect-first": Step 1 solo guarda creds, Step 2 fetchea Flex YTD + auto-detecta cuentas filtrando F-suffix, pre-pobla alias desde `<AccountInformation accountAlias=>`. Step 3 multi-file drag-drop con detect de cuentas nuevas en XMLs históricos (modal de confirmación). Filtro F a nivel persister (allowlist pattern del sibling renta) garantiza que ningún ingest futuro re-introduzca shadow accounts. Migration H wipea data legacy (preserva `flex_credentials` + `apscheduler_jobs`). Backend: 9 endpoints reescritos bajo `/api/setup/*` + in-memory `_step3_stash` con TTL. Frontend: state machine de 7 pantallas en `WizardPage` reemplaza los 4 steps lineales originales. Tests: 192 → 207 (+15 backend) + 3 nuevos Playwright wizard specs. Spec: `docs/specs/2026-05-24-wizard-redesign-design.md` (D1-D12 locked). Plan: `docs/plans/2026-05-24-wizard-redesign.md` (16 tareas). Branch: `feat/wizard-redesign` (17 commits + docs). Cleanup: legacy `frontend/e2e/wizard.spec.ts` eliminado (superseded por los 3 specs nuevos).
 
 ---
 
@@ -174,7 +152,7 @@ Globant, AFC, leasing, etc. Esta app es el **centro de control IBKR-only**.
 | Phase | Status | Plan | Spec | Tag al completar |
 |---|---|---|---|---|
 | 1. Foundation | ✅ código completo (Tasks 1-14) + polish backlog cerrado (6/6) + tag `v0.1.0-foundation` ✓ · Task 15 (deploy manual a Coolify) pendiente del usuario | `docs/plans/2026-05-24-ibkr-control-phase1-foundation.md` + `docs/plans/2026-05-24-phase1-polish-backlog.md` | spec maestro §3, §5.1 | `v0.1.0-foundation` ✓ |
-| 2. Data ingestion (Flex WS + TRM Socrata + scheduler + upload XML + setup wizard) | ✅ completado · 20 tasks + polish backlog (10 items) + post-merge persistent state D5+D2 cerrado · 192 tests · tags `v0.2.0-ingest` + `v0.2.1-persistent-state` ✓ | `docs/plans/2026-05-24-ibkr-control-phase2-ingestion.md` + `docs/plans/2026-05-24-phase2-polish-backlog.md` + `docs/plans/2026-05-24-d5-d2-persistent-state.md` | `docs/specs/2026-05-24-phase2-ingestion-design.md` (D1-D17 — D6 SUPERSEDED) | `v0.2.1-persistent-state` ✓ |
+| 2. Data ingestion (Flex WS + TRM Socrata + scheduler + upload XML + setup wizard) | ✅ completado · 20 tasks + polish backlog (10 items) + persistent state D5+D2 + wizard redesign (16 tasks) · 207 tests · tags `v0.2.0-ingest` + `v0.2.1-persistent-state` + `v0.2.2-wizard-redesign` ✓ | `docs/plans/2026-05-24-ibkr-control-phase2-ingestion.md` + `docs/plans/2026-05-24-phase2-polish-backlog.md` + `docs/plans/2026-05-24-d5-d2-persistent-state.md` + `docs/plans/2026-05-24-wizard-redesign.md` | `docs/specs/2026-05-24-phase2-ingestion-design.md` (D1-D17 — D6 SUPERSEDED) + `docs/specs/2026-05-24-wizard-redesign-design.md` (D1-D12) | `v0.2.2-wizard-redesign` ✓ |
 | 3. Domain layer + lotes (FIFO, classification, lotes abiertos/cerrados/alertas) | ⏳ por brainstormear + planificar — ver §Roadmap Phase 3 abajo | — | spec maestro §6 (domain) + §4.2 (Lotes Abiertos/Cerrados/Alertas) + `renta/docs/flex_fifo_loader_spec.md` | `v0.3.0-lotes` |
 | 4. Simulador (STK + FUT con neteo YTD) | ⏳ por planificar | — | spec maestro §4.2 (Simulador) + `renta2025.py` § A.5 régimen DUAL | `v0.4.0-simulator` |
 | 5. Dividendos + Patrimonio + Form 160 + Reporte Form 210 | ⏳ por planificar | — | spec maestro §4.2 (Dividendos/Patrimonio/Form 160/Reporte) + §6.1 reglas D-E | `v0.5.0-reports` |

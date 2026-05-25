@@ -35,6 +35,13 @@ DEFAULT_BASE_URL: Final = "https://gdcdyn.interactivebrokers.com"
 # Codigos de error documentados por IBKR Flex WS
 ERR_INVALID_TOKEN: Final = "1018"
 ERR_STATEMENT_PENDING: Final = "1019"
+# IBKR Flex Web Service error codes seen in production:
+#   1001 → "Statement could not be generated at this time" (transient throttling)
+#   1003, 1004 → bad token / token expired (auth-class)
+#   1005 → "Invalid request or required parameter is missing" (typically wrong query_id)
+ERR_BUSY: Final = "1001"
+ERR_AUTH_CODES: Final = {"1003", "1004", ERR_INVALID_TOKEN}
+ERR_QUERY_NOT_FOUND: Final = "1005"
 
 # Backoff exponencial: 1 → 2 → 4 → 8 → 16 (capped)
 _BACKOFF_INITIAL: Final = 1
@@ -62,7 +69,40 @@ class FlexPollTimeoutError(RuntimeError):
 
 
 class FlexClientError(RuntimeError):
-    """Error generico del API Flex (no auth, no timeout)."""
+    """Error generico del API Flex (no auth, no timeout).
+
+    Tiene .code para que el caller pueda inspeccionar el ErrorCode IBKR
+    sin parsear el mensaje.
+    """
+
+    def __init__(self, message: str, code: str | None = None) -> None:
+        self.code = code
+        super().__init__(message)
+
+
+# Alias para que el caller pueda hacer `except flex_client_mod.FlexError`
+# matcheando cualquier error tipado del modulo (Auth, Busy, QueryNotFound,
+# generico). FlexError es la base abstracta logica.
+FlexError = FlexClientError
+
+
+class FlexBusyError(FlexClientError):
+    """IBKR ErrorCode 1001: Statement could not be generated at this time.
+
+    Throttling transient — el caller deberia hacer retry con backoff.
+    """
+
+    def __init__(self, error_message: str = "Statement could not be generated at this time") -> None:
+        super().__init__(f"Flex busy (1001): {error_message}", code=ERR_BUSY)
+        self.error_message = error_message
+
+
+class FlexQueryNotFoundError(FlexClientError):
+    """IBKR ErrorCode 1005: Invalid request — query_id desconocido o sin permisos."""
+
+    def __init__(self, error_message: str = "Query not found") -> None:
+        super().__init__(f"Flex query not found (1005): {error_message}", code=ERR_QUERY_NOT_FOUND)
+        self.error_message = error_message
 
 
 class FlexClient:
@@ -148,6 +188,18 @@ class FlexClient:
 
         raise FlexPollTimeoutError(reference_code, elapsed)
 
+    async def get_statement(
+        self,
+        reference_code: str,
+        max_wait_seconds: int = 300,
+    ) -> bytes:
+        """Alias semantico de poll_statement.
+
+        IBKR documenta el endpoint como GetStatement; el cliente hace polling
+        internamente cuando el statement no esta listo (ErrorCode 1019).
+        """
+        return await self.poll_statement(reference_code, max_wait_seconds=max_wait_seconds)
+
     @staticmethod
     def _parse_send_response(body: bytes) -> str:
         """Extrae ReferenceCode del XML de respuesta de SendRequest.
@@ -170,9 +222,15 @@ class FlexClient:
 
         error_code = tree.findtext("ErrorCode") or ""
         error_message = tree.findtext("ErrorMessage") or "unknown"
-        if error_code == ERR_INVALID_TOKEN:
+        if error_code in ERR_AUTH_CODES:
             raise FlexAuthError(error_code, error_message)
-        raise FlexClientError(f"SendRequest fallo {error_code}: {error_message}")
+        if error_code == ERR_BUSY:
+            raise FlexBusyError(error_message)
+        if error_code == ERR_QUERY_NOT_FOUND:
+            raise FlexQueryNotFoundError(error_message)
+        raise FlexClientError(
+            f"SendRequest fallo {error_code}: {error_message}", code=error_code or None
+        )
 
     @staticmethod
     def _is_pending(body: bytes) -> bool:

@@ -4,10 +4,17 @@ import { cn } from "@/lib/utils";
 
 interface StepperProps {
   current: 1 | 2 | 3 | 4;
-  labels: [string, string, string, string];
+  labels?: [string, string, string, string];
 }
 
-export function Stepper({ current, labels }: StepperProps) {
+const DEFAULT_LABELS: [string, string, string, string] = [
+  "Credenciales",
+  "Cuentas",
+  "Históricos",
+  "Finalizar",
+];
+
+export function Stepper({ current, labels = DEFAULT_LABELS }: StepperProps) {
   return (
     <ol className="flex items-center w-full mb-8">
       {labels.map((label, i) => {

@@ -170,3 +170,41 @@ def test_parses_open_dividend_accruals():
     assert row.gross_amount_usd == Decimal("12.72")
     assert row.tax_usd == Decimal("3.82")
     assert row.net_amount_usd == Decimal("8.9")
+
+
+def test_parse_account_info_extracts_alias_type_and_name():
+    """AccountInformation tag attrs accountAlias/accountType/name carried into ParsedAccount."""
+    xml = b'''<?xml version="1.0"?>
+    <FlexQueryResponse>
+      <FlexStatements>
+        <FlexStatement accountId="U99999999" fromDate="20260101" toDate="20261231">
+          <AccountInformation accountId="U99999999" accountAlias="My Joint" accountType="Joint" name="TEST USER" currency="USD"/>
+        </FlexStatement>
+      </FlexStatements>
+    </FlexQueryResponse>
+    '''
+    parsed = parse(xml)
+    assert len(parsed.accounts) == 1
+    ai = parsed.accounts[0]
+    assert ai.ibkr_account_id == "U99999999"
+    assert ai.account_alias == "My Joint"
+    assert ai.account_type == "Joint"
+    assert ai.name == "TEST USER"
+
+
+def test_parse_account_info_handles_missing_optional_attrs():
+    """If accountAlias/name/accountType absent, fields are None (not empty string)."""
+    xml = b'''<?xml version="1.0"?>
+    <FlexQueryResponse>
+      <FlexStatements>
+        <FlexStatement accountId="U99999999" fromDate="20260101" toDate="20261231">
+          <AccountInformation accountId="U99999999" currency="USD"/>
+        </FlexStatement>
+      </FlexStatements>
+    </FlexQueryResponse>
+    '''
+    parsed = parse(xml)
+    ai = parsed.accounts[0]
+    assert ai.account_alias is None
+    assert ai.account_type is None
+    assert ai.name is None
