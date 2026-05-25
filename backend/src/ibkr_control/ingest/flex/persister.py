@@ -30,7 +30,7 @@ DO NOTHING absorbe colisiones cross-XML sin error.
 """
 from datetime import date
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -181,6 +181,27 @@ async def persist(
     fi.n_new_dividends = n_new["dividends"]
     fi.n_new_transfers = n_new["transfers"]
     await session.flush()
+
+    # R1 latest-1 cleanup. For year_status='rolling' rows of the same
+    # (user_id, anyo, source), retain only the row just persisted (fi.id).
+    # Sealed rows are pinned. Poison rows are forensic evidence — preserved.
+    await session.execute(
+        text("""
+            DELETE FROM flex_imports
+            WHERE user_id = :user_id
+              AND anyo = :anyo
+              AND source = :source
+              AND year_status = 'rolling'
+              AND status = 'ok'
+              AND id != :current_id
+        """),
+        {
+            "user_id": user_id,
+            "anyo": parsed.anyo,
+            "source": source,
+            "current_id": fi.id,
+        },
+    )
 
     return fi.id, {
         "hash_dedup": False,

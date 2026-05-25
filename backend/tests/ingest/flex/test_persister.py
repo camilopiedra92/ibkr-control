@@ -312,3 +312,140 @@ async def test_persist_dividend_accruals_from_2025_fixture(
     assert row.tax_usd == Decimal("3.82")
     assert row.net_amount_usd == Decimal("8.90")
     assert row.account_id is not None  # resolves to the joint account
+
+
+@pytest.mark.asyncio
+async def test_persist_deletes_previous_rolling_for_same_user_anyo_source(
+    db_session, sample_user,
+):
+    """R1 latest-1 retention: previous rolling row for same key gets deleted."""
+    from pathlib import Path
+    from datetime import date
+    from lxml import etree
+    from sqlalchemy import select
+    from ibkr_control.db.models.flex_raw import FlexImport
+    from ibkr_control.ingest.flex.parser import parse
+    from ibkr_control.ingest.flex.persister import persist
+
+    fixture = Path(__file__).parent.parent.parent / "fixtures" / "xml" / "ACTIVITY_2025_sanitized.xml"
+    base = fixture.read_bytes()
+    tree = etree.fromstring(base)
+    xml_v1 = etree.tostring(tree, pretty_print=False)
+    xml_v2 = etree.tostring(tree, pretty_print=True)  # different whitespace → different SHA-256
+
+    # First persist — force year_status='rolling' via period_to monkeypatch
+    parsed_v1 = parse(xml_v1)
+    parsed_v1.period_to = date(2025, 5, 24)  # not Dec 31 → 'rolling'
+    id_v1, _ = await persist(
+        db_session, parsed=parsed_v1, user_id=sample_user.id,
+        xml_bytes=xml_v1, source="web_service",
+    )
+    await db_session.commit()
+
+    # Second persist (different hash, same key) — should DELETE v1
+    parsed_v2 = parse(xml_v2)
+    parsed_v2.period_to = date(2025, 5, 24)
+    id_v2, _ = await persist(
+        db_session, parsed=parsed_v2, user_id=sample_user.id,
+        xml_bytes=xml_v2, source="web_service",
+    )
+    await db_session.commit()
+
+    rows = (await db_session.scalars(
+        select(FlexImport).where(
+            FlexImport.user_id == sample_user.id,
+            FlexImport.anyo == 2025,
+            FlexImport.source == "web_service",
+            FlexImport.year_status == "rolling",
+        )
+    )).all()
+    assert len(rows) == 1
+    assert rows[0].id == id_v2
+
+
+@pytest.mark.asyncio
+async def test_persist_does_not_delete_sealed_years(db_session, sample_user):
+    """R1: sealed years are pinned regardless of latest-1 cleanup."""
+    from pathlib import Path
+    from datetime import date
+    from lxml import etree
+    from sqlalchemy import select
+    from ibkr_control.db.models.flex_raw import FlexImport
+    from ibkr_control.ingest.flex.parser import parse
+    from ibkr_control.ingest.flex.persister import persist
+
+    fixture = Path(__file__).parent.parent.parent / "fixtures" / "xml" / "ACTIVITY_2025_sanitized.xml"
+    base = fixture.read_bytes()
+    tree = etree.fromstring(base)
+    xml_sealed = etree.tostring(tree, pretty_print=False)
+    xml_rolling = etree.tostring(tree, pretty_print=True)
+
+    # First: persist as 'sealed' (period_to = Dec 31)
+    parsed_sealed = parse(xml_sealed)
+    parsed_sealed.period_to = date(2025, 12, 31)
+    id_sealed, _ = await persist(
+        db_session, parsed=parsed_sealed, user_id=sample_user.id,
+        xml_bytes=xml_sealed, source="web_service",
+    )
+    await db_session.commit()
+
+    # Second: persist as 'rolling' (different bytes → different hash, same anyo)
+    parsed_rolling = parse(xml_rolling)
+    parsed_rolling.period_to = date(2025, 5, 24)
+    id_rolling, _ = await persist(
+        db_session, parsed=parsed_rolling, user_id=sample_user.id,
+        xml_bytes=xml_rolling, source="web_service",
+    )
+    await db_session.commit()
+
+    # Sealed row must still exist
+    sealed_row = await db_session.scalar(
+        select(FlexImport).where(FlexImport.id == id_sealed)
+    )
+    assert sealed_row is not None
+    assert sealed_row.year_status == "sealed"
+    # Rolling row also exists
+    rolling_row = await db_session.scalar(
+        select(FlexImport).where(FlexImport.id == id_rolling)
+    )
+    assert rolling_row is not None
+    assert rolling_row.year_status == "rolling"
+
+
+@pytest.mark.asyncio
+async def test_persist_does_not_delete_poison_rows(db_session, sample_user):
+    """R1: poison rows are forensic evidence — never auto-deleted."""
+    from pathlib import Path
+    from datetime import date
+    from lxml import etree
+    from sqlalchemy import select
+    from ibkr_control.db.models.flex_raw import FlexImport
+    from ibkr_control.ingest.flex.parser import parse
+    from ibkr_control.ingest.flex.persister import persist
+
+    # Seed a poison row first
+    db_session.add(FlexImport(
+        user_id=sample_user.id, xml_hash="poison-row-hash", xml_bytes=b"x",
+        xml_size_bytes=1, anyo=2025, source="web_service",
+        year_status="rolling", status="poison", poison_reason="test",
+        period_covered_from=date(2025, 1, 1),
+        period_covered_to=date(2025, 12, 31),
+    ))
+    await db_session.commit()
+
+    # Now persist a fresh rolling row
+    fixture = Path(__file__).parent.parent.parent / "fixtures" / "xml" / "ACTIVITY_2025_sanitized.xml"
+    base = fixture.read_bytes()
+    parsed = parse(base)
+    parsed.period_to = date(2025, 5, 24)
+    await persist(
+        db_session, parsed=parsed, user_id=sample_user.id,
+        xml_bytes=base, source="web_service",
+    )
+    await db_session.commit()
+
+    poison_row = await db_session.scalar(
+        select(FlexImport).where(FlexImport.xml_hash == "poison-row-hash")
+    )
+    assert poison_row is not None
+    assert poison_row.status == "poison"
