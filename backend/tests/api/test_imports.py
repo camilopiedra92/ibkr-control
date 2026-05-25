@@ -20,7 +20,12 @@ async def test_upload_valid_xml_returns_summary(client: AsyncClient, auth_header
     assert resp.status_code == 200
     body = resp.json()
     assert "flex_import_id" in body
-    assert body["n_trades"] > 0
+    # Spec A5 (Task 8 persister rewrite): response surfaces both n_observed_*
+    # (rows that arrived in the XML) and n_new_* (rows that hit DB). A fresh
+    # import should have both > 0; a re-upload would have observed > 0 and
+    # new == 0 thanks to the hash_dedup fast-path.
+    assert body["n_observed_trades"] > 0
+    assert body["n_new_trades"] > 0
 
 
 async def test_upload_duplicate_returns_409(client: AsyncClient, auth_headers: dict):

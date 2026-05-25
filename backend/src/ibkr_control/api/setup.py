@@ -28,6 +28,7 @@ from sqlalchemy.orm import attributes
 from ibkr_control.api._schemas import (
     DetectedAccount,
     FlexCredentialsValidate,
+    IngestCounters,
     Step2DetectFromXmlResponse,
     Step2DetectResponse,
     Step2SaveRequest,
@@ -92,17 +93,16 @@ def _detected_from_parsed(parsed) -> list[DetectedAccount]:
     ]
 
 
-def _ingest_summary_from_parsed(parsed) -> dict:
-    """Opaque shape — frontend only renders counts; backend tests assert keys."""
-    return {
-        "n_trades": len(parsed.trades),
-        "n_closed_lots": len(parsed.closed_lots),
-        "n_open_position_lots": len(parsed.open_position_lots),
-        "n_cash_transactions": len(parsed.cash_transactions),
-        "n_transfers": len(parsed.transfers),
-        "n_change_in_dividend_accruals": len(parsed.change_in_dividend_accruals),
-        "n_open_dividend_accruals": len(parsed.open_dividend_accruals),
-    }
+def _counters_to_ingest(counters: dict) -> IngestCounters:
+    """Build IngestCounters from the persister's counters dict.
+
+    The persister returns a dict with `hash_dedup` and (when not deduped)
+    n_observed_* + n_new_* keys. On hash_dedup fast-path, only `hash_dedup`
+    is present; all counter fields default to 0 (per spec A4: nothing was
+    written, so n_new are all 0; observed counts are also 0 because we
+    didn't re-parse).
+    """
+    return IngestCounters(**counters)
 
 
 async def _trm_backfill_background(user_id: int, job_id: int) -> None:
@@ -284,8 +284,8 @@ async def step2_detect(
 
     # Persist via the orchestrator-grade persister: it builds FlexImport
     # internally, dedups by xml_hash, and skips F-shadow accounts. Returns
-    # the FlexImport id (existing if hash duplicate).
-    flex_import_id = await flex_persister_mod.persist(
+    # (flex_import_id, counters_dict) per spec A5 (Task 8 persister rewrite).
+    flex_import_id, counters = await flex_persister_mod.persist(
         session,
         parsed=parsed,
         user_id=user.id,
@@ -299,7 +299,7 @@ async def step2_detect(
     return Step2DetectResponse(
         detected_accounts=detected,
         flex_import_id=flex_import_id,
-        ingest_summary=_ingest_summary_from_parsed(parsed),
+        ingest_summary=_counters_to_ingest(counters),
     )
 
 
@@ -325,7 +325,10 @@ async def step2_detect_from_xml(
             detail={"code": "PARSE_ERROR", "message": str(e)[:500]},
         ) from e
 
-    await flex_persister_mod.persist(
+    # Persister returns (flex_import_id, counters_dict); this endpoint doesn't
+    # surface either to the response shape, but we still need to consume the
+    # tuple cleanly so future linter doesn't flag the discard.
+    _flex_import_id, _counters = await flex_persister_mod.persist(
         session,
         parsed=parsed,
         user_id=user.id,
@@ -595,15 +598,24 @@ async def step3_commit(
                 )
 
     # Persist pass: delegate to the real persister which handles FlexImport
-    # creation, dedup, and shadow-account filtering. We tally rows from the
-    # ParsedXML (same shape the persister uses for n_* counts).
+    # creation, dedup, and shadow-account filtering. Tally `n_new_*` from the
+    # persister's counters (rows that actually hit DB — excludes hash_dedup
+    # fast-paths and dedup'd children).
+    _NEW_KEYS = (
+        "n_new_trades",
+        "n_new_lots_closed",
+        "n_new_open_lots",
+        "n_new_cash_tx",
+        "n_new_dividends",
+        "n_new_transfers",
+    )
     for temp_id in payload.temp_ids:
         entry = stash.pop(user_id=user.id, temp_id=temp_id)
         if entry is None:
             continue  # belt-and-suspenders; validate pass already checked
         data = entry.data
         parsed = data["parsed"]
-        flex_import_id = await flex_persister_mod.persist(
+        flex_import_id, counters = await flex_persister_mod.persist(
             session,
             parsed=parsed,
             user_id=user.id,
@@ -611,7 +623,7 @@ async def step3_commit(
             source="manual_upload",
         )
         flex_import_ids.append(flex_import_id)
-        total_rows += sum(_ingest_summary_from_parsed(parsed).values())
+        total_rows += sum(counters.get(k, 0) for k in _NEW_KEYS)
 
     _set_progress(user, "step3_xmls", True)
     await session.commit()

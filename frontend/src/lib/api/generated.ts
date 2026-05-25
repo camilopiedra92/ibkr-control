@@ -101,6 +101,31 @@ export interface HTTPValidationError {
   detail?: ValidationError[];
 }
 
+/**
+ * Counters de un ingest: cuantas rows vio del XML (`n_observed_*`) y
+ * cuantas afectaron la DB (`n_new_*`).
+ *
+ * Para entities immutable: n_new = rows insertadas por primera vez.
+ * Para entities snapshot: n_new = rows touched (insert + update combinado).
+ * `hash_dedup=True` indica que el XML era byte-identico a uno previo y se
+ * aplico el fast-path; en ese caso los `n_new_*` son todos 0.
+ */
+export interface IngestCounters {
+  n_observed_trades?: number;
+  n_observed_lots_closed?: number;
+  n_observed_open_lots?: number;
+  n_observed_cash_tx?: number;
+  n_observed_dividends?: number;
+  n_observed_transfers?: number;
+  n_new_trades?: number;
+  n_new_lots_closed?: number;
+  n_new_open_lots?: number;
+  n_new_cash_tx?: number;
+  n_new_dividends?: number;
+  n_new_transfers?: number;
+  hash_dedup?: boolean;
+}
+
 export interface IngestJobStarted {
   job_id: number;
 }
@@ -126,12 +151,10 @@ export interface Step2DetectFromXmlResponse {
   parsed_only?: boolean;
 }
 
-export type Step2DetectResponseIngestSummary = { [key: string]: unknown };
-
 export interface Step2DetectResponse {
   detected_accounts: DetectedAccount[];
   flex_import_id: number;
-  ingest_summary: Step2DetectResponseIngestSummary;
+  ingest_summary: IngestCounters;
 }
 
 export interface Step2SaveAccountItem {

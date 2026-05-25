@@ -71,6 +71,30 @@ class IngestLogRead(BaseModel):
     trigger: str
 
 
+class IngestCounters(BaseModel):
+    """Counters de un ingest: cuantas rows vio del XML (`n_observed_*`) y
+    cuantas afectaron la DB (`n_new_*`).
+
+    Para entities immutable: n_new = rows insertadas por primera vez.
+    Para entities snapshot: n_new = rows touched (insert + update combinado).
+    `hash_dedup=True` indica que el XML era byte-identico a uno previo y se
+    aplico el fast-path; en ese caso los `n_new_*` son todos 0.
+    """
+    n_observed_trades: int = 0
+    n_observed_lots_closed: int = 0
+    n_observed_open_lots: int = 0
+    n_observed_cash_tx: int = 0
+    n_observed_dividends: int = 0
+    n_observed_transfers: int = 0
+    n_new_trades: int = 0
+    n_new_lots_closed: int = 0
+    n_new_open_lots: int = 0
+    n_new_cash_tx: int = 0
+    n_new_dividends: int = 0
+    n_new_transfers: int = 0
+    hash_dedup: bool = False
+
+
 # ===== Wizard redesign schemas (v0.2.2) =====
 
 
@@ -84,7 +108,7 @@ class DetectedAccount(BaseModel):
 class Step2DetectResponse(BaseModel):
     detected_accounts: list[DetectedAccount]
     flex_import_id: int
-    ingest_summary: dict  # {n_trades, n_cash_tx, ...} -- opaque shape
+    ingest_summary: IngestCounters
 
 
 class Step2DetectFromXmlResponse(BaseModel):
