@@ -443,3 +443,120 @@ async def test_run_returns_none_if_hash_already_known(
             )
         )
         assert n_logs == 2
+
+
+# ---------------------------------------------------------------------------
+# Task 6: per-user fast-path with distinct logging (ok vs poison)
+# ---------------------------------------------------------------------------
+
+import logging
+from datetime import date as _date
+from unittest.mock import AsyncMock
+
+
+@pytest.mark.asyncio
+async def test_run_logs_info_on_ok_hash_skip(
+    monkeypatch, caplog, db_session, sample_user,
+):
+    """run() encuentra hash con status='ok' -> skip + info log."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from ibkr_control.db.models.flex_credentials import FlexCredentials
+    from ibkr_control.db.models.flex_raw import FlexImport as FI
+    from ibkr_control.ingest.flex import client as flex_client_mod
+    from ibkr_control.ingest.flex import crypto as flex_crypto_mod
+    from ibkr_control.ingest.hash_dedup import xml_hash
+
+    caplog.set_level(logging.INFO, logger="ibkr_control.ingest.flex.job")
+
+    xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
+    h = xml_hash(xml)
+
+    # Seed credentials + existing flex_imports row with status='ok'
+    import base64
+    test_key = base64.b64encode(b"K" * 32).decode("ascii")
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", test_key)
+
+    db_session.add(FlexCredentials(
+        user_id=sample_user.id,
+        token_encrypted=flex_crypto_mod.encrypt_token("dummy-token"),
+        ytd_query_id="123456",
+    ))
+    db_session.add(FI(
+        user_id=sample_user.id, xml_hash=h, xml_bytes=xml,
+        xml_size_bytes=len(xml), anyo=2025, source="web_service",
+        year_status="sealed", status="ok",
+        period_covered_from=_date(2025, 1, 1),
+        period_covered_to=_date(2025, 12, 31),
+    ))
+    await db_session.commit()
+
+    engine = db_session.bind
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    from ibkr_control.ingest.flex import client as client_mod
+    monkeypatch.setattr(
+        client_mod.FlexClient, "send_request", AsyncMock(return_value="ref-ok")
+    )
+    monkeypatch.setattr(
+        client_mod.FlexClient, "poll_statement", AsyncMock(return_value=xml)
+    )
+
+    from ibkr_control.ingest.flex import job as flex_job_mod
+    result = await flex_job_mod.run(session_factory, user_id=sample_user.id, trigger="cron")
+
+    assert result is None
+    assert "duplicate hash" in caplog.text and "skipped" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_run_logs_warning_on_poison_hash_skip(
+    monkeypatch, caplog, db_session, sample_user,
+):
+    """run() encuentra hash con status='poison' -> skip + warning log con recovery hint."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from ibkr_control.db.models.flex_credentials import FlexCredentials
+    from ibkr_control.db.models.flex_raw import FlexImport as FI
+    from ibkr_control.ingest.flex import client as client_mod
+    from ibkr_control.ingest.flex import crypto as flex_crypto_mod
+    from ibkr_control.ingest.hash_dedup import xml_hash
+
+    caplog.set_level(logging.WARNING, logger="ibkr_control.ingest.flex.job")
+
+    xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
+    h = xml_hash(xml)
+
+    import base64
+    test_key = base64.b64encode(b"P" * 32).decode("ascii")
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", test_key)
+
+    db_session.add(FlexCredentials(
+        user_id=sample_user.id,
+        token_encrypted=flex_crypto_mod.encrypt_token("dummy-token"),
+        ytd_query_id="123456",
+    ))
+    db_session.add(FI(
+        user_id=sample_user.id, xml_hash=h, xml_bytes=xml,
+        xml_size_bytes=len(xml), anyo=2025, source="web_service",
+        year_status="sealed", status="poison",
+        poison_reason="forced parser crash",
+        period_covered_from=_date(2025, 1, 1),
+        period_covered_to=_date(2025, 12, 31),
+    ))
+    await db_session.commit()
+
+    engine = db_session.bind
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    monkeypatch.setattr(
+        client_mod.FlexClient, "send_request", AsyncMock(return_value="ref-poison")
+    )
+    monkeypatch.setattr(
+        client_mod.FlexClient, "poll_statement", AsyncMock(return_value=xml)
+    )
+
+    from ibkr_control.ingest.flex import job as flex_job_mod
+    result = await flex_job_mod.run(session_factory, user_id=sample_user.id, trigger="cron")
+
+    assert result is None
+    assert "previously poisoned" in caplog.text
+    assert "poison_reset" in caplog.text

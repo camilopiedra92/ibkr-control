@@ -88,12 +88,19 @@ async def persist(
     """
     h = xml_hash(xml_bytes)
 
-    # Fast-path A4: hash dedup
-    existing_id = await session.scalar(
-        select(FlexImport.id).where(FlexImport.xml_hash == h)
+    # Fast-path A4: hash dedup — scoped to (user_id, xml_hash) matching
+    # the UNIQUE(user_id, xml_hash) constraint. A bare WHERE xml_hash = :h
+    # would match rows from other users (multi-user isolation bug).
+    row = await session.execute(
+        select(FlexImport.id, FlexImport.status).where(
+            FlexImport.user_id == user_id,
+            FlexImport.xml_hash == h,
+        )
     )
-    if existing_id is not None:
-        return existing_id, {"hash_dedup": True}
+    existing = row.first()
+    if existing is not None:
+        existing_id, existing_status = existing
+        return existing_id, {"hash_dedup": True, "hash_status": existing_status}
 
     # Recopilar todos los ibkr_account_ids referenciados en el XML.
     # Skip F-suffix shadow accounts (IB-UK Limited, NAV=0) at every collection

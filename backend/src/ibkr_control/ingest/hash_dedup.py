@@ -1,9 +1,9 @@
 """SHA-256 dedup helper para flex_imports (per-user scope, R6).
 
-NOTE: is_known_hash() is deprecated (kept temporarily for backwards compat
-with flex/job.py until Task 6 swaps callers). New code should use
-check_hash_status() which returns Literal['absent', 'ok', 'poison'] and is
-scoped per-user (matching the UNIQUE(user_id, xml_hash) constraint).
+Exposes two public symbols:
+- xml_hash(bytes) -> str  — deterministic SHA-256 hexdigest
+- check_hash_status(session, user_id, hash_hex) -> 'absent' | 'ok' | 'poison'
+  Scoped to (user_id, xml_hash) matching the UNIQUE constraint on flex_imports.
 """
 import hashlib
 from typing import Literal
@@ -40,13 +40,3 @@ async def check_hash_status(
     if result is None:
         return "absent"
     return result  # type: ignore[return-value]
-
-
-async def is_known_hash(session: AsyncSession, hash_hex: str) -> bool:
-    """DEPRECATED: removed in Task 6. Use check_hash_status() instead."""
-    from ibkr_control.db.models.flex_raw import FlexImport
-
-    result = await session.scalar(
-        select(FlexImport.id).where(FlexImport.xml_hash == hash_hex)
-    )
-    return result is not None

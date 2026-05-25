@@ -137,7 +137,8 @@ async def test_persist_duplicate_hash_returns_existing_id(
         xml_bytes=xml_bytes, source="manual_upload",
     )
     assert fi_id_1 == fi_id_2
-    assert counters_2 == {"hash_dedup": True}
+    assert counters_2["hash_dedup"] is True
+    assert counters_2["hash_status"] == "ok"
 
     from ibkr_control.db.models.flex_raw import Trade
 
