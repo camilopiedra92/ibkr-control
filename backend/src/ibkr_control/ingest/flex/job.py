@@ -13,8 +13,10 @@ Patron de transaccion en ingest_xml:
     en la sesion para que ingest_log_entry lo marque como 'failed' y lo commitee.
 """
 import logging
+from datetime import date, datetime, timezone
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ibkr_control.db.models.flex_credentials import FlexCredentials
@@ -29,6 +31,47 @@ from ibkr_control.ingest.lock import advisory_lock
 from ibkr_control.ingest.log import ingest_log_entry
 
 logger = logging.getLogger(__name__)
+
+
+async def _insert_poison_row(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    xml_hash: str,
+    xml_bytes: bytes,
+    source: str,
+    exc: Exception,
+) -> None:
+    """Inserts flex_imports row with status='poison' after a parse/persist failure.
+
+    Called from inside the catch block of the SAVEPOINT-wrapped persist, so the
+    SAVEPOINT rollback runs first (reverting partial persister writes) and the
+    poison INSERT happens on the outer session — which then gets commited by
+    ingest_log_entry's finally clause.
+
+    ON CONFLICT DO NOTHING because the same poison XML may be retried before
+    the first poison row is committed (race between concurrent uploads).
+    """
+    reason = str(exc)[:2000]
+    stmt = (
+        pg_insert(FlexImport)
+        .values(
+            user_id=user_id,
+            xml_hash=xml_hash,
+            xml_bytes=xml_bytes,
+            xml_size_bytes=len(xml_bytes),
+            anyo=0,
+            source=source,
+            year_status="rolling",
+            period_covered_from=date(1970, 1, 1),
+            period_covered_to=date(1970, 1, 1),
+            status="poison",
+            poison_reason=reason,
+            fetched_at=datetime.now(timezone.utc),
+        )
+        .on_conflict_do_nothing(index_elements=["user_id", "xml_hash"])
+    )
+    await session.execute(stmt)
 
 
 async def ingest_xml(
@@ -103,12 +146,18 @@ async def ingest_xml(
                 source=source,
             )
             await sp.commit()
-        except Exception:
+        except Exception as exc:
             # Must stay broad: the SAVEPOINT catch-all must roll back partial
             # persister writes regardless of exception type (DB error, parse
             # error, unexpected) so the outer ingest_log_entry context can still
             # mark the log row as 'failed' and commit it cleanly.
             await sp.rollback()
+            # Insert poison row OUTSIDE the rolled-back savepoint so it survives
+            # the rollback and gets commited by ingest_log_entry's finally.
+            await _insert_poison_row(
+                session, user_id=user_id, xml_hash=h, xml_bytes=xml_bytes,
+                source=source, exc=exc,
+            )
             raise
 
         # Update items_processed antes del exit del log context.
@@ -192,11 +241,18 @@ async def run(
                         source="web_service",
                     )
                     await sp.commit()
-                except Exception:
+                except Exception as exc:
                     # Must stay broad: same SAVEPOINT pattern as ingest_xml — must
                     # rollback partial persister writes for any exception type so
                     # ingest_log_entry can mark the row 'failed' and commit it.
                     await sp.rollback()
+                    # Insert poison row OUTSIDE the rolled-back savepoint so it
+                    # survives the rollback and gets commited by ingest_log_entry's
+                    # finally.
+                    await _insert_poison_row(
+                        session, user_id=user_id, xml_hash=h, xml_bytes=xml_bytes,
+                        source="web_service", exc=exc,
+                    )
                     raise
 
                 log_row = await session.scalar(

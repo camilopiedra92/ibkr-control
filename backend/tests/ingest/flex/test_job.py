@@ -166,15 +166,26 @@ async def test_ingest_xml_rolls_back_persister_on_failure(db_session: AsyncSessi
     from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession as AS2
     maker2 = async_sessionmaker(db_engine, expire_on_commit=False, class_=AS2)
     async with maker2() as s2:
-        # No flex_imports should exist for this bad xml_hash
+        # Post-Task-7: a poison FlexImport row must exist (R2 contract).
+        # The SAVEPOINT rollback still reverts partial persister writes (e.g.
+        # no CashTransaction rows), but the poison row itself is written outside
+        # the savepoint and committed by ingest_log_entry's finally clause.
         from ibkr_control.ingest.hash_dedup import xml_hash
+        from ibkr_control.db.models.flex_raw import CashTransaction
         bad_hash = xml_hash(b"<xml>bad-fk</xml>")
         fi = await s2.scalar(
             select(FlexImport).where(FlexImport.xml_hash == bad_hash)
         )
-        assert fi is None, "Persister data should have been rolled back"
+        assert fi is not None, "Poison FlexImport row must exist after persist failure"
+        assert fi.status == "poison", f"FlexImport should be status='poison', got {fi.status!r}"
 
-        # But the ingest_log 'failed' row should persist
+        # SAVEPOINT rollback was effective: no partial cash_transactions from the bad insert
+        n_cash = await s2.scalar(
+            select(func.count(CashTransaction.id))
+        )
+        assert n_cash == 0, "CashTransaction writes should have been rolled back by SAVEPOINT"
+
+        # The ingest_log 'failed' row must persist
         log_row = await s2.scalar(
             select(IngestLog)
             .where(
