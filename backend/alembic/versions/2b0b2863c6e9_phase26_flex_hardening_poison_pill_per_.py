@@ -48,7 +48,7 @@ def upgrade() -> None:
     # 2. poison_reason column
     op.add_column(
         "flex_imports",
-        sa.Column("poison_reason", sa.String(), nullable=True),
+        sa.Column("poison_reason", sa.Text(), nullable=True),
     )
 
     # 3. UNIQUE(xml_hash) → UNIQUE(user_id, xml_hash)

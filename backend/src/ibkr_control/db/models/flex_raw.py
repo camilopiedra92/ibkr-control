@@ -10,7 +10,7 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger, CheckConstraint, Date, DateTime, ForeignKey, Index,
-    Integer, LargeBinary, Numeric, String, UniqueConstraint, text,
+    Integer, LargeBinary, Numeric, String, Text, UniqueConstraint, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -59,7 +59,7 @@ class FlexImport(Base):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, server_default=text("'ok'")
     )
-    poison_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    poison_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class Trade(Base):
