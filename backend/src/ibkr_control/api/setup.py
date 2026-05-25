@@ -281,8 +281,12 @@ async def step2_detect(
 async def step2_detect_from_xml(
     file: UploadFile = File(...),
     user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_async_session),
 ) -> Step2DetectFromXmlResponse:
-    """Parse uploaded XML, return detected accounts. NO persist (fallback when IBKR offline)."""
+    """Fallback when IBKR is unreachable: parse uploaded XML and persist it as
+    a manual upload so step2/save can validate detected accounts. The persister
+    dedups by SHA-256, so re-uploads of the same XML are idempotent.
+    """
     content = await file.read()
     settings = get_settings()
     if len(content) > settings.max_xml_size_bytes:
@@ -295,9 +299,18 @@ async def step2_detect_from_xml(
             detail={"code": "PARSE_ERROR", "message": str(e)[:500]},
         ) from e
 
+    await flex_persister_mod.persist(
+        session,
+        parsed=parsed,
+        user_id=user.id,
+        xml_bytes=content,
+        source="manual_upload",
+    )
+    await session.commit()
+
     return Step2DetectFromXmlResponse(
         detected_accounts=_detected_from_parsed(parsed),
-        parsed_only=True,
+        parsed_only=False,
     )
 
 
