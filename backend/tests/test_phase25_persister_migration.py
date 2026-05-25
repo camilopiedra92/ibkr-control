@@ -103,7 +103,7 @@ async def test_phase25_rev1_adds_xml_bytes_nullable(alembic_db_session: AsyncSes
     ))
     row = result.first()
     assert row is not None
-    assert row[0] == 'YES'  # nullable in Revision 1 (NOT NULL post-wipe in Rev2)
+    assert row[0] == 'NO'  # Rev2 promovio a NOT NULL post-wipe
 
 
 @pytest.mark.asyncio
@@ -132,4 +132,91 @@ async def test_phase25_rev1_adds_transaction_id_to_closed_lots_nullable(
     ))
     row = result.first()
     assert row is not None
-    assert row[0] == 'YES'  # nullable en Rev1; NOT NULL en Rev2
+    assert row[0] == 'NO'  # Rev2 promovio a NOT NULL post-wipe
+
+
+@pytest.mark.asyncio
+async def test_phase25_rev2_promotes_transaction_id_not_null(alembic_db_session):
+    for table in ('closed_lots', 'cash_transactions', 'transfers'):
+        result = await alembic_db_session.execute(text(
+            f"SELECT is_nullable FROM information_schema.columns "
+            f"WHERE table_name = '{table}' AND column_name = 'transaction_id'"
+        ))
+        row = result.first()
+        assert row is not None, f"transaction_id missing from {table}"
+        assert row[0] == 'NO', f"{table}.transaction_id should be NOT NULL"
+
+
+@pytest.mark.asyncio
+async def test_phase25_rev2_adds_unique_constraints(alembic_db_session):
+    """All 6 UNIQUE constraints from spec A3 + transaction_id must exist."""
+    expected_constraints = {
+        'closed_lots_transaction_id_key',
+        'cash_transactions_transaction_id_key',
+        'transfers_transaction_id_key',
+        'open_position_lots_natural_key',
+        'change_in_dividend_accruals_natural_key',
+        'open_dividend_accruals_natural_key',
+    }
+    result = await alembic_db_session.execute(text(
+        "SELECT conname FROM pg_constraint WHERE conname = ANY(:names)"
+    ).bindparams(names=list(expected_constraints)))
+    found = {row[0] for row in result.all()}
+    assert found == expected_constraints, f"Missing: {expected_constraints - found}"
+
+
+@pytest.mark.asyncio
+async def test_phase25_rev2_promotes_xml_bytes_not_null(alembic_db_session):
+    result = await alembic_db_session.execute(text(
+        "SELECT is_nullable FROM information_schema.columns "
+        "WHERE table_name = 'flex_imports' AND column_name = 'xml_bytes'"
+    ))
+    row = result.first()
+    assert row is not None
+    assert row[0] == 'NO'
+
+
+@pytest.mark.asyncio
+async def test_phase25_rev2_open_position_lots_natural_key_enforced(alembic_db_session):
+    """Insertar duplicate (account, symbol, open_date, snapshot_date) debe fallar."""
+    from sqlalchemy.exc import IntegrityError
+
+    # Setup minimo: insertar account + flex_import + 2 open_position_lots con misma natural key
+    await alembic_db_session.execute(text("""
+        INSERT INTO accounts (ibkr_account_id, currency)
+        VALUES ('U99999099', 'USD') ON CONFLICT DO NOTHING
+    """))
+    await alembic_db_session.execute(text("""
+        INSERT INTO users (id, name, email, hashed_password, is_active, is_superuser, is_verified)
+        VALUES (9999, 'rev2test', 'rev2test@example.com', 'x', true, false, false)
+        ON CONFLICT (id) DO NOTHING
+    """))
+    await alembic_db_session.execute(text("""
+        INSERT INTO flex_imports (id, user_id, anyo, xml_hash, xml_size_bytes, xml_bytes,
+                                  source, period_covered_from, period_covered_to,
+                                  year_status, status, fetched_at)
+        VALUES (9999, 9999, 2026, 'test-rev2-hash', 10, '\\x00010203'::bytea,
+                'manual_upload', '2026-01-01', '2026-12-31', 'rolling', 'ok', now())
+        ON CONFLICT DO NOTHING
+    """))
+    await alembic_db_session.commit()
+
+    account_id = (await alembic_db_session.execute(
+        text("SELECT id FROM accounts WHERE ibkr_account_id = 'U99999099'")
+    )).scalar()
+
+    # Primer insert OK
+    await alembic_db_session.execute(text("""
+        INSERT INTO open_position_lots (flex_import_id, account_id, symbol, open_date, qty, cost_basis_usd, snapshot_date)
+        VALUES (9999, :acc, 'AAPL', '2026-01-15', 10, 1500, '2026-05-25')
+    """).bindparams(acc=account_id))
+    await alembic_db_session.commit()
+
+    # Segundo insert con mismo natural key -> IntegrityError
+    with pytest.raises(IntegrityError):
+        await alembic_db_session.execute(text("""
+            INSERT INTO open_position_lots (flex_import_id, account_id, symbol, open_date, qty, cost_basis_usd, snapshot_date)
+            VALUES (9999, :acc, 'AAPL', '2026-01-15', 20, 3000, '2026-05-25')
+        """).bindparams(acc=account_id))
+        await alembic_db_session.commit()
+    await alembic_db_session.rollback()
