@@ -15,6 +15,21 @@ axiosInstance.interceptors.request.use((cfg) => {
   return cfg;
 });
 
+axiosInstance.interceptors.response.use(
+  (r) => r,
+  (error) => {
+    if (
+      typeof window !== "undefined" &&
+      error?.response?.status === 401 &&
+      !window.location.pathname.startsWith("/login")
+    ) {
+      localStorage.removeItem("auth_token");
+      window.location.replace("/login");
+    }
+    return Promise.reject(error);
+  },
+);
+
 export const axiosMutator = <T>(config: AxiosRequestConfig): Promise<T> => {
   // axios.request returns AxiosResponse<T> with .data, .headers, .status, etc.
   // Orval-generated code expects T directly — unwrap .data here so the type

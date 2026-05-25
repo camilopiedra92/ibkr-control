@@ -22,16 +22,23 @@ export default function SettingsPage() {
   const [tz, setTz] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Used to trigger a re-fetch in IngestLogTable after a manual refresh
   const [logRefreshKey, setLogRefreshKey] = useState(0);
 
   useEffect(() => {
-    axiosInstance.get<Settings>("/api/settings").then((r) => {
-      setSettings(r.data);
-      setRate(r.data.marginal_rate);
-      setTz(r.data.timezone);
-    });
+    axiosInstance
+      .get<Settings>("/api/settings")
+      .then((r) => {
+        setSettings(r.data);
+        setRate(r.data.marginal_rate);
+        setTz(r.data.timezone);
+      })
+      .catch((e) => {
+        if (e?.response?.status === 401) return;
+        setLoadError("No pude cargar settings. Reintentá en unos segundos.");
+      });
   }, []);
 
   async function save() {
@@ -51,6 +58,7 @@ export default function SettingsPage() {
     }
   }
 
+  if (loadError) return <p className="text-sm text-red-600">{loadError}</p>;
   if (!settings) return <p className="text-sm text-muted-foreground">Cargando…</p>;
 
   return (
