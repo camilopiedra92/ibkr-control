@@ -4,8 +4,10 @@
 
 **Phase 2 + wizard redesign completos (tags `v0.2.0-ingest`, `v0.2.1-persistent-state`, `v0.2.2-wizard-redesign`). Próximo: Phase 3.**
 
-Branch `phase2/ingestion` ya mergeado a `main`. Branch `feat/wizard-redesign` (17 commits + docs/tag) terminada y lista para merge a `main` cuando el usuario lo decida.
-Tag `v0.2.0-ingest` apunta al cierre original de polish (`a606be2`). Tag `v0.2.1-persistent-state` apunta a `172cc12` — incluye SQLAlchemyJobStore + DB-backed rate limit. Tag `v0.2.2-wizard-redesign` apunta al cierre del rewrite del wizard (detect-first, F-filter en persister, Migration H wipea legacy). **207/207 backend tests pasan, frontend builds clean, 3 nuevos Playwright wizard specs.**
+Branches `phase2/ingestion` + `feat/wizard-redesign` ya mergeadas a `main` (merge SHA `b458ac6`). Smoke test del wizard en dev completado exitosamente con datos reales IBKR el 2026-05-24.
+Tag `v0.2.0-ingest` apunta al cierre original de polish (`a606be2`). Tag `v0.2.1-persistent-state` apunta a `172cc12` — incluye SQLAlchemyJobStore + DB-backed rate limit. Tag `v0.2.2-wizard-redesign` apunta al cierre del rewrite del wizard (detect-first, F-filter en persister, Migration H wipea legacy). **209/209 backend tests pasan, frontend builds clean, 3 nuevos Playwright wizard specs.**
+
+Post-merge sobre `main` (4 commits sin push aún): `8bd578f` infra DNS fix para container backend (resolver local AdGuard/NextDNS SERVFAILa `gdcdyn.interactivebrokers.com` → pinned a `1.1.1.1`/`8.8.8.8`), `24aa5f9` fix gap del fallback "subir XML manual" (ahora persiste igual que `step2/detect` para que `step2/save` valide contra `accounts`), `4eb4f80` migración a endpoints V3 oficiales (`ndcdyn` + `/AccountManagement/FlexWebService/`) + User-Agent header requerido. Ver §"Wizard redesign post-deploy" abajo para detalle completo.
 
 ### Camino A — Planificar Phase 3 (recomendado)
 
@@ -27,44 +29,45 @@ Phase 3 = domain layer + 3 pantallas (Lotes Abiertos/Cerrados/Alertas 730d). Spe
 8. Branch: git checkout -b phase3/lotes main
 ```
 
-### Camino B — Deploy a Coolify + smoke test prod (tarea del usuario, no del agente)
+### Camino B — Push a remote + deploy a Coolify (tarea del usuario)
 
-Independiente de Phase 3. La sesión Claude no puede hacer estos pasos (UI interactiva + credenciales reales):
+Smoke test en dev YA está hecho (2026-05-24, ver §"Wizard redesign post-deploy"). Falta solo push + deploy prod:
 
 ```
-1. Merge feat/wizard-redesign → main + push a remote (~30s):
-   git checkout main && git merge --no-ff feat/wizard-redesign
+1. Push main + tags a remote (~30s):
    git push origin main --follow-tags
-   # Esto sube main + tags v0.2.0/v0.2.1/v0.2.2 a GitHub
+   # Sube los 4 commits post-merge (b458ac6, 8bd578f, 24aa5f9, 4eb4f80) +
+   # tags v0.2.0/v0.2.1/v0.2.2 a GitHub
 
 2. Configurar TOKEN_ENCRYPTION_KEY en Coolify (1 min):
    openssl rand -base64 32  # generar key
    # Pegarla en Coolify env vars del backend container
    # CRÍTICO: sin esta key, decrypt_token() crashea al primer fetch del cron
 
-3. Trigger redeploy desde Coolify UI apuntando a main (~3 min build):
+3. Confirmar DNS en Coolify (1 min):
+   # El compose.yml local ahora pinea `dns: [1.1.1.1, 8.8.8.8]` en backend.
+   # Coolify normalmente usa DNS público por default — verificar que no
+   # haya un override de network que herede DNS del host server. Si lo hay,
+   # replicar el pin en la config de Coolify.
+
+4. Trigger redeploy desde Coolify UI apuntando a main (~3 min build):
    # Verificar logs: "Registered 3 ingest jobs: flex_daily, trm_daily, cleanup_job_tracker"
    # Migration H wipea data legacy — preserva flex_credentials + apscheduler_jobs
    # Si las migrations no se aplican automáticamente:
    docker exec <backend-container> uv run alembic upgrade head
 
-4. Smoke test end-to-end del wizard redesign (~20-30 min):
-   - Abrir URL prod del frontend → registrarte
-   - Step 1: pegar tu Flex Token + YTD Query ID reales → guardar
-   - Step 2: ver auto-detect de cuentas (debe traer 3 cuentas U-prefix, filtrar 3 F-shadow)
-     · Ajustar % cuenta conjunta U99999001 al 50%, alias pre-poblado
-   - Step 3: drag-drop XMLs históricos desde ../renta/fuentes/2024/2025/compartidos/ibkr/
-     · Si el XML trae cuentas nuevas no detectadas, debe aparecer modal
-   - Finish: "Iniciar carga" → ver SSE progress
-   - Verificar dashboard llega + DB no tiene F-shadow accounts
-   - Settings → log table tiene entries, click "Actualizar ahora" funciona
+5. Smoke test end-to-end del wizard en prod (~20-30 min):
+   # Mismo flow validado en dev: Step 1 creds → Step 2 detect (online o
+   # XML fallback) → Step 2 configure → Step 3 históricos → finish.
+   # Si IBKR responde 1001 BUSY (puede pasar — es 1x/día por design),
+   # usar "Subir XML manualmente" — funciona end-to-end.
 ```
 
 ### Pre-Phase-3 checklist (verificar al arrancar la próxima sesión)
 
 - [ ] `git status` limpio en `main`
 - [ ] `git tag -l "v0.2*"` muestra `v0.2.0-ingest` + `v0.2.1-persistent-state` + `v0.2.2-wizard-redesign`
-- [ ] `cd backend && uv run pytest -q` → 207 passed
+- [ ] `cd backend && uv run pytest -q` → 209 passed
 - [ ] `cd frontend && pnpm build` → exit 0
 - [ ] Leer `docs/plans/2026-05-24-phase2-polish-backlog.md` § "Deuda conocida (D1-D11)"
 - [ ] (Opcional) `docker compose ps` para confirmar postgres + backend healthy si vas a smoke test
@@ -84,9 +87,11 @@ Independiente de Phase 3. La sesión Claude no puede hacer estos pasos (UI inter
 
 | Item | Quién | Bloquea? |
 |---|---|---|
-| **Push main + tag a remote** (`git push origin main --follow-tags`) | Usuario | No bloquea Phase 3 dev local |
-| **Deploy a Coolify + setear `TOKEN_ENCRYPTION_KEY`** | Usuario | No bloquea Phase 3 dev local |
-| **Smoke test end-to-end con datos reales IBKR** | Usuario | No bloquea Phase 3 (testcontainer alcanza) |
+| **Push main + 4 commits post-merge + tags a remote** (`git push origin main --follow-tags`) | Usuario | No bloquea Phase 3 dev local |
+| **Deploy a Coolify + setear `TOKEN_ENCRYPTION_KEY` + verificar DNS público** | Usuario | No bloquea Phase 3 dev local |
+| **Smoke test end-to-end en dev** ✅ completado 2026-05-24 | — | — |
+| **Smoke test end-to-end en prod** | Usuario | No bloquea Phase 3 (dev validó el flow) |
+| **Counterparty account `CS-######-##` queda como orphan account** (1 row dejada de smoke test — `CS-999999-99` del transfer GLOB desde Shareworks) | Aceptado | No bloquea Phase 3 — se resuelve cuando Phase 3 reescriba el persister, ver §Roadmap Phase 3 |
 | **11 items de deuda conocida D1-D11** documentados en polish backlog | Aceptados como V1 | No bloquean — la mayoría tienen mitigation o son features (fail-loud audit, etc.) |
 
 ### Deuda conocida heredada de Phase 2 (resumen)
@@ -126,6 +131,16 @@ Detalles útiles para evitar re-depurar en fases futuras:
 - **Formato de datos numéricos — decisión locked** — Phase 2 polish llegó a `Numeric(20,4)` para totales USD, `Numeric(20,8)` para quantities, `Numeric(20,6)` para prices, `Numeric(12,4)` para TRM. Rechazado integer minor units (Stripe-style) por (a) volumen bajo, (b) multi-currency USD/COP/TRM hace error-prone trackear scale por columna, (c) Python `Decimal` interop más limpio con NUMERIC. Match precisión del XML IBKR source + DIAN TRM.
 - **Post-Phase-2 persistent state migration (D5+D2 RESOLVED)** — sesión 2026-05-24 mergeó 5 commits (deps `c86e308` + D5 scheduler `70f9bd0` + D2 rate limit `45127f1` + docs `27f9442` + plan `8b823f8`) reabriendo dos decisiones "locked" del spec Phase 2: (a) APScheduler ahora usa `SQLAlchemyJobStore` persistente — tabla `apscheduler_jobs` auto-creada al boot, `misfire_grace_time=21600` (6h) en los 3 crons para recuperar runs perdidos por container restart; (b) rate limit del endpoint `POST /api/ingest/trigger` movido de dict in-memory `_LAST_TRIGGER` a columna `users.last_ingest_trigger_at` (Migration G) + UPDATE atómico condicional (`WHERE last_ingest_trigger_at IS NULL OR < now() - cooldown`) sin race TOCTOU. Nueva dep: `psycopg[binary]>=3.1` (driver sync que APScheduler 3.x requiere — el app sigue usando `asyncpg` para todo lo demás). APScheduler pinned a `==3.11.*` para evitar drift de schema del jobstore. Lecciones: (1) las decisiones "locked" pueden re-abrirse si el lift es chico y el upside es real — el patrón es documentar el cambio de criterio en commit + spec note "SUPERSEDED", no editar la decisión vieja; (2) APScheduler 3.x SQLAlchemyJobStore es sync incluso bajo `AsyncIOScheduler` (corre las ops del jobstore en el thread del scheduler, no en el event loop) — por eso necesitamos un driver sync separado del asyncpg de la app. Tests: 186 → 192. Ver `docs/plans/2026-05-24-d5-d2-persistent-state.md`.
 - **Wizard redesign post-deploy (2026-05-24, tag v0.2.2-wizard-redesign)** — el smoke test end-to-end con datos reales reveló que el wizard pedía IDs de cuenta ciegos (typos), no validaba contra cuentas reales del usuario, y poblaba `accounts` con 3 F-suffix shadow accounts IB-UK Limited (NAV=0, fees/journals only). Reescritura "detect-first": Step 1 solo guarda creds, Step 2 fetchea Flex YTD + auto-detecta cuentas filtrando F-suffix, pre-pobla alias desde `<AccountInformation accountAlias=>`. Step 3 multi-file drag-drop con detect de cuentas nuevas en XMLs históricos (modal de confirmación). Filtro F a nivel persister (allowlist pattern del sibling renta) garantiza que ningún ingest futuro re-introduzca shadow accounts. Migration H wipea data legacy (preserva `flex_credentials` + `apscheduler_jobs`). Backend: 9 endpoints reescritos bajo `/api/setup/*` + in-memory `_step3_stash` con TTL. Frontend: state machine de 7 pantallas en `WizardPage` reemplaza los 4 steps lineales originales. Tests: 192 → 207 (+15 backend) + 3 nuevos Playwright wizard specs. Spec: `docs/specs/2026-05-24-wizard-redesign-design.md` (D1-D12 locked). Plan: `docs/plans/2026-05-24-wizard-redesign.md` (16 tareas). Branch: `feat/wizard-redesign` (17 commits + docs). Cleanup: legacy `frontend/e2e/wizard.spec.ts` eliminado (superseded por los 3 specs nuevos).
+
+- **Wizard redesign post-deploy fixes (smoke test dev, 2026-05-24, post-merge a main)** — el primer smoke test contra IBKR real reveló 4 problemas adicionales que el spec del wizard no contempló. Todos resueltos pre-deploy a prod, en `main` post-merge:
+  - **(1) DNS infra (`8bd578f`):** backend container heredaba el resolver del host (Docker Desktop → `/etc/resolv.conf` → `127.0.2.2/3`). En macOS con AdGuard/NextDNS/VPN/Little Snitch activo, `gdcdyn.interactivebrokers.com` daba `SERVFAIL`. Fix: pin `dns: [1.1.1.1, 8.8.8.8]` al servicio backend en `docker-compose.yml`. En Coolify hay que verificar que la red del compose use DNS público también.
+  - **(2) Fallback gap (`24aa5f9`):** el spec D2 mandaba `step2/detect_from_xml` como "parse-only, no DB writes". Pero `step2/save` valida cada `ibkr_account_id` contra `accounts` table (anti-typo) — entonces si IBKR responde 1001 BUSY y el usuario usa el fallback de upload manual, `save` rebotaba 400 `ACCOUNT_NOT_DETECTED` para cada cuenta. Fix: `detect_from_xml` ahora persiste igual que `detect` con `source="manual_upload"`. El persister ya dedupea por SHA-256 (idempotente). +2 tests (regression lock + dedup). Test count 207 → 209.
+  - **(3) Migración Flex Web Service V3 (`4eb4f80`):** estábamos en el host legacy `gdcdyn.interactivebrokers.com` con paths `/Universal/servlet/FlexStatementService.*`. La V3 oficial (per `interactivebrokers.com/campus/ibkr-api-page/flex-web-service/`) vive en `ndcdyn.interactivebrokers.com` + `/AccountManagement/FlexWebService/`. Adicionalmente, V3 exige `User-Agent` header explícito ("all requests must include a User-Agent header") — sin él, httpx mandaba `python-httpx/x.y.z` que IBKR puede penalizar como bot. Tests + VCR cassettes actualizados con find-replace. El param `v=3` ya estaba.
+  - **(4) Counterparty accounts (DEFERRED a Phase 3):** smoke test detectó una 4ta cuenta `CS-999999-99` huérfana en `accounts` post-wizard. Investigación: era un `<Transfer>` `IN` con symbol `GLOB` (94 acciones) desde Shareworks/Solium/Morgan Stanley StockPlan Connect (broker externo donde Globant deposita el bono RSU) a `U99999002` (cuenta personal del usuario). El persister recolecta `account_id` de TODOS los tags del XML (incluido `<Transfer>`), no solo de `<AccountInformation>`. Counterparties externos terminan como `Account` rows huérfanos (sin participation, sin trades, solo referenciados en 1 transfer). Fix sistémico: persister debería crear `Account` rows SOLO para IDs en `<AccountInformation>`; los counterparties en transfers deberían guardarse como `counterparty_ref TEXT` (no FK). Ver §Roadmap Phase 3 decisión #6.
+
+- **Lecciones del smoke test post-merge** (no son código — son aprendizajes que valen para sesiones futuras):
+  - **IBKR 1001 BUSY es inherente al diseño**, no a la versión del API. Doc oficial: *"Activity Statement Flex Queries contain data that is only updated once daily at close of business, so there is no benefit to generating and retrieving these reports more than once per day."* El pacing oficial es 1 req/s, 10/min — nuestro retry `[5,15,30]s` está bien. En prod el cron 1x/día post-cierre US lo evita naturalmente. **La migración V3 NO resuelve 1001** — solo el fallback manual lo hace, y por eso era crítico cerrar el gap (2).
+  - **macOS local resolvers (AdGuard/NextDNS/VPN) son una clase de bug recurrente** para containers Docker que necesitan egress. Worth documentar en cualquier nuevo servicio que llame APIs externas.
 
 ---
 
@@ -195,6 +210,7 @@ Phase 3 = **domain layer + 3 pantallas**: convertir los datos crudos que dejó P
 3. **¿Cuándo recomputar TODOS los años vs solo el año del ingest?** — un cambio de TRM histórico afecta cost_basis_cop de lotes viejos; ¿recompute selectivo o full?
 4. **Stale-while-revalidate en pantalla Lotes** — ¿mostramos clasificaciones cacheadas mientras recomputa, o esperamos?
 5. **`lot_status_v` view recomputa días_hasta_730 con CURRENT_DATE** — ¿alcanza para mostrar el semáforo en real-time, o necesitamos un materialized view + refresh diario?
+6. **Refactor del persister para no crear `Account` rows huérfanos por counterparties externos** — bug detectado en smoke test del wizard redesign (ver Retrospectiva §"Wizard redesign post-deploy fixes" item 4). El persister actual recolecta `account_id` de TODOS los tags del XML; cuando un `<Transfer>` IN viene desde un broker externo (e.g. `CS-999999-99` = Shareworks/Solium/MS StockPlan para GLOB RSU bonus), el ID del counterparty queda como Account row sin participation. Decisión Phase 3: crear `Account` rows SOLO para IDs en `<AccountInformation>`; los src/dst de transfers que no matchean a un `Account` propio se guardan como `counterparty_ref TEXT` separado del FK. Requiere Migration nueva (drop FK O nullable + nueva columna) + cleanup de rows huérfanos preexistentes. Es work pequeño (~3-5 LOC en persister + migración) pero del scope de Phase 3 porque toca el mismo persister que recompute_lot_classifications va a invocar.
 
 ### Cross-references a renta (Phase 3 específicos)
 

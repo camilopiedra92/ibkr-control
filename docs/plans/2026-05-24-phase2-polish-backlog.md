@@ -440,3 +440,52 @@ completa:
 Cierra el item D6 del CLAUDE.md (cron times) parcialmente — el persister ahora
 filtra F-shadow universalmente, lo que mejora la calidad de los snapshots de
 cualquier cron.
+
+---
+
+## Post-merge a main: smoke test dev fixes (2026-05-24)
+
+Después de mergear `feat/wizard-redesign` a `main`, el smoke test contra IBKR
+real reveló 4 items no contemplados por el spec del wizard. 3 resueltos pre-deploy
+a prod, 1 deferred a Phase 3. Tests 207 → 209.
+
+### Resueltos en `main` (no en branch, no en tag)
+
+**1. DNS infra** (`8bd578f` — `fix(infra): force public DNS on backend container`)
+- **Síntoma:** `httpx.ConnectError: [Errno -2] Name or service not known` para `gdcdyn.interactivebrokers.com` desde container backend.
+- **Causa raíz:** macOS host con resolver local en `127.0.2.2/3` (AdGuard/NextDNS/VPN/Little Snitch) devolviendo SERVFAIL para ese dominio. Docker Desktop hereda el resolver del host vía `192.168.65.7`.
+- **Fix:** pin `dns: [1.1.1.1, 8.8.8.8]` en `docker-compose.yml` para servicio backend (solo backend lo necesita — postgres no toca internet, frontend solo sirve assets).
+- **Implicación prod:** Coolify normalmente usa DNS público por default. Verificar que la network del compose en Coolify NO tenga override que herede el resolver del host server.
+
+**2. Fallback de upload manual no persistía** (`24aa5f9` — `fix(api): step2/detect_from_xml must persist so step2/save accepts the IDs`)
+- **Síntoma:** cuando IBKR responde 1001 BUSY y el usuario usa "Subir XML manualmente", `step2/save` rebota cada cuenta con `400 ACCOUNT_NOT_DETECTED`.
+- **Causa raíz:** spec D2 del wizard mandaba que `detect_from_xml` fuera "parse-only, no DB writes". Pero `step2/save` valida cada `ibkr_account_id` contra `accounts` table como anti-typo defense. Si el fallback no persiste, save siempre falla.
+- **Fix:** `detect_from_xml` ahora invoca `flex_persister.persist(...)` con `source="manual_upload"` (mismo path que `detect` pero distinto source). El persister dedupea por SHA-256 → re-subir el mismo XML es idempotente.
+- **Tests nuevos:** `test_detect_from_xml_persists_accounts_and_flex_import` (regression lock) + `test_detect_from_xml_is_idempotent_on_same_sha` (dedup verification).
+- **Spec note:** D2 está SUPERSEDED. El fallback ahora es semánticamente equivalente a un upload manual de Step 3.
+
+**3. Migración a Flex Web Service V3** (`4eb4f80` — `feat(flex): migrate client to Flex Web Service V3 endpoints`)
+- **Síntoma:** ningún error inmediato — pero la doc oficial (`interactivebrokers.com/campus/ibkr-api-page/flex-web-service/`) documenta endpoints distintos a los que usábamos.
+- **Causa raíz:** estábamos usando el host legacy `gdcdyn.interactivebrokers.com` con paths `/Universal/servlet/FlexStatementService.*`. La V3 oficial (la única documentada como "current") vive en:
+  - `https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService/SendRequest`
+  - `https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService/GetStatement`
+- **V3 requiere `User-Agent` header explícito** ("all requests must include a User-Agent header"). httpx mandaba `python-httpx/x.y.z` por default → IBKR puede penalizarlo como bot.
+- **Fix:** swap de constantes `DEFAULT_BASE_URL` + `SEND_REQUEST_PATH` + `GET_STATEMENT_PATH` en `flex/client.py`. Adicionar `headers={"User-Agent": "ibkr-control/0.2 (+...)"}` a ambos `httpx.AsyncClient(...)`. Find-replace en tests + VCR cassettes (5 archivos). El param `v=3` ya estaba.
+- **Verificado en prod:** ambos hosts (legacy + V3) responden HTTP 200 con el mismo XML format (`<FlexStatementResponse>` + ErrorCodes) ante token fake. Cambio es backwards-compatible en response shape.
+- **Aclaración importante:** la migración V3 **NO resuelve el 1001 BUSY**. Per doc oficial: "Activity Statement Flex Queries contain data that is only updated once daily at close of business, so there is no benefit to generating and retrieving these reports more than once per day." El pacing oficial es 1 req/s, 10/min. En prod el cron 1x/día post-cierre US lo evita.
+
+### Deferred a Phase 3
+
+**4. Counterparty accounts dejan huérfanos en `accounts`** (sin commit, flagged)
+- **Síntoma:** post-smoke-test, `accounts` table tenía 4 rows aunque el usuario configuró 3 (las 3 U-prefix reales). La 4ta era `CS-999999-99` sin participation.
+- **Investigación:** `CS-999999-99` apareció en un único `<Transfer>` con `direction=IN`, `symbol=GLOB`, 94 acciones, `dst=U99999002`. Confirmación del usuario: era el bono RSU de Globant pagado vía Shareworks/Solium/Morgan Stanley StockPlan, transferido manualmente a IBKR.
+- **Causa raíz:** persister recolecta `account_id` de TODOS los tags del XML (trades, cash, lots, transfers, dividend_accruals), no solo de `<AccountInformation>`. Counterparties externos terminan como Account rows huérfanos.
+- **Fix sistémico (Phase 3):** persister crea `Account` rows SOLO para IDs en `<AccountInformation>`. Para transfers, src/dst que no matchee a un Account propio se guarda en una columna `counterparty_ref TEXT` separada del FK. Requiere migration nueva (drop o nullable FK + add counterparty_ref).
+- **Decisión:** deferred a Phase 3 (item #6 del §Roadmap Phase 3 en CLAUDE.md) porque (a) requiere refactor de modelo que es del scope del persister rewrite de Phase 3, (b) los counterparty rows son inertes (cero queries downstream los referencian salvo el transfer correspondiente), (c) cleanup tactical del row existente en dev es trivial (`DELETE FROM accounts WHERE ibkr_account_id LIKE 'CS-%'`).
+
+### Lecciones nuevas (escritas en CLAUDE.md §"Wizard redesign post-deploy fixes")
+
+- IBKR 1001 BUSY es inherente al diseño (1x/día post-cierre).
+- macOS local resolvers (AdGuard/NextDNS/VPN) son una clase de bug recurrente para containers Docker con egress.
+- Flex Web Service V3: host `ndcdyn`, path `/AccountManagement/FlexWebService/`, User-Agent obligatorio.
+- "Parse-only, no DB writes" en endpoints fallback es un anti-pattern si endpoints downstream validan contra DB state — el fallback debe dejar el sistema en un estado válido para los siguientes steps.
