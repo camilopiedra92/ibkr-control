@@ -204,3 +204,77 @@ async def test_poll_statement_timeout_records_actual_elapsed(monkeypatch):
     # Exception chain must be preserved (not suppressed with from None)
     assert exc_info.value.__cause__ is not None
     assert isinstance(exc_info.value.__cause__, FlexStatementPendingError)
+
+
+@pytest.mark.asyncio
+async def test_send_request_retries_on_1001_busy(monkeypatch):
+    """send_request debe reintentar FlexBusyError (1001) hasta 3 veces."""
+    from unittest.mock import AsyncMock, patch
+
+    from ibkr_control.ingest.flex.client import FlexBusyError
+
+    client = FlexClient(token="t")
+    call_count = 0
+
+    async def fake_send_once(self, query_id):
+        nonlocal call_count
+        call_count += 1
+        if call_count < 3:
+            raise FlexBusyError("transient")
+        return "ref-final"
+
+    monkeypatch.setattr(FlexClient, "_send_request_once", fake_send_once)
+
+    with patch("asyncio.sleep", new=AsyncMock()):
+        result = await client.send_request("query-1")
+
+    assert result == "ref-final"
+    assert call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_send_request_does_not_retry_on_auth_error(monkeypatch):
+    """FlexAuthError debe propagar inmediato sin retry."""
+    from ibkr_control.ingest.flex.client import FlexAuthError as _FlexAuthError
+
+    client = FlexClient(token="t")
+    call_count = 0
+
+    async def fake_send_once(self, query_id):
+        nonlocal call_count
+        call_count += 1
+        raise _FlexAuthError("1018", "invalid token")
+
+    monkeypatch.setattr(FlexClient, "_send_request_once", fake_send_once)
+
+    with pytest.raises(FlexAuthError):
+        await client.send_request("query-1")
+
+    assert call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_send_request_retries_on_5xx(monkeypatch):
+    """HTTP 5xx debe disparar retry."""
+    import httpx
+    from unittest.mock import AsyncMock, patch
+
+    client = FlexClient(token="t")
+    call_count = 0
+
+    async def fake_send_once(self, query_id):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            req = httpx.Request("GET", "http://x")
+            resp = httpx.Response(503, request=req)
+            raise httpx.HTTPStatusError("service unavailable", request=req, response=resp)
+        return "ref-final"
+
+    monkeypatch.setattr(FlexClient, "_send_request_once", fake_send_once)
+
+    with patch("asyncio.sleep", new=AsyncMock()):
+        result = await client.send_request("query-1")
+
+    assert result == "ref-final"
+    assert call_count == 2

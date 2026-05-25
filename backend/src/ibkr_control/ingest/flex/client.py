@@ -131,6 +131,23 @@ POLL_STATEMENT_POLICY = RetryPolicy(
     retryable_exceptions=(FlexStatementPendingError,),
 )
 
+# RetryPolicy para send_request (1001 BUSY + network + 5xx)
+SEND_REQUEST_POLICY = RetryPolicy(
+    initial_delay_s=5.0,
+    max_delay_s=30.0,
+    multiplier=3.0,
+    max_attempts=3,
+    retryable_exceptions=(FlexBusyError, httpx.NetworkError, httpx.HTTPStatusError),
+    retryable_predicate=lambda e: (
+        isinstance(e, FlexBusyError)
+        or isinstance(e, httpx.NetworkError)
+        or (
+            isinstance(e, httpx.HTTPStatusError)
+            and e.response.status_code >= 500
+        )
+    ),
+)
+
 
 class FlexClient:
     """Cliente async para el IBKR Flex Web Service.
@@ -152,20 +169,8 @@ class FlexClient:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
 
-    async def send_request(self, query_id: str) -> str:
-        """Inicia la generacion de un statement en IBKR.
-
-        Args:
-            query_id: ID del Flex Query configurado en Account Management.
-
-        Returns:
-            reference_code: string numerico para usar en poll_statement.
-
-        Raises:
-            FlexAuthError: Token invalido (ErrorCode 1018).
-            FlexClientError: Otro error del API.
-            httpx.HTTPStatusError: Error HTTP no-2xx.
-        """
+    async def _send_request_once(self, query_id: str) -> str:
+        """Una llamada a SendRequest. Lanza FlexBusyError/FlexAuthError/etc segun parse."""
         url = f"{self._base_url}{SEND_REQUEST_PATH}"
         params = {"v": "3", "t": self._token, "q": query_id}
 
@@ -176,6 +181,22 @@ class FlexClient:
             resp.raise_for_status()
 
         return self._parse_send_response(resp.content)
+
+    async def send_request(self, query_id: str) -> str:
+        """Inicia la generacion de un statement en IBKR con retry policy.
+
+        Returns:
+            reference_code para usar en poll_statement.
+
+        Raises:
+            FlexAuthError, FlexQueryNotFoundError, FlexClientError: non-retryable.
+            FlexBusyError: si despues de max_attempts sigue 1001.
+            httpx.HTTPStatusError: 4xx propaga inmediato (non-retryable).
+        """
+        return await execute_with_retry(
+            lambda: self._send_request_once(query_id),
+            policy=SEND_REQUEST_POLICY,
+        )
 
     async def _poll_once(self, reference_code: str) -> bytes:
         """Una llamada al GetStatement. Lanza FlexStatementPendingError si pending."""
