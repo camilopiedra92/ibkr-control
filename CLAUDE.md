@@ -2,14 +2,41 @@
 
 ## ⏯ Cómo continuar (próxima sesión)
 
-**Phase 2 está 100% completa + post-polish persistent state (D5+D2 fixed).**
+**Phase 2 está 100% completa + post-polish persistent state (D5+D2 fixed) + wizard redesign spec+plan listos.**
 Branch `phase2/ingestion` ya mergeado a `main` (commit `6b97e46`).
 Polish backlog post-merge cerrado (10 items, ver `docs/plans/2026-05-24-phase2-polish-backlog.md`).
-Tag `v0.2.0-ingest` apunta al cierre original de polish (`a606be2`). Tag `v0.2.1-persistent-state` apunta al head actual (`8b823f8`) — incluye SQLAlchemyJobStore + DB-backed rate limit. **192/192 backend tests pasan, frontend builds clean.**
+Tag `v0.2.0-ingest` apunta al cierre original de polish (`a606be2`). Tag `v0.2.1-persistent-state` apunta a `172cc12` — incluye SQLAlchemyJobStore + DB-backed rate limit. **192/192 backend tests pasan, frontend builds clean.**
 
-La próxima sesión decide entre dos caminos. NO son excluyentes — podés hacer A y B en paralelo.
+**⚠ Próxima sesión: ejecutar plan de wizard redesign** (spec + plan ya escritos y commiteados — listos para `superpowers:subagent-driven-development`). Ver §"Próxima sesión — Wizard redesign" abajo.
 
-### Camino A — Planificar Phase 3 (recomendado arrancar acá si querés seguir codeando)
+La próxima sesión tiene **3 caminos** posibles. El A (wizard redesign) es el más urgente porque tiene plan listo + smoke test del 2026-05-24 ya reveló los bugs que motivan el redesign.
+
+### Próxima sesión — Wizard redesign (recomendado — plan ya escrito)
+
+Spec: `docs/specs/2026-05-24-wizard-redesign-design.md` (689 líneas, 12 decisiones D1-D12 locked).
+Plan: `docs/plans/2026-05-24-wizard-redesign.md` (3538 líneas, 16 tareas, target tag `v0.2.2-wizard-redesign`).
+
+Resuelve 5 bugs detectados durante smoke test del 2026-05-24:
+1. Wizard pedía IDs de cuenta ciegos (typos)
+2. No validaba contra cuentas reales del usuario
+3. Poblaba tabla `accounts` con 3 F-suffix shadow accounts orphan (IB-UK Limited, NAV=0)
+4. Re-validaba contra IBKR aunque ya hubieras guardado creds via `/settings` → error 1001
+5. `setup_progress` flags JSONB desync de la realidad de las tablas
+
+```
+Entry point exacto:
+1. git status → debe estar en main, working tree limpio, 12 commits ahead de origin
+2. git log --oneline -5 → último commit debe ser docs(plan): wizard redesign — 16-task...
+3. Leer docs/specs/2026-05-24-wizard-redesign-design.md (refresh design)
+4. Leer docs/plans/2026-05-24-wizard-redesign.md (refresh plan)
+5. Branch: git checkout -b feat/wizard-redesign (Task 1 step 1)
+6. Invocar superpowers:subagent-driven-development con prompt:
+   "Ejecutá el plan en docs/plans/2026-05-24-wizard-redesign.md.
+    16 tareas. Empezá por Task 1. TDD estricto donde el plan lo
+    indica. Bundle commits según indica cada task."
+```
+
+### Camino B — Planificar Phase 3 (si preferís diferir el wizard redesign)
 
 Phase 3 = domain layer + 3 pantallas (Lotes Abiertos/Cerrados/Alertas 730d). Spec maestro §6 + §4.2. Phase 3 NO requiere prod deploy ni datos reales — desarrolla 100% contra testcontainer + fixtures sanitizadas.
 
@@ -27,7 +54,7 @@ Phase 3 = domain layer + 3 pantallas (Lotes Abiertos/Cerrados/Alertas 730d). Spe
 8. Branch: git checkout -b phase3/lotes main
 ```
 
-### Camino B — Deploy a Coolify + smoke test (tarea del usuario, no del agente)
+### Camino C — Deploy a Coolify + smoke test prod (tarea del usuario, no del agente)
 
 Independiente de Phase 3. La sesión Claude no puede hacer estos pasos (UI interactiva + credenciales reales):
 
