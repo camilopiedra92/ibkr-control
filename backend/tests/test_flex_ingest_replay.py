@@ -221,6 +221,9 @@ async def test_closed_lots_sum_matches_pool_2025(ephemeral_session_factory):
         if v:
             xml_sum += Decimal(v).quantize(_FOUR_DP, rounding=ROUND_HALF_UP)
 
+    assert xml_sum != Decimal("0"), (
+        "no CLOSED_LOT rows parsed from XML — fixture truncated or tag filter broke"
+    )
     assert db_sum == xml_sum, (
         f"DB sum {db_sum} != XML sum {xml_sum} (delta: {db_sum - xml_sum})"
     )
