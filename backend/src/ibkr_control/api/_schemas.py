@@ -102,6 +102,11 @@ class Step2SaveRequest(BaseModel):
     accounts: list[Step2SaveAccountItem] = Field(min_length=1)
 
 
+class Step2SaveResponse(BaseModel):
+    ok: bool = True
+    trm_backfill_job_id: int
+
+
 class Step3UploadResponse(BaseModel):
     flex_import_temp_id: str
     detected_accounts: list[DetectedAccount]

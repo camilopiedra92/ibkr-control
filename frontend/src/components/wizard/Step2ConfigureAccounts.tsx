@@ -5,11 +5,12 @@ import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { step2SaveApiSetupStep2SavePost } from "@/lib/api";
-import type { DetectedAccount } from "@/lib/api";
+import type { DetectedAccount, Step2SaveResponse } from "@/lib/api";
 
 interface Step2ConfigureAccountsProps {
   detected: DetectedAccount[];
-  onComplete: () => void;
+  /** Called with the TRM backfill job id so the wizard banner can subscribe to SSE. */
+  onComplete: (trmBackfillJobId: number) => void;
   onBack: () => void;
 }
 
@@ -61,7 +62,10 @@ export function Step2ConfigureAccounts({
           pct: r.pct,
         })),
       }),
-    onSuccess: () => onComplete(),
+    onSuccess: (data) => {
+      const resp = data as Step2SaveResponse;
+      onComplete(resp.trm_backfill_job_id);
+    },
     onError: (err: unknown) => {
       const e = err as {
         response?: {

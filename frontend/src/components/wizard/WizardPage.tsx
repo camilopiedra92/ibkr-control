@@ -9,6 +9,7 @@ import { Step3Upload } from "@/components/wizard/Step3Upload";
 import { Step3NewAccountsModal } from "@/components/wizard/Step3NewAccountsModal";
 import { Step3Commit } from "@/components/wizard/Step3Commit";
 import { StepFinish } from "@/components/wizard/StepFinish";
+import { TrmBackfillBanner } from "@/components/wizard/TrmBackfillBanner";
 import { useSetupState } from "@/hooks/useSetupState";
 import {
   useWizardScreen,
@@ -67,6 +68,10 @@ export function WizardPage() {
   const [unresolvedNewAccounts, setUnresolvedNewAccounts] = useState<
     DetectedAccount[]
   >([]);
+  // job_id of the TRM backfill kicked off by step2/save. Persists across the
+  // remaining wizard screens so the banner stays mounted (and the SSE stream
+  // stays alive) until the backfill finishes or fails.
+  const [trmBackfillJobId, setTrmBackfillJobId] = useState<number | null>(null);
 
   const transient: WizardTransientState = useMemo(
     () => ({
@@ -93,9 +98,10 @@ export function WizardPage() {
     setDetectedAccounts(accounts);
   }
 
-  function handleStep2ConfigureComplete() {
+  function handleStep2ConfigureComplete(jobId: number) {
     // Clear transient cache so refetch becomes the source of truth.
     setDetectedAccounts(null);
+    setTrmBackfillJobId(jobId);
     refetch();
   }
 
@@ -111,6 +117,11 @@ export function WizardPage() {
 
   return (
     <div>
+      <TrmBackfillBanner
+        jobId={trmBackfillJobId}
+        onDismiss={() => setTrmBackfillJobId(null)}
+      />
+
       <Stepper current={stepperStep} labels={WIZARD_LABELS} />
 
       {screen === "step1" && (

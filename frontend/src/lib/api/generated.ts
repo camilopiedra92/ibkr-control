@@ -150,6 +150,11 @@ export interface Step2SaveRequest {
   accounts: Step2SaveAccountItem[];
 }
 
+export interface Step2SaveResponse {
+  ok?: boolean;
+  trm_backfill_job_id: number;
+}
+
 export interface Step3CommitRequest {
   temp_ids: string[];
 }
@@ -232,8 +237,6 @@ export type HealthHealthGet200 = {[key: string]: string};
 export type UpdateFlexCredentialsApiCredentialsFlexPut200 = { [key: string]: unknown };
 
 export type Step1SaveApiSetupStep1SavePost200 = { [key: string]: unknown };
-
-export type Step2SaveApiSetupStep2SavePost200 = { [key: string]: unknown };
 
 export type Step3SaveNewAccountsApiSetupStep3SaveNewAccountsPost200 = { [key: string]: unknown };
 
@@ -1593,7 +1596,9 @@ export function useStep2DetectApiSetupStep2DetectPost<TData = Awaited<ReturnType
 
 
 /**
- * Parse uploaded XML, return detected accounts. NO persist (fallback when IBKR offline).
+ * Fallback when IBKR is unreachable: parse uploaded XML and persist it as
+ * a manual upload so step2/save can validate detected accounts. The persister
+ * dedups by SHA-256, so re-uploads of the same XML are idempotent.
  * @summary Step2 Detect From Xml
  */
 export const step2DetectFromXmlApiSetupStep2DetectFromXmlPost = (
@@ -1700,7 +1705,7 @@ export const step2SaveApiSetupStep2SavePost = (
 ) => {
 
 
-      return axiosMutator<Step2SaveApiSetupStep2SavePost200>(
+      return axiosMutator<Step2SaveResponse>(
       {url: `/api/setup/step2/save`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: step2SaveRequest, signal

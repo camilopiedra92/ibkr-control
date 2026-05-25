@@ -31,6 +31,7 @@ from ibkr_control.api._schemas import (
     Step2DetectFromXmlResponse,
     Step2DetectResponse,
     Step2SaveRequest,
+    Step2SaveResponse,
     Step3CommitRequest,
     Step3CommitResponse,
     Step3SaveNewAccountsRequest,
@@ -51,6 +52,7 @@ from ibkr_control.ingest.flex import crypto as flex_crypto_mod
 from ibkr_control.ingest.flex import parser as flex_parser_mod
 from ibkr_control.ingest.flex import persister as flex_persister_mod
 from ibkr_control.ingest.flex._models import ParsedAccount
+from ibkr_control.ingest.job_tracker import get_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -103,16 +105,40 @@ def _ingest_summary_from_parsed(parsed) -> dict:
     }
 
 
-async def _trm_backfill_background(user_id: int) -> None:
-    """Best-effort TRM full backfill post-step2/save. Errors logged, not propagated."""
+async def _trm_backfill_background(user_id: int, job_id: int) -> None:
+    """TRM full backfill post-step2/save with SSE progress reporting.
+
+    Emits tracker events so the wizard's TrmBackfillBanner can render running /
+    ok / failed states. Errors are still logged (the original safety net) but
+    no longer silent — they surface as status='failed' on the SSE stream.
+    """
     from ibkr_control.ingest.trm import job as trm_job_mod
 
     engine = get_engine()
     session_local = async_sessionmaker(engine, expire_on_commit=False)
+    tracker = get_tracker()
     try:
-        await trm_job_mod.run(session_local, trigger="wizard", full_backfill=True)
-    except Exception:
+        tracker.emit(job_id, {"step": "trm_backfill", "status": "running"})
+        result = await trm_job_mod.run(
+            session_local, trigger="wizard", full_backfill=True
+        )
+        tracker.emit(
+            job_id,
+            {"step": "trm_backfill", "status": "ok", "n_days": result["n_days"]},
+        )
+        tracker.emit(job_id, {"step": "done"})
+    except Exception as e:
+        # Must stay broad: this is the background-task catch-all. Any unhandled
+        # exception (network, Socrata 5xx, persister DB error) must surface to
+        # the wizard banner via the tracker so the user sees the failure
+        # instead of a silent "Setup completado" with no TRM data.
         logger.exception("TRM backfill background for user_id=%s failed", user_id)
+        tracker.emit(
+            job_id,
+            {"step": "trm_backfill", "status": "failed", "error": str(e)[:500]},
+        )
+    finally:
+        tracker.mark_done(job_id)
 
 
 # ===== STATE =====
@@ -317,13 +343,13 @@ async def step2_detect_from_xml(
 # ===== STEP 2 SAVE =====
 
 
-@router.post("/step2/save")
+@router.post("/step2/save", response_model=Step2SaveResponse)
 async def step2_save(
     payload: Step2SaveRequest,
     background: BackgroundTasks,
     user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session),
-) -> dict:
+) -> Step2SaveResponse:
     """Persist accounts + participations. Dispatches TRM backfill in background (per D6)."""
     # Validation pass: must have detected at least one flex_import OR have
     # accounts already in DB (re-entry after partial setup). Then every
@@ -389,9 +415,12 @@ async def step2_save(
         )
 
     await session.commit()
-    # Fire-and-forget TRM backfill per D6 (FastAPI BackgroundTasks runs post-response)
-    background.add_task(_trm_backfill_background, user_id=user.id)
-    return {"ok": True}
+    # Register the job BEFORE add_task so the wizard banner can subscribe to
+    # /api/ingest/stream/{job_id} the moment it receives this response without
+    # racing the background task start (D12 fix — was fire-and-forget).
+    job_id = get_tracker().create_job()
+    background.add_task(_trm_backfill_background, user_id=user.id, job_id=job_id)
+    return Step2SaveResponse(ok=True, trm_backfill_job_id=job_id)
 
 
 # ===== STEP 3 =====
