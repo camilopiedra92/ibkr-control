@@ -163,6 +163,21 @@ async def auth_headers(client: AsyncClient) -> dict:
 
 
 @pytest.fixture
+async def second_auth_headers(client: AsyncClient) -> dict:
+    """Registra un segundo usuario para tests de isolation R6."""
+    await client.post(
+        "/api/auth/register",
+        json={"email": "api_test_2@test.com", "password": "supersecret123", "name": "API Test User 2"},
+    )
+    login = await client.post(
+        "/api/auth/jwt/login",
+        data={"username": "api_test_2@test.com", "password": "supersecret123"},
+    )
+    token = login.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
 async def sample_account(db_session: AsyncSession):
     from ibkr_control.db.models.accounts import Account
     a = Account(ibkr_account_id='U99999999', alias='fixture-acc', currency='USD')
