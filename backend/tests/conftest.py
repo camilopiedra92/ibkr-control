@@ -131,6 +131,17 @@ async def sample_user(db_session: AsyncSession):
 
 
 @pytest.fixture
+async def second_sample_user(db_session: AsyncSession):
+    """A second User for multi-user isolation tests."""
+    from ibkr_control.auth.models import User
+    u = User(email='second_fixture@t.com', hashed_password='x', is_active=True, name='Second Fixture User')
+    db_session.add(u)
+    await db_session.commit()
+    await db_session.refresh(u)
+    return u
+
+
+@pytest.fixture
 async def auth_headers(client: AsyncClient) -> dict:
     """Registra un usuario de test y devuelve headers de autorizacion JWT."""
     await client.post(
