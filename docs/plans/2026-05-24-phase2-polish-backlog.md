@@ -421,3 +421,22 @@ git tag -l "v0.2*"
 
 **Commit final del polish:** después de este doc + actualización CLAUDE.md →
 re-point `v0.2.0-ingest` tag.
+
+---
+
+## Post-Phase-2: Wizard redesign (closed 2026-05-24, tag v0.2.2-wizard-redesign)
+
+Smoke test del 2026-05-24 reveló 5 bugs en el wizard original (IDs ciegos, no
+validación contra cuentas reales, F-suffix shadow accounts en `accounts` table,
+re-validación redundante contra IBKR, flags JSONB desync). Reescritura
+completa:
+
+- Spec: `docs/specs/2026-05-24-wizard-redesign-design.md`
+- Plan: `docs/plans/2026-05-24-wizard-redesign.md` (16 tasks)
+- Implementación: 17 commits + tag `v0.2.2-wizard-redesign` en branch `feat/wizard-redesign`
+- Tests: backend 207 (was 192, +15), frontend 3 nuevos Playwright specs
+- Migration H: wipea data legacy preservando flex_credentials y apscheduler_jobs
+
+Cierra el item D6 del CLAUDE.md (cron times) parcialmente — el persister ahora
+filtra F-shadow universalmente, lo que mejora la calidad de los snapshots de
+cualquier cron.
