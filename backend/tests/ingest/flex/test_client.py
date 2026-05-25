@@ -278,3 +278,32 @@ async def test_send_request_retries_on_5xx(monkeypatch):
 
     assert result == "ref-final"
     assert call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_send_request_logs_retry(monkeypatch, caplog):
+    """on_retry callback wired into send_request: logs a warning on each retry."""
+    import logging
+    from unittest.mock import AsyncMock, patch
+
+    from ibkr_control.ingest.flex.client import FlexBusyError
+
+    caplog.set_level(logging.WARNING, logger="ibkr_control.ingest.flex.client")
+    client = FlexClient(token="t")
+    call_count = 0
+
+    async def fake_send_once(self, query_id):
+        nonlocal call_count
+        call_count += 1
+        if call_count < 3:
+            raise FlexBusyError("transient")
+        return "ref"
+
+    monkeypatch.setattr(FlexClient, "_send_request_once", fake_send_once)
+
+    with patch("asyncio.sleep", new=AsyncMock()):
+        await client.send_request("query-1")
+
+    # 2 retries → 2 warning lines
+    retry_logs = [r for r in caplog.records if "retry" in r.message and r.levelno == logging.WARNING]
+    assert len(retry_logs) == 2

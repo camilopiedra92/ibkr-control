@@ -24,6 +24,7 @@ Notas sobre _is_pending:
     con un mensaje informativo en vez de ciclar para siempre).
 """
 import asyncio
+import logging
 import time
 from typing import Final
 
@@ -31,6 +32,8 @@ import httpx
 from lxml import etree
 
 from ibkr_control.ingest.retry import RetryPolicy, execute_with_retry
+
+logger = logging.getLogger(__name__)
 
 
 SEND_REQUEST_PATH: Final = "/AccountManagement/FlexWebService/SendRequest"
@@ -121,6 +124,14 @@ class FlexStatementPendingError(FlexClientError):
         )
 
 
+def _log_retry(exc: Exception, attempt: int, delay: float) -> None:
+    """Logging helper passed to execute_with_retry. Renders attempt count and delay."""
+    logger.warning(
+        "flex: retry %d after %.1fs due to %s: %s",
+        attempt, delay, type(exc).__name__, exc,
+    )
+
+
 # RetryPolicy para poll_statement (1019 PENDING).
 # max_attempts=30 con delay máx 16s → ~5min total (matchea 300s anterior).
 POLL_STATEMENT_POLICY = RetryPolicy(
@@ -196,6 +207,7 @@ class FlexClient:
         return await execute_with_retry(
             lambda: self._send_request_once(query_id),
             policy=SEND_REQUEST_POLICY,
+            on_retry=_log_retry,
         )
 
     async def _poll_once(self, reference_code: str) -> bytes:
@@ -233,6 +245,7 @@ class FlexClient:
             return await execute_with_retry(
                 lambda: self._poll_once(reference_code),
                 policy=POLL_STATEMENT_POLICY,
+                on_retry=_log_retry,
             )
         except FlexStatementPendingError as exc:
             elapsed = int(time.monotonic() - started)
