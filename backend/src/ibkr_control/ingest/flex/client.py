@@ -4,7 +4,7 @@ Flujo:
   1. send_request(token, query_id) → reference_code
   2. poll_statement(token, reference_code) con backoff exponencial hasta que
      IBKR responda con el XML completo, o lanza FlexPollTimeoutError a los
-     max_wait_seconds (default 300 s = 5 min).
+     max_attempts del POLL_STATEMENT_POLICY (default 30 × max 16s ≈ 5 min).
 
 URLs production (Flex Web Service V3 — host ndcdyn + AccountManagement path):
   https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService/SendRequest
@@ -28,6 +28,8 @@ from typing import Final
 
 import httpx
 from lxml import etree
+
+from ibkr_control.ingest.retry import RetryPolicy, execute_with_retry
 
 
 SEND_REQUEST_PATH: Final = "/AccountManagement/FlexWebService/SendRequest"
@@ -111,6 +113,28 @@ class FlexQueryNotFoundError(FlexClientError):
         self.error_message = error_message
 
 
+class FlexStatementPendingError(FlexClientError):
+    """ErrorCode 1019: statement aún generándose. Retryable via RetryPolicy."""
+
+    def __init__(self, reference_code: str) -> None:
+        self.reference_code = reference_code
+        super().__init__(
+            f"Flex statement pending (1019): {reference_code}",
+            code=ERR_STATEMENT_PENDING,
+        )
+
+
+# RetryPolicy para poll_statement (1019 PENDING).
+# max_attempts=30 con delay máx 16s → ~5min total (matchea 300s anterior).
+POLL_STATEMENT_POLICY = RetryPolicy(
+    initial_delay_s=1.0,
+    max_delay_s=16.0,
+    multiplier=2.0,
+    max_attempts=30,
+    retryable_exceptions=(FlexStatementPendingError,),
+)
+
+
 class FlexClient:
     """Cliente async para el IBKR Flex Web Service.
 
@@ -156,47 +180,43 @@ class FlexClient:
 
         return self._parse_send_response(resp.content)
 
-    async def poll_statement(
-        self,
-        reference_code: str,
-        max_wait_seconds: int = 300,
-    ) -> bytes:
-        """Consulta el statement con backoff exponencial hasta que este listo.
-
-        Args:
-            reference_code: Codigo devuelto por send_request.
-            max_wait_seconds: Tiempo maximo de espera acumulado en segundos.
-
-        Returns:
-            Bytes del XML del FlexQueryResponse.
-
-        Raises:
-            FlexPollTimeoutError: Timeout superado antes de recibir el XML.
-            httpx.HTTPStatusError: Error HTTP no-2xx.
-        """
+    async def _poll_once(self, reference_code: str) -> bytes:
+        """Una llamada al GetStatement. Lanza FlexStatementPendingError si pending."""
         url = f"{self._base_url}{GET_STATEMENT_PATH}"
         params = {"v": "3", "t": self._token, "q": reference_code}
-
-        backoff = _BACKOFF_INITIAL
-        elapsed = 0
 
         async with httpx.AsyncClient(
             timeout=self._timeout, headers={"User-Agent": _USER_AGENT}
         ) as http:
-            while elapsed < max_wait_seconds:
-                resp = await http.get(url, params=params)
-                resp.raise_for_status()
-                content = resp.content
+            resp = await http.get(url, params=params)
+            resp.raise_for_status()
+            content = resp.content
 
-                if self._is_pending(content):
-                    await asyncio.sleep(backoff)
-                    elapsed += backoff
-                    backoff = min(backoff * 2, _BACKOFF_MAX)
-                    continue
+        if self._is_pending(content):
+            raise FlexStatementPendingError(reference_code)
+        return content
 
-                return content
+    async def poll_statement(
+        self,
+        reference_code: str,
+        max_wait_seconds: int = 300,  # kept for backwards compat in callers
+    ) -> bytes:
+        """Polls GetStatement con RetryPolicy hasta XML listo o max_attempts exceeded.
 
-        raise FlexPollTimeoutError(reference_code, elapsed)
+        Note: max_wait_seconds is accepted for backwards compat but is no longer
+        the source of truth — POLL_STATEMENT_POLICY governs retry behavior.
+
+        Raises:
+            FlexPollTimeoutError: si max_attempts del policy excedido.
+            httpx.HTTPStatusError: Error HTTP no-2xx.
+        """
+        try:
+            return await execute_with_retry(
+                lambda: self._poll_once(reference_code),
+                policy=POLL_STATEMENT_POLICY,
+            )
+        except FlexStatementPendingError:
+            raise FlexPollTimeoutError(reference_code, max_wait_seconds) from None
 
     async def get_statement(
         self,

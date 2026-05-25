@@ -45,7 +45,7 @@ async def execute_with_retry(
     fn: Callable[[], Awaitable[T]],
     policy: RetryPolicy,
     on_retry: Callable[[Exception, int, float], None] | None = None,
-    _sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    _sleep: Callable[[float], Awaitable[None]] | None = None,
 ) -> T:
     """Ejecuta fn() con backoff. Lanza la última exception si max_attempts excedido.
 
@@ -54,7 +54,8 @@ async def execute_with_retry(
         policy: RetryPolicy a aplicar.
         on_retry: callback opcional llamado antes de cada retry con
             (exception, attempt_number, delay_seconds). Útil para logging.
-        _sleep: inyectable para tests (default asyncio.sleep).
+        _sleep: inyectable para tests (default asyncio.sleep). None = late-bind
+            asyncio.sleep al momento de cada call para que monkeypatch propague.
 
     Returns:
         T si fn() succeeds en cualquier attempt.
@@ -63,6 +64,11 @@ async def execute_with_retry(
         La última exception lanzada por fn() si max_attempts excedido,
         o cualquier exception non-retryable inmediatamente.
     """
+    # Late-bind asyncio.sleep so that monkeypatch.setattr / patch("asyncio.sleep")
+    # propagates correctly. If _sleep is provided explicitly (e.g. in tests via
+    # _sleep=fake_sleep), use that instead.
+    sleep_fn: Callable[[float], Awaitable[None]] = _sleep if _sleep is not None else asyncio.sleep
+
     delay = policy.initial_delay_s
     last_exc: Exception | None = None
 
@@ -83,7 +89,7 @@ async def execute_with_retry(
             if on_retry is not None:
                 on_retry(exc, attempt, delay)
 
-            await _sleep(delay)
+            await sleep_fn(delay)
             delay = min(delay * policy.multiplier, policy.max_delay_s)
 
     # Defensive: el loop nunca debería terminar sin return o raise
