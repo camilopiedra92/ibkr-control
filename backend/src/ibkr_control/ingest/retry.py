@@ -34,6 +34,12 @@ class RetryPolicy:
     retryable_exceptions: tuple[type[Exception], ...]
     retryable_predicate: Callable[[Exception], bool] | None = None
 
+    def __post_init__(self) -> None:
+        if self.max_attempts < 1:
+            raise ValueError(
+                f"RetryPolicy.max_attempts must be >= 1, got {self.max_attempts}"
+            )
+
 
 async def execute_with_retry(
     fn: Callable[[], Awaitable[T]],

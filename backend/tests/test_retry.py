@@ -156,3 +156,37 @@ async def test_on_retry_callback_invoked(fast_policy):
     assert len(callback_invocations) == 2
     assert callback_invocations[0][1] == 1  # attempt number
     assert callback_invocations[1][1] == 2
+
+
+def test_max_attempts_zero_raises_value_error():
+    with pytest.raises(ValueError, match="max_attempts"):
+        RetryPolicy(
+            initial_delay_s=0.001,
+            max_delay_s=0.01,
+            multiplier=2,
+            max_attempts=0,
+            retryable_exceptions=(_TransientError,),
+        )
+
+
+@pytest.mark.asyncio
+async def test_max_attempts_one_raises_on_first_failure():
+    """Boundary: max_attempts=1 means run once, no retries."""
+    policy = RetryPolicy(
+        initial_delay_s=0.001,
+        max_delay_s=0.01,
+        multiplier=2,
+        max_attempts=1,
+        retryable_exceptions=(_TransientError,),
+    )
+    calls = 0
+
+    async def fn():
+        nonlocal calls
+        calls += 1
+        raise _TransientError("only shot")
+
+    with pytest.raises(_TransientError):
+        await execute_with_retry(fn, policy)
+
+    assert calls == 1
