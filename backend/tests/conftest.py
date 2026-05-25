@@ -19,6 +19,12 @@ from ibkr_control.main import create_app
 from ibkr_control.db.base import Base
 from ibkr_control.db.session import get_async_session
 
+from tests.conftest_ephemeral_db import (  # noqa: F401
+    ephemeral_postgres,
+    ephemeral_db_url,
+    ephemeral_session_factory,
+)
+
 
 @pytest.fixture(scope="session")
 def anyio_backend():
@@ -131,6 +137,17 @@ async def sample_user(db_session: AsyncSession):
 
 
 @pytest.fixture
+async def second_sample_user(db_session: AsyncSession):
+    """A second User for multi-user isolation tests."""
+    from ibkr_control.auth.models import User
+    u = User(email='second_fixture@t.com', hashed_password='x', is_active=True, name='Second Fixture User')
+    db_session.add(u)
+    await db_session.commit()
+    await db_session.refresh(u)
+    return u
+
+
+@pytest.fixture
 async def auth_headers(client: AsyncClient) -> dict:
     """Registra un usuario de test y devuelve headers de autorizacion JWT."""
     await client.post(
@@ -140,6 +157,21 @@ async def auth_headers(client: AsyncClient) -> dict:
     login = await client.post(
         "/api/auth/jwt/login",
         data={"username": "api_test@test.com", "password": "supersecret123"},
+    )
+    token = login.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+async def second_auth_headers(client: AsyncClient) -> dict:
+    """Registra un segundo usuario para tests de isolation R6."""
+    await client.post(
+        "/api/auth/register",
+        json={"email": "api_test_2@test.com", "password": "supersecret123", "name": "API Test User 2"},
+    )
+    login = await client.post(
+        "/api/auth/jwt/login",
+        data={"username": "api_test_2@test.com", "password": "supersecret123"},
     )
     token = login.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}

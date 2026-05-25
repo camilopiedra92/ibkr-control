@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { axiosInstance } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +11,11 @@ import { FlexCredentialsSection } from "@/components/settings/FlexCredentialsSec
 import { XmlUploadSection } from "@/components/settings/XmlUploadSection";
 import { IngestLogTable } from "@/components/settings/IngestLogTable";
 import { ManualRefreshButton } from "@/components/settings/ManualRefreshButton";
+import { IngestHealthTable } from "@/components/settings/IngestHealthTable";
+import {
+  getIngestHealthApiHealthIngestGet,
+  listLogsApiIngestLogsGet,
+} from "@/lib/api/generated";
 
 interface Settings {
   marginal_rate: string;
@@ -26,6 +32,18 @@ export default function SettingsPage() {
 
   // Used to trigger a re-fetch in IngestLogTable after a manual refresh
   const [logRefreshKey, setLogRefreshKey] = useState(0);
+
+  const { data: health } = useQuery({
+    queryKey: ["ingest-health"],
+    queryFn: () => getIngestHealthApiHealthIngestGet(),
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: true,
+  });
+  const { data: recentLogs } = useQuery({
+    queryKey: ["ingest-logs-recent"],
+    queryFn: () => listLogsApiIngestLogsGet({ limit: 30 }),
+    staleTime: 5 * 60 * 1000,
+  });
 
   useEffect(() => {
     axiosInstance
@@ -110,6 +128,18 @@ export default function SettingsPage() {
 
       {/* Phase 2: Ingest log */}
       <IngestLogTable refreshKey={logRefreshKey} />
+
+      <Separator />
+
+      {/* Phase 2.6: Ingest health */}
+      <section id="salud-ingesta" className="space-y-3">
+        <h2 className="text-lg font-medium">Salud de ingesta</h2>
+        {health && recentLogs ? (
+          <IngestHealthTable health={health} recentLogs={recentLogs} />
+        ) : (
+          <p className="text-sm text-muted-foreground">Cargando…</p>
+        )}
+      </section>
     </div>
   );
 }

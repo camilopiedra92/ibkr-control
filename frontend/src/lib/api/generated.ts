@@ -126,6 +126,27 @@ export interface IngestCounters {
   hash_dedup?: boolean;
 }
 
+export type IngestSourceHealthSource = typeof IngestSourceHealthSource[keyof typeof IngestSourceHealthSource];
+
+
+export const IngestSourceHealthSource = {
+  flex: 'flex',
+  trm: 'trm',
+} as const;
+
+export interface IngestSourceHealth {
+  source: IngestSourceHealthSource;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  consecutive_failures: number;
+  last_error: string | null;
+}
+
+export interface IngestHealthResponse {
+  sources: IngestSourceHealth[];
+  checked_at: string;
+}
+
 export interface IngestJobStarted {
   job_id: number;
 }
@@ -1363,6 +1384,68 @@ export function useUpdateFlexCredentialsApiCredentialsFlexPut<TData = Awaited<Re
 
 
 
+
+/**
+ * @summary Get Ingest Health
+ */
+export const getIngestHealthApiHealthIngestGet = (
+
+ signal?: AbortSignal
+) => {
+
+
+      return axiosMutator<IngestHealthResponse>(
+      {url: `/api/health/ingest`, method: 'GET', signal
+    },
+      );
+    }
+
+
+
+export const getGetIngestHealthApiHealthIngestGetMutationOptions = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getIngestHealthApiHealthIngestGet>>, TError,void, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof getIngestHealthApiHealthIngestGet>>, TError,void, TContext> => {
+
+const mutationKey = ['getIngestHealthApiHealthIngestGet'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof getIngestHealthApiHealthIngestGet>>, void> = () => {
+
+
+          return  getIngestHealthApiHealthIngestGet()
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GetIngestHealthApiHealthIngestGetMutationResult = NonNullable<Awaited<ReturnType<typeof getIngestHealthApiHealthIngestGet>>>
+
+    export type GetIngestHealthApiHealthIngestGetMutationError = unknown
+
+    /**
+ * @summary Get Ingest Health
+ */
+export const useGetIngestHealthApiHealthIngestGet = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getIngestHealthApiHealthIngestGet>>, TError,void, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof getIngestHealthApiHealthIngestGet>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getGetIngestHealthApiHealthIngestGetMutationOptions(options), queryClient);
+    }
 
 /**
  * @summary Get State

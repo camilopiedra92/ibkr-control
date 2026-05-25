@@ -166,15 +166,26 @@ async def test_ingest_xml_rolls_back_persister_on_failure(db_session: AsyncSessi
     from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession as AS2
     maker2 = async_sessionmaker(db_engine, expire_on_commit=False, class_=AS2)
     async with maker2() as s2:
-        # No flex_imports should exist for this bad xml_hash
+        # Post-Task-7: a poison FlexImport row must exist (R2 contract).
+        # The SAVEPOINT rollback still reverts partial persister writes (e.g.
+        # no CashTransaction rows), but the poison row itself is written outside
+        # the savepoint and committed by ingest_log_entry's finally clause.
         from ibkr_control.ingest.hash_dedup import xml_hash
+        from ibkr_control.db.models.flex_raw import CashTransaction
         bad_hash = xml_hash(b"<xml>bad-fk</xml>")
         fi = await s2.scalar(
             select(FlexImport).where(FlexImport.xml_hash == bad_hash)
         )
-        assert fi is None, "Persister data should have been rolled back"
+        assert fi is not None, "Poison FlexImport row must exist after persist failure"
+        assert fi.status == "poison", f"FlexImport should be status='poison', got {fi.status!r}"
 
-        # But the ingest_log 'failed' row should persist
+        # SAVEPOINT rollback was effective: no partial cash_transactions from the bad insert
+        n_cash = await s2.scalar(
+            select(func.count(CashTransaction.id))
+        )
+        assert n_cash == 0, "CashTransaction writes should have been rolled back by SAVEPOINT"
+
+        # The ingest_log 'failed' row must persist
         log_row = await s2.scalar(
             select(IngestLog)
             .where(
@@ -443,3 +454,118 @@ async def test_run_returns_none_if_hash_already_known(
             )
         )
         assert n_logs == 2
+
+
+# ---------------------------------------------------------------------------
+# Task 6: per-user fast-path with distinct logging (ok vs poison)
+# ---------------------------------------------------------------------------
+
+import logging
+from datetime import date as _date
+from unittest.mock import AsyncMock
+
+
+@pytest.mark.asyncio
+async def test_run_logs_info_on_ok_hash_skip(
+    monkeypatch, caplog, db_session, db_engine, sample_user,
+):
+    """run() encuentra hash con status='ok' -> skip + info log."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from ibkr_control.db.models.flex_credentials import FlexCredentials
+    from ibkr_control.db.models.flex_raw import FlexImport as FI
+    from ibkr_control.ingest.flex import client as flex_client_mod
+    from ibkr_control.ingest.flex import crypto as flex_crypto_mod
+    from ibkr_control.ingest.hash_dedup import xml_hash
+
+    caplog.set_level(logging.INFO, logger="ibkr_control.ingest.flex.job")
+
+    xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
+    h = xml_hash(xml)
+
+    # Seed credentials + existing flex_imports row with status='ok'
+    import base64
+    test_key = base64.b64encode(b"K" * 32).decode("ascii")
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", test_key)
+
+    db_session.add(FlexCredentials(
+        user_id=sample_user.id,
+        token_encrypted=flex_crypto_mod.encrypt_token("dummy-token"),
+        ytd_query_id="123456",
+    ))
+    db_session.add(FI(
+        user_id=sample_user.id, xml_hash=h, xml_bytes=xml,
+        xml_size_bytes=len(xml), anyo=2025, source="web_service",
+        year_status="sealed", status="ok",
+        period_covered_from=_date(2025, 1, 1),
+        period_covered_to=_date(2025, 12, 31),
+    ))
+    await db_session.commit()
+
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+
+    from ibkr_control.ingest.flex import client as client_mod
+    monkeypatch.setattr(
+        client_mod.FlexClient, "send_request", AsyncMock(return_value="ref-ok")
+    )
+    monkeypatch.setattr(
+        client_mod.FlexClient, "poll_statement", AsyncMock(return_value=xml)
+    )
+
+    from ibkr_control.ingest.flex import job as flex_job_mod
+    result = await flex_job_mod.run(session_factory, user_id=sample_user.id, trigger="cron")
+
+    assert result is None
+    assert "duplicate hash" in caplog.text and "skipped" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_run_logs_warning_on_poison_hash_skip(
+    monkeypatch, caplog, db_session, db_engine, sample_user,
+):
+    """run() encuentra hash con status='poison' -> skip + warning log con recovery hint."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from ibkr_control.db.models.flex_credentials import FlexCredentials
+    from ibkr_control.db.models.flex_raw import FlexImport as FI
+    from ibkr_control.ingest.flex import client as client_mod
+    from ibkr_control.ingest.flex import crypto as flex_crypto_mod
+    from ibkr_control.ingest.hash_dedup import xml_hash
+
+    caplog.set_level(logging.WARNING, logger="ibkr_control.ingest.flex.job")
+
+    xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
+    h = xml_hash(xml)
+
+    import base64
+    test_key = base64.b64encode(b"P" * 32).decode("ascii")
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", test_key)
+
+    db_session.add(FlexCredentials(
+        user_id=sample_user.id,
+        token_encrypted=flex_crypto_mod.encrypt_token("dummy-token"),
+        ytd_query_id="123456",
+    ))
+    db_session.add(FI(
+        user_id=sample_user.id, xml_hash=h, xml_bytes=xml,
+        xml_size_bytes=len(xml), anyo=2025, source="web_service",
+        year_status="sealed", status="poison",
+        poison_reason="forced parser crash",
+        period_covered_from=_date(2025, 1, 1),
+        period_covered_to=_date(2025, 12, 31),
+    ))
+    await db_session.commit()
+
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+
+    monkeypatch.setattr(
+        client_mod.FlexClient, "send_request", AsyncMock(return_value="ref-poison")
+    )
+    monkeypatch.setattr(
+        client_mod.FlexClient, "poll_statement", AsyncMock(return_value=xml)
+    )
+
+    from ibkr_control.ingest.flex import job as flex_job_mod
+    result = await flex_job_mod.run(session_factory, user_id=sample_user.id, trigger="cron")
+
+    assert result is None
+    assert "previously poisoned" in caplog.text
+    assert "poison_reset" in caplog.text
