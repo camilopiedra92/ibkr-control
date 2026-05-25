@@ -24,6 +24,7 @@ Notas sobre _is_pending:
     con un mensaje informativo en vez de ciclar para siempre).
 """
 import asyncio
+import time
 from typing import Final
 
 import httpx
@@ -50,10 +51,6 @@ ERR_STATEMENT_PENDING: Final = "1019"
 ERR_BUSY: Final = "1001"
 ERR_AUTH_CODES: Final = {"1003", "1004", ERR_INVALID_TOKEN}
 ERR_QUERY_NOT_FOUND: Final = "1005"
-
-# Backoff exponencial: 1 → 2 → 4 → 8 → 16 (capped)
-_BACKOFF_INITIAL: Final = 1
-_BACKOFF_MAX: Final = 16
 
 
 class FlexAuthError(RuntimeError):
@@ -210,13 +207,15 @@ class FlexClient:
             FlexPollTimeoutError: si max_attempts del policy excedido.
             httpx.HTTPStatusError: Error HTTP no-2xx.
         """
+        started = time.monotonic()
         try:
             return await execute_with_retry(
                 lambda: self._poll_once(reference_code),
                 policy=POLL_STATEMENT_POLICY,
             )
-        except FlexStatementPendingError:
-            raise FlexPollTimeoutError(reference_code, max_wait_seconds) from None
+        except FlexStatementPendingError as exc:
+            elapsed = int(time.monotonic() - started)
+            raise FlexPollTimeoutError(reference_code, elapsed) from exc
 
     async def get_statement(
         self,

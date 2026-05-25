@@ -172,3 +172,35 @@ async def test_poll_statement_raises_timeout_when_max_attempts_exceeded(monkeypa
     with patch("asyncio.sleep"):
         with pytest.raises(FlexPollTimeoutError):
             await client.poll_statement("ref123")
+
+
+@pytest.mark.asyncio
+async def test_poll_statement_timeout_records_actual_elapsed(monkeypatch):
+    """FlexPollTimeoutError.waited reflects actual elapsed seconds, not max_wait_seconds."""
+    from ibkr_control.ingest.flex import client as client_module
+    from unittest.mock import patch
+
+    client = FlexClient(token="t")
+
+    async def always_pending(self, ref):
+        raise FlexStatementPendingError(ref)
+
+    monkeypatch.setattr(FlexClient, "_poll_once", always_pending)
+    tight_policy = POLL_STATEMENT_POLICY.__class__(
+        initial_delay_s=0.0,
+        max_delay_s=0.0,
+        multiplier=2,
+        max_attempts=2,
+        retryable_exceptions=(FlexStatementPendingError,),
+    )
+    monkeypatch.setattr(client_module, "POLL_STATEMENT_POLICY", tight_policy)
+
+    with patch("asyncio.sleep"):
+        with pytest.raises(FlexPollTimeoutError) as exc_info:
+            await client.poll_statement("ref123", max_wait_seconds=999_999)
+
+    # waited should be near 0 (tight policy with no real sleep), NOT 999_999
+    assert exc_info.value.waited < 10
+    # Exception chain must be preserved (not suppressed with from None)
+    assert exc_info.value.__cause__ is not None
+    assert isinstance(exc_info.value.__cause__, FlexStatementPendingError)
