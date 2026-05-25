@@ -63,8 +63,31 @@ export function Step2ConfigureAccounts({
       }),
     onSuccess: () => onComplete(),
     onError: (err: unknown) => {
-      const e = err as { response?: { data?: { detail?: string } } };
-      setError(e?.response?.data?.detail ?? "Error al guardar cuentas");
+      const e = err as {
+        response?: {
+          data?: {
+            detail?:
+              | { code?: string; ibkr_account_id?: string }
+              | string;
+          };
+        };
+      };
+      const detail = e?.response?.data?.detail;
+      if (typeof detail === "object" && detail !== null) {
+        if (detail.code === "ACCOUNT_NOT_DETECTED") {
+          setError(
+            `Cuenta ${detail.ibkr_account_id} no fue detectada en IBKR`,
+          );
+          return;
+        }
+        if (detail.code === "SHADOW_ACCOUNT_REJECTED") {
+          setError(
+            `Cuenta ${detail.ibkr_account_id} es shadow (F-suffix), no se puede configurar`,
+          );
+          return;
+        }
+      }
+      setError("Error al guardar cuentas");
     },
   });
 
