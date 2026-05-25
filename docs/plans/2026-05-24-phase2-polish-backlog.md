@@ -381,6 +381,40 @@ cubre estos flows operacionalmente.
 
 **Quien hereda:** Phase 3 si toca estos endpoints, agregar tests al pasar.
 
+### D12 — `setup._trm_backfill_background` es fire-and-forget silencioso (post-2026-05-25)
+
+**Issue:** El wizard dispara el TRM backfill via `BackgroundTasks` después de
+`step2/save` (per spec D6). El handler envuelve la llamada en
+`try/except` con `logger.exception(...)` pero NO emite ningún evento al
+frontend del wizard. Si Socrata falla, si el persister crashea, o si la red del
+container no resuelve `datos.gov.co` (clase de bug DNS macOS, ver
+`8bd578f`), el wizard sigue mostrando "Setup completado!" como si todo
+hubiera salido bien. La evidencia queda solo en `ingest_log` + container logs.
+
+Esto fue precisamente lo que ocultó el bug del 32767 (D2 hijo, ver "TRM fetch"
+en CLAUDE.md retrospectiva 2026-05-25): el job venía fallando desde el primer
+disparo del wizard sin signal alguno en UI.
+
+**Por qué no se fixa ahora:** El path "Settings → Refresh manual → Ejecutar
+ahora" YA tiene el patrón SSE completo (post-fix del 2026-05-25 a
+`/api/ingest/stream/{job_id}` con substeps `trm_backfill` / `flex_ytd` y
+status=failed con error). Eso cubre el caso "verificar manualmente que el TRM
+quedó OK post-wizard". Para hacer lo mismo dentro del wizard hay que:
+
+1. Registrar un job en `JobTracker` antes del `background.add_task`
+2. Devolver el `job_id` en la respuesta de `step2/save` (cambio de shape →
+   regenerar cliente TS + actualizar el componente del wizard)
+3. Que el wizard consuma `/api/ingest/stream/{job_id}` (nuevo `useIngestStream`
+   en el flujo) y bloquee el "Continuar a Step 3" hasta que termine OK/fail
+4. Definir UX de error: ¿permitir retry inline? ¿skip + warn? ¿bloquear?
+
+Es scope distinto + decisión de UX. Mientras tanto la mitigation operacional es
+"Settings → Refresh manual" que ya funciona con feedback completo.
+
+**Quien hereda:** Phase 5 (polish UI) o un mini-PR de polish post-Phase-3 si
+empieza a doler en uso real. Si el cron diario corre bien (y ahora con el fix
+del chunking lo hace), la deuda es de UX del wizard, no operacional.
+
 ---
 
 ## Verificación final
