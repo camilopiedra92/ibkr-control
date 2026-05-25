@@ -55,7 +55,7 @@ async def ingest_xml(
         sp = await session.begin_nested()
         try:
             parsed = flex_parser_mod.parse(xml_bytes)
-            flex_import_id = await flex_persister_mod.persist(
+            flex_import_id, _counters = await flex_persister_mod.persist(
                 session,
                 parsed=parsed,
                 user_id=user_id,
@@ -71,15 +71,22 @@ async def ingest_xml(
             await sp.rollback()
             raise
 
-        # Update items_processed antes del exit del log context
+        # Update items_processed antes del exit del log context.
+        # Usamos n_observed_* (rows que llegaron en el XML) en vez de len(parsed.*)
+        # para mantener el cálculo en un solo lugar (el persister). Si hubo
+        # hash_dedup, _counters solo trae {"hash_dedup": True} y items_processed
+        # queda en 0 (no se procesó nada nuevo).
         log_row = await session.scalar(select(IngestLog).where(IngestLog.id == log_id))
-        log_row.items_processed = (
-            len(parsed.trades)
-            + len(parsed.closed_lots)
-            + len(parsed.open_position_lots)
-            + len(parsed.cash_transactions)
-            + len(parsed.transfers)
-        )
+        if _counters.get("hash_dedup"):
+            log_row.items_processed = 0
+        else:
+            log_row.items_processed = (
+                _counters["n_observed_trades"]
+                + _counters["n_observed_lots_closed"]
+                + _counters["n_observed_open_lots"]
+                + _counters["n_observed_cash_tx"]
+                + _counters["n_observed_transfers"]
+            )
 
         return flex_import_id
 
@@ -122,7 +129,7 @@ async def run(
                 sp = await session.begin_nested()
                 try:
                     parsed = flex_parser_mod.parse(xml_bytes)
-                    flex_import_id = await flex_persister_mod.persist(
+                    flex_import_id, _counters = await flex_persister_mod.persist(
                         session,
                         parsed=parsed,
                         user_id=user_id,
@@ -140,11 +147,14 @@ async def run(
                 log_row = await session.scalar(
                     select(IngestLog).where(IngestLog.id == log_id)
                 )
-                log_row.items_processed = (
-                    len(parsed.trades)
-                    + len(parsed.closed_lots)
-                    + len(parsed.open_position_lots)
-                    + len(parsed.cash_transactions)
-                    + len(parsed.transfers)
-                )
+                if _counters.get("hash_dedup"):
+                    log_row.items_processed = 0
+                else:
+                    log_row.items_processed = (
+                        _counters["n_observed_trades"]
+                        + _counters["n_observed_lots_closed"]
+                        + _counters["n_observed_open_lots"]
+                        + _counters["n_observed_cash_tx"]
+                        + _counters["n_observed_transfers"]
+                    )
                 return flex_import_id

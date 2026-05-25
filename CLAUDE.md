@@ -2,10 +2,10 @@
 
 ## ⏯ Cómo continuar (próxima sesión)
 
-**Phase 2 + wizard redesign completos (tags `v0.2.0-ingest`, `v0.2.1-persistent-state`, `v0.2.2-wizard-redesign`). Próximo: Phase 3.**
+**Phase 2 + wizard redesign + persister idempotente completos (tags `v0.2.0-ingest`, `v0.2.1-persistent-state`, `v0.2.2-wizard-redesign`, `v0.2.3-persister-idempotent`). Próximo: Phase 3.**
 
-Branches `phase2/ingestion` + `feat/wizard-redesign` ya mergeadas a `main` (merge SHA `b458ac6`). Smoke test del wizard en dev completado exitosamente con datos reales IBKR el 2026-05-24.
-Tag `v0.2.0-ingest` apunta al cierre original de polish (`a606be2`). Tag `v0.2.1-persistent-state` apunta a `172cc12` — incluye SQLAlchemyJobStore + DB-backed rate limit. Tag `v0.2.2-wizard-redesign` apunta al cierre del rewrite del wizard (detect-first, F-filter en persister, Migration H wipea legacy). **209/209 backend tests pasan, frontend builds clean, 3 nuevos Playwright wizard specs.**
+Branches `phase2/ingestion` + `feat/wizard-redesign` + `phase25/flex-persister-idempotent` ya mergeadas a `main` (merge SHAs `b458ac6` + pending merge SHA del v0.2.3). Smoke tests en dev completados (wizard 2026-05-24; persister idempotente 2026-05-25).
+Tag `v0.2.0-ingest` apunta al cierre original de polish (`a606be2`). Tag `v0.2.1-persistent-state` apunta a `172cc12` — incluye SQLAlchemyJobStore + DB-backed rate limit. Tag `v0.2.2-wizard-redesign` apunta al cierre del rewrite del wizard (detect-first, F-filter en persister, Migration H wipea legacy). Tag `v0.2.3-persister-idempotent` apunta al fix del bug del 2026-05-25 (D13 [BUG-FIXED]): rewrite del Flex persister a UPSERT por natural key — cron + manual refresh ahora idempotentes fila por fila + smoke test end-to-end validado (segundo Flex refresh real-conditions devuelve `items_processed=0` sin failures). **245/0 backend tests pasan, frontend builds clean.**
 
 Post-merge sobre `main` (4 commits sin push aún): `8bd578f` infra DNS fix para container backend (resolver local AdGuard/NextDNS SERVFAILa `gdcdyn.interactivebrokers.com` → pinned a `1.1.1.1`/`8.8.8.8`), `24aa5f9` fix gap del fallback "subir XML manual" (ahora persiste igual que `step2/detect` para que `step2/save` valide contra `accounts`), `4eb4f80` migración a endpoints V3 oficiales (`ndcdyn` + `/AccountManagement/FlexWebService/`) + User-Agent header requerido. Ver §"Wizard redesign post-deploy" abajo para detalle completo.
 
@@ -14,11 +14,12 @@ Post-merge sobre `main` (4 commits sin push aún): `8bd578f` infra DNS fix para 
 Phase 3 = domain layer + 3 pantallas (Lotes Abiertos/Cerrados/Alertas 730d). Spec maestro §6 + §4.2. Phase 3 NO requiere prod deploy ni datos reales — desarrolla 100% contra testcontainer + fixtures sanitizadas.
 
 ```
-1. Verificar Phase 2 + wizard redesign cerradas:
-   git tag -l "v0.2*" → debe mostrar v0.2.0-ingest + v0.2.1-persistent-state + v0.2.2-wizard-redesign
+1. Verificar Phase 2 + wizard redesign + persister idempotente cerradas:
+   git tag -l "v0.2*" → debe mostrar v0.2.0-ingest + v0.2.1-persistent-state +
+                       v0.2.2-wizard-redesign + v0.2.3-persister-idempotent
 2. Leer este CLAUDE.md (lo cargás automáticamente)
-3. Leer docs/plans/2026-05-24-phase2-polish-backlog.md (entender deuda conocida D1-D12
-   + apendice "Post-Phase-2: Wizard redesign")
+3. Leer docs/plans/2026-05-24-phase2-polish-backlog.md (entender deuda conocida D1-D13
+   + apendice "Post-Phase-2: Wizard redesign"; D13 = persister idempotente RESOLVED)
 4. Invocar `superpowers:brainstorming` con prompt:
    "Phase 3 = domain layer + lotes. Decisiones abiertas listadas en
     CLAUDE.md §Roadmap Phase 3. Resolver una a una, luego escribir spec
@@ -61,10 +62,10 @@ Smoke test en dev + push a remote YA están hechos (2026-05-24/25, ver §"Wizard
 ### Pre-Phase-3 checklist (verificar al arrancar la próxima sesión)
 
 - [ ] `git status` limpio en `main`
-- [ ] `git tag -l "v0.2*"` muestra `v0.2.0-ingest` + `v0.2.1-persistent-state` + `v0.2.2-wizard-redesign`
-- [ ] `cd backend && uv run pytest -q` → 215 passed (era 209 al cierre del wizard redesign; +3 por TRM/SSE fix `989652d`, +3 por D12 fix `5dba1b4`)
+- [ ] `git tag -l "v0.2*"` muestra `v0.2.0-ingest` + `v0.2.1-persistent-state` + `v0.2.2-wizard-redesign` + `v0.2.3-persister-idempotent`
+- [ ] `cd backend && uv run pytest -q` → 245 passed (era 215 al cierre del wizard fix; +30 por persister rewrite — helpers + integration + migration tests + counter assertions + A3 amendments #1/#2/#3 regression tests)
 - [ ] `cd frontend && pnpm build` → exit 0
-- [ ] Leer `docs/plans/2026-05-24-phase2-polish-backlog.md` § "Deuda conocida (D1-D12)"
+- [ ] Leer `docs/plans/2026-05-24-phase2-polish-backlog.md` § "Deuda conocida" (D1-D13; D13 [BUG-FIXED] documenta el incidente del persister + lecciones)
 - [ ] (Opcional) `docker compose ps` para confirmar postgres + backend healthy si vas a smoke test
 
 ### Convenciones (heredadas)
@@ -83,12 +84,13 @@ Smoke test en dev + push a remote YA están hechos (2026-05-24/25, ver §"Wizard
 
 | Item | Quién | Bloquea? |
 |---|---|---|
-| **Push main + tags a remote** ✅ completado 2026-05-25 — repo privado `owner/ibkr-control` creado via `gh repo create`, main + 4 tags pushed | — | — |
+| **Push main + tags a remote** ✅ completado 2026-05-25 — repo privado `owner/ibkr-control` creado via `gh repo create`, main + 4 tags pushed (NOTA: el tag v0.2.3 todavía no está pushed a remote — branch `phase25/flex-persister-idempotent` está local; merge a main + push pendientes del usuario) | Usuario | No bloquea Phase 3 dev local |
 | **Deploy a Coolify + setear `TOKEN_ENCRYPTION_KEY` + verificar DNS público** | Usuario | No bloquea Phase 3 dev local |
-| **Smoke test end-to-end en dev** ✅ completado 2026-05-24 | — | — |
+| **Smoke test end-to-end en dev — Phase 2 wizard original** ✅ completado 2026-05-24 | — | — |
+| **Smoke test end-to-end en dev — Phase 2.5 persister idempotente** ✅ completado 2026-05-25: 3 imports cargados, 154 closed_lots / 302 trades / 327 open_lots persistidos correctamente, segundo refresh `items_processed=0` confirma D13 fix | — | — |
 | **Smoke test end-to-end en prod** | Usuario | No bloquea Phase 3 (dev validó el flow) |
 | **Counterparty account `CS-######-##` queda como orphan account** (1 row dejada de smoke test — `CS-999999-99` del transfer GLOB desde Shareworks) | Aceptado | No bloquea Phase 3 — se resuelve cuando Phase 3 reescriba el persister, ver §Roadmap Phase 3 |
-| **11 items de deuda conocida D1-D11** documentados en polish backlog (D12 RESOLVED en `5dba1b4` 2026-05-25 — wizard TRM ahora con SSE feedback) | Aceptados como V1 | No bloquean — la mayoría tienen mitigation o son features (fail-loud audit, etc.) |
+| **11 items de deuda conocida D1-D11** documentados en polish backlog (D12 RESOLVED en `5dba1b4` 2026-05-25 — wizard TRM ahora con SSE feedback; D13 [BUG-FIXED] RESOLVED en tag `v0.2.3-persister-idempotent` — persister rewrite) | Aceptados como V1 | No bloquean — la mayoría tienen mitigation o son features (fail-loud audit, etc.) |
 
 ### Deuda conocida heredada de Phase 2 (resumen)
 
@@ -103,7 +105,7 @@ Ver `docs/plans/2026-05-24-phase2-polish-backlog.md` § "Deuda conocida" para de
 - **D9** Phase 1 Task 15: Coolify deploy — usuario
 - **D10** `auth_headers` fixture per-test overhead — V2 perf
 - **D11** Coverage gaps en imports/ingest/scheduler — requieren live infra para subir más
-- **D2 + D5 + D12 RESOLVED**: D2/D5 persistent state migration (commits 70f9bd0 + 45127f1); D12 wizard TRM fire-and-forget resuelto en `5dba1b4` — `step2/save` ahora registra job en `JobTracker` y devuelve `trm_backfill_job_id`, frontend renderiza `TrmBackfillBanner` con SSE state running/ok/failed encima del stepper
+- **D2 + D5 + D12 + D13 RESOLVED**: D2/D5 persistent state migration (commits 70f9bd0 + 45127f1); D12 wizard TRM fire-and-forget resuelto en `5dba1b4` — `step2/save` ahora registra job en `JobTracker` y devuelve `trm_backfill_job_id`, frontend renderiza `TrmBackfillBanner` con SSE state running/ok/failed encima del stepper. **D13 [BUG-FIXED]** = persister Flex no idempotente — resuelto en tag `v0.2.3-persister-idempotent` (Phase 2.5): rewrite a Core UPSERT por natural key per-entity, 6 Alembic revisions + 2 scripts manuales (wipe + backfill_closed_lots), decisiones A0-A8 + 3 amendments lockeadas en `docs/specs/2026-05-25-flex-persister-idempotent-design.md`
 
 ### Decisiones locked (no re-discutir)
 
@@ -145,6 +147,15 @@ Detalles útiles para evitar re-depurar en fases futuras:
   - **Tests por unidad NO atrapan drift de contrato cross-stack.** `test_job_tracker.py` usaba `step="trm_backfill"` aislado y el `_run_manual` de `api/ingest.py` (no testeado en `test_ingest.py` hasta hoy) emitía `step="trm"`. Cada test pasaba; el contrato cruzado no se verificaba. Lección para Phase 3+: cuando un payload viaja backend → wire → frontend, agregar al menos un test que invoque al productor real y assert la shape consumida por el frontend (no solo que el productor "emite algo"). En este caso bastó con `_run_manual(...)` directo + inspect del tracker — overhead mínimo, atrapa el bug.
   - **Fire-and-forget = bug invisible.** `_trm_backfill_background` venía fallando desde el primer disparo del wizard sin generar ningún signal en UI. Solo se detectó cuando el usuario reportó "no hace nada" + miramos `ingest_log` a mano. Regla práctica: si un background task NO tiene UI feedback, mínimo `logger.exception` + escribir en `ingest_log`; preferentemente integrar al `JobTracker` para que aparezca en Settings → Logs. Aplica a cualquier nuevo `BackgroundTasks` en Phase 3+.
 
+- **Persister Flex no idempotente — bug crítico detectado post-deploy + rewrite Phase 2.5 (2026-05-25, tag `v0.2.3-persister-idempotent`)** — smoke test del manual refresh el 2026-05-25 reveló que cron Flex + manual refresh fallaban al 2do run con `UniqueViolationError trades_transaction_id_key`. Phase 2 dedupea solo a nivel xml_hash pero los XMLs YTD cambian byte-a-byte cada día (mark prices, timestamp del reporte, eventos nuevos) → cada hash es nuevo → re-INSERT de todos los trades del año → choque con UNIQUE global. El cron diario también estaba roto, solo no se detectó porque el único smoke E2E de Phase 2 cubría el primer run (DB vacía). Fix Phase 2.5: rewrite del persister a UPSERT por natural key per-entity con helpers Core (`pg_insert + on_conflict_*`), semántica diferenciada immutable (DO NOTHING, first-seen) vs snapshot (DO UPDATE, last-updated-by). Schema migration en 6 Alembic revisions + 2 scripts manuales (`scripts/wipe_flex_data.py` para mitigar TRUNCATE accidental, `scripts/backfill_closed_lots.py` que replay xml_bytes via A0 cuando se aplicó A3 #3 sin pedir re-upload al usuario). Decisiones A0-A8 lockeadas + **3 amendments descubiertas durante implementación**: **A3 #1** agregó `originating_transaction_id` a `open_position_lots` (multi-fill orders con mismo `(account, symbol, open_date)`); **A3 #2** agregó `(report_date, action_id, code)` a accruals + promovió `code` de raw_attrs a column (Po/Re lifecycle events); **A3 #3** agregó `(close_datetime, fifo_pnl_usd)` a closed_lots (multi-execution closes del mismo open_lot con mismo transactionID compartido — caso ICSH 2025 verificado: 7 close events colapsados a 1, recuperamos $8.75 de realized PnL; caso IBIT 2024 verificado: 2 rows con mismo key + distinto pnl por wash-sale adjustment). Las 3 amendments se descubrieron solo ejecutando tests integration y smoke real contra el XML real del fixture 2025 — el spec original quedaba lossy contra real data en 3 tablas distintas. Agregamos `xml_bytes BYTEA` a flex_imports para replay capability futura (A0) — usado exitosamente para el backfill de A3 #3 sin re-upload. Plan: `docs/plans/2026-05-25-flex-persister-rewrite.md` (15 tasks + extension). Spec: `docs/specs/2026-05-25-flex-persister-idempotent-design.md` (decisiones + 3 amendments inline). Tests: 215 → 245 (+30: helpers + integration + migration + regression + 3 amendments). D13 [BUG-FIXED] documenta el incidente + lecciones en polish backlog. **Smoke test end-to-end validado 2026-05-25 con datos reales IBKR**: 3 imports cargados (2024 sealed + 2025 sealed + 2026 YTD Flex WS), 154 closed_lots + 302 trades + 327 open_lots persistidos, n_observed=n_new en todos (excepto transfers por behavior IBKR-mirror documentado); segundo refresh manual `items_processed=0` (hash dedup fast-path A4) sin failures — idempotencia probada end-to-end.
+
+- **Lecciones del incidente del persister** (Phase 2.5, additional al smoke test post-merge):
+  - **Natural keys validar contra data REAL antes de lockear como UNIQUE.** Spec A3 original tenía 2 colisiones contra el fixture 2025 (open_position_lots multi-fill + accruals Po/Re). Solo se detectaron al ejecutar tests integration contra el XML real. Lección para Phase 3+ brainstorming: verificar fixture data antes de cerrar natural keys, especialmente snapshot/mutable tables donde el discriminador no es obvio del schema.
+  - **Smoke E2E debe disparar jobs ≥2 veces consecutivas.** El smoke de Phase 2 corrió Flex 1 vez sola (DB vacía, sin conflictos). Bug invisible. Aplicar a cualquier background task Phase 3+ que toque DB con UNIQUE constraints.
+  - **UNIQUE constraint sin UPSERT es trampa garantizada.** Pareo obligatorio: cada UNIQUE nueva en el schema requiere decisión explícita de qué hacer ON CONFLICT (DO NOTHING / DO UPDATE), y un test que dispare el caso de re-insert.
+  - **Hash dedup a nivel "documento entero" es engañoso para fuentes mutables.** Para YTD/rolling data, dedupear a nivel fila (natural key) es la única respuesta correcta. Hash queda como fast-path optimization (skip parsing), no como contract de idempotencia.
+  - **Append-only ledger pattern es el default world-class para hechos immutables.** SET NULL en FK preserva data ante deletes accidentales del parent; CASCADE viola la semántica de first-seen porque puede matar hechos sanos que también aparecen en imports posteriores.
+
 ---
 
 ## Qué es este proyecto
@@ -170,7 +181,7 @@ Globant, AFC, leasing, etc. Esta app es el **centro de control IBKR-only**.
 | Phase | Status | Plan | Spec | Tag al completar |
 |---|---|---|---|---|
 | 1. Foundation | ✅ código completo (Tasks 1-14) + polish backlog cerrado (6/6) + tag `v0.1.0-foundation` ✓ · Task 15 (deploy manual a Coolify) pendiente del usuario | `docs/plans/2026-05-24-ibkr-control-phase1-foundation.md` + `docs/plans/2026-05-24-phase1-polish-backlog.md` | spec maestro §3, §5.1 | `v0.1.0-foundation` ✓ |
-| 2. Data ingestion (Flex WS + TRM Socrata + scheduler + upload XML + setup wizard) | ✅ completado · 20 tasks + polish backlog (10 items) + persistent state D5+D2 + wizard redesign (16 tasks) · 207 tests · tags `v0.2.0-ingest` + `v0.2.1-persistent-state` + `v0.2.2-wizard-redesign` ✓ | `docs/plans/2026-05-24-ibkr-control-phase2-ingestion.md` + `docs/plans/2026-05-24-phase2-polish-backlog.md` + `docs/plans/2026-05-24-d5-d2-persistent-state.md` + `docs/plans/2026-05-24-wizard-redesign.md` | `docs/specs/2026-05-24-phase2-ingestion-design.md` (D1-D17 — D6 SUPERSEDED) + `docs/specs/2026-05-24-wizard-redesign-design.md` (D1-D12) | `v0.2.2-wizard-redesign` ✓ |
+| 2. Data ingestion (Flex WS + TRM Socrata + scheduler + upload XML + setup wizard + persister idempotente) | ✅ completado + smoke test real validado · 20 tasks + polish backlog (10 items) + persistent state D5+D2 + wizard redesign (16 tasks) + Phase 2.5 persister rewrite (15 tasks + A3 amendments #1/#2/#3, D13 [BUG-FIXED]) · **245 tests** · tags `v0.2.0-ingest` + `v0.2.1-persistent-state` + `v0.2.2-wizard-redesign` + `v0.2.3-persister-idempotent` ✓ | `docs/plans/2026-05-24-ibkr-control-phase2-ingestion.md` + `docs/plans/2026-05-24-phase2-polish-backlog.md` + `docs/plans/2026-05-24-d5-d2-persistent-state.md` + `docs/plans/2026-05-24-wizard-redesign.md` + `docs/plans/2026-05-25-flex-persister-rewrite.md` | `docs/specs/2026-05-24-phase2-ingestion-design.md` (D1-D17 — D6 SUPERSEDED) + `docs/specs/2026-05-24-wizard-redesign-design.md` (D1-D12) + `docs/specs/2026-05-25-flex-persister-idempotent-design.md` (A0-A8 + 3 amendments) | `v0.2.3-persister-idempotent` ✓ |
 | 3. Domain layer + lotes (FIFO, classification, lotes abiertos/cerrados/alertas) | ⏳ por brainstormear + planificar — ver §Roadmap Phase 3 abajo | — | spec maestro §6 (domain) + §4.2 (Lotes Abiertos/Cerrados/Alertas) + `renta/docs/flex_fifo_loader_spec.md` | `v0.3.0-lotes` |
 | 4. Simulador (STK + FUT con neteo YTD) | ⏳ por planificar | — | spec maestro §4.2 (Simulador) + `renta2025.py` § A.5 régimen DUAL | `v0.4.0-simulator` |
 | 5. Dividendos + Patrimonio + Form 160 + Reporte Form 210 | ⏳ por planificar | — | spec maestro §4.2 (Dividendos/Patrimonio/Form 160/Reporte) + §6.1 reglas D-E | `v0.5.0-reports` |

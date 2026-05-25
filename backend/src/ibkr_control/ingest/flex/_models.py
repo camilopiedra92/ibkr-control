@@ -1,6 +1,6 @@
 """Dataclasses que el parser produce a partir del XML (intermediarias, no DB)."""
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 
@@ -36,6 +36,7 @@ class ParsedClosedLot:
     symbol: str
     open_date: date
     close_date: date
+    close_datetime: datetime  # A3 amendment #3: per-execution timestamp, discriminator for natural key
     qty: Decimal
     cost_basis_usd: Decimal
     proceeds_usd: Decimal
@@ -53,10 +54,17 @@ class ParsedOpenPositionLot:
     mark_price_usd: Decimal | None
     mark_value_usd: Decimal | None
     snapshot_date: date
+    originating_transaction_id: str
+    # IBKR <OpenPosition originatingTransactionID="...">. Discriminator for the
+    # natural key (spec A3 amendment 2026-05-25). Multi-fill orders produce
+    # multiple LOT rows with the same (account, symbol, open_date, snapshot_date)
+    # — only this txn id distinguishes them. LOT-level rows always have it
+    # populated; SUMMARY rows (already filtered by the parser) do not.
 
 
 @dataclass
 class ParsedCashTransaction:
+    transaction_id: str
     ibkr_account_id: str
     type: str
     currency: str
@@ -68,6 +76,7 @@ class ParsedCashTransaction:
 
 @dataclass
 class ParsedTransfer:
+    transaction_id: str
     transfer_date: date
     direction: str
     src_ibkr_account_id: str | None
@@ -107,6 +116,12 @@ class ParsedDividendAccrual:
     asset_category: str | None
     sub_category: str | None
     level_of_detail: str | None
+    code: str
+    # IBKR <ChangeInDividendAccrual code="Po|Re|..."> — first-class column post
+    # A3 amendment #2 (2026-05-25). Discriminator together with action_id +
+    # report_date for accrual lifecycle events (Posted vs Reversal) over the same
+    # accrual_date. Normalized to "" (never None) so it works as a UNIQUE key
+    # column without needing NULLS NOT DISTINCT (which is PG15+ only).
     raw_attrs: dict
 
 
@@ -130,6 +145,12 @@ class ParsedOpenDividendAccrual:
     action_id: str | None
     asset_category: str | None
     sub_category: str | None
+    code: str
+    # Preemptive mirror of A3 amendment #2 (2026-05-25). The 2025 fixture only
+    # exhibits the Po/Re collision pattern on change_in_dividend_accruals, but
+    # the same IBKR semantics apply to open accruals — add the column +
+    # discriminator now to avoid a future regression when an XML with multi-row
+    # open accruals shows up.
     raw_attrs: dict
 
 

@@ -8,6 +8,19 @@ export interface StreamEvent {
   status?: "running" | "ok" | "failed";
   n_days?: number;
   n_trades?: number;
+  // Phase 2.5 idempotent persister counters (spec A5)
+  n_observed_trades?: number;
+  n_observed_lots_closed?: number;
+  n_observed_open_lots?: number;
+  n_observed_cash_tx?: number;
+  n_observed_dividends?: number;
+  n_observed_transfers?: number;
+  n_new_trades?: number;
+  n_new_lots_closed?: number;
+  n_new_open_lots?: number;
+  n_new_cash_tx?: number;
+  n_new_dividends?: number;
+  n_new_transfers?: number;
   error?: string;
   redirect?: string;
 }

@@ -50,6 +50,7 @@ def _make_trade(account_id: str, txn_suffix: str) -> ParsedTrade:
 
 def _make_cash_tx(account_id: str, amount: str, description: str) -> ParsedCashTransaction:
     return ParsedCashTransaction(
+        transaction_id="TXN-CASH-test-001",
         ibkr_account_id=account_id,
         type="Commissions",
         currency="USD",
@@ -93,7 +94,7 @@ async def test_persister_filters_f_accounts_from_all_tables(
         open_dividend_accruals=[],
     )
 
-    await persist(
+    _fi_id, _counters = await persist(
         db_session,
         parsed=parsed,
         user_id=sample_user.id,
@@ -139,7 +140,7 @@ async def test_persister_handles_xml_with_only_f_accounts(
         open_dividend_accruals=[],
     )
 
-    await persist(
+    _fi_id, _counters = await persist(
         db_session,
         parsed=parsed,
         user_id=sample_user.id,

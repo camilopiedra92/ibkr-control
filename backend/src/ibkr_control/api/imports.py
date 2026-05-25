@@ -84,7 +84,10 @@ async def upload_xml(
     except XMLSyntaxError as e:
         raise HTTPException(status_code=400, detail=f"XML invalido: {e}")
 
-    # Ingest real
+    # Ingest real. job.ingest_xml internally destructures the persister tuple
+    # and returns only the flex_import_id; we re-pull the FlexImport row to
+    # expose both n_observed_* (what the XML carried) and n_new_* (what
+    # actually hit DB — 0s on dedup'd re-uploads) per spec A5.
     flex_import_id = await flex_job_mod.ingest_xml(
         session,
         user_id=user.id,
@@ -93,12 +96,20 @@ async def upload_xml(
         trigger="wizard",
     )
 
-    # Pull counts del registro persistido
     fi = await session.scalar(select(FlexImport).where(FlexImport.id == flex_import_id))
     return {
         "flex_import_id": flex_import_id,
-        "n_trades": fi.n_trades,
-        "n_lots_closed": fi.n_lots_closed,
-        "n_cash_tx": fi.n_cash_tx,
         "anyo": fi.anyo,
+        "n_observed_trades": fi.n_observed_trades or 0,
+        "n_observed_lots_closed": fi.n_observed_lots_closed or 0,
+        "n_observed_open_lots": fi.n_observed_open_lots or 0,
+        "n_observed_cash_tx": fi.n_observed_cash_tx or 0,
+        "n_observed_dividends": fi.n_observed_dividends or 0,
+        "n_observed_transfers": fi.n_observed_transfers or 0,
+        "n_new_trades": fi.n_new_trades or 0,
+        "n_new_lots_closed": fi.n_new_lots_closed or 0,
+        "n_new_open_lots": fi.n_new_open_lots or 0,
+        "n_new_cash_tx": fi.n_new_cash_tx or 0,
+        "n_new_dividends": fi.n_new_dividends or 0,
+        "n_new_transfers": fi.n_new_transfers or 0,
     }

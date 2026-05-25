@@ -36,6 +36,7 @@ RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=1001,gid=1001 \
 COPY --chown=appuser:appuser src/ ./src/
 COPY --chown=appuser:appuser alembic.ini ./
 COPY --chown=appuser:appuser alembic/ ./alembic/
+COPY --chown=appuser:appuser scripts/ ./scripts/
 
 EXPOSE 8000
 
@@ -51,6 +52,7 @@ RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=1001,gid=1001 \
 COPY --chown=appuser:appuser src/ ./src/
 COPY --chown=appuser:appuser alembic.ini ./
 COPY --chown=appuser:appuser alembic/ ./alembic/
+COPY --chown=appuser:appuser scripts/ ./scripts/
 
 RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=1001,gid=1001 \
     uv sync --frozen --no-dev

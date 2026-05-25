@@ -417,6 +417,61 @@ del chunking lo hace), la deuda es de UX del wizard, no operacional.
 
 ---
 
+### D13 [BUG-FIXED] — Persister Flex no idempotente (resuelto en Phase 2.5)
+
+**Status:** **RESOLVED** en tag `v0.2.3-persister-idempotent` (branch `phase25/flex-persister-idempotent`).
+
+**Bug:** El persister Phase 2 dedupea solo a nivel `xml_hash`. La Flex YTD del
+Web Service cambia byte-a-byte cada día (mark prices, timestamp, eventos nuevos)
+→ hash siempre nuevo → `session.add(Trade(...))` choca con `UNIQUE(transaction_id)`
+global → cron + manual refresh fallan al 2do run con `UniqueViolationError`.
+
+**Detectado:** 2026-05-25 durante refresh manual desde Settings. Síntoma visible:
+UI mostraba "✓ Refresh completado" (race condition independiente en
+`ManualRefreshButton.tsx` — fix en el mismo PR) mientras `ingest_log` mostraba
+`flex=failed` con stacktrace.
+
+**Causa raíz arquitectónica:** mezcla de dos modelos contradictorios
+(dedup a nivel XML vs UNIQUE global por transaction_id) sin idempotencia
+real per-row.
+
+**Fix (Phase 2.5):** rewrite del persister a UPSERT por natural key per-entity,
+con semántica diferenciada immutable (DO NOTHING, first-seen) vs snapshot
+(DO UPDATE, last-updated-by). Decisiones A0-A8 lockeadas + 3 amendments durante
+implementación (A3 #1 para `originating_transaction_id` en open_position_lots,
+A3 #2 para `code` en accruals, A3 #3 para `close_datetime + fifo_pnl_usd` en
+closed_lots). Spec: `docs/specs/2026-05-25-flex-persister-idempotent-design.md`.
+Plan: `docs/plans/2026-05-25-flex-persister-rewrite.md`. 6 Alembic revisions +
+script manual de wipe entre Rev1 y Rev2 + script de backfill closed_lots entre
+Rev5 y Rev6 (replay desde xml_bytes via A0, sin re-upload del usuario). Tests:
+215 → 245.
+
+**Lecciones (escritas para evitar repetir):**
+
+1. **Smoke E2E debe disparar jobs ≥2 veces consecutivas.** El único smoke de
+   Phase 2 corrió Flex 1 vez (DB vacía, sin conflictos). Bug invisible. Aplicar
+   a cualquier background task Phase 3+ que toque DB.
+
+2. **UNIQUE constraint sin UPSERT es trampa.** Si una tabla tiene `UNIQUE(X)`
+   y el escritor hace plain INSERT, cualquier re-run rompe. Siempre que se
+   agregue UNIQUE, parear con decisión explícita de qué hacer ON CONFLICT.
+
+3. **Hash dedup a nivel "documento entero" es engañoso para fuentes que cambian
+   continuamente.** Para YTD/rolling data, dedupear a nivel fila (natural key)
+   es la única respuesta correcta. Hash queda como fast-path optimization.
+
+4. **Natural keys validar contra data REAL antes de lockear como UNIQUE.** Spec
+   A3 original tenía 2 colisiones contra el fixture 2025: open_position_lots
+   (multi-fill orders) y dividend accruals (Po/Re events). Solo se detectaron
+   ejecutando los tests integration contra el XML real. Lección: brainstorming
+   debe verificar fixture data antes de cerrar natural keys.
+
+5. **Append-only ledger pattern con SET NULL.** Borrar un flex_import no debe
+   matar hechos immutable que también aparecen en otros imports. SET NULL en
+   FK preserva data; CASCADE viola la semántica de first-seen.
+
+---
+
 ## Verificación final
 
 ```bash

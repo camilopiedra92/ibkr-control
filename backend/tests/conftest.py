@@ -155,6 +155,26 @@ async def sample_account(db_session: AsyncSession):
     return a
 
 
+@pytest.fixture
+async def sample_flex_import(db_session: AsyncSession, sample_user):
+    from datetime import date
+    from ibkr_control.db.models.flex_raw import FlexImport
+    fi = FlexImport(
+        user_id=sample_user.id, anyo=2025,
+        xml_hash='helper-test-hash',
+        xml_size_bytes=100,
+        xml_bytes=b'<test/>',
+        source='manual_upload',
+        period_covered_from=date(2025, 1, 1),
+        period_covered_to=date(2025, 12, 31),
+        year_status='sealed',
+        status='ok',
+    )
+    db_session.add(fi)
+    await db_session.flush()
+    return fi
+
+
 @pytest.fixture(scope="session")
 def cassette_dir() -> Path:
     return Path(__file__).parent / "fixtures" / "cassettes"
