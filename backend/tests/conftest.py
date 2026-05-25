@@ -19,6 +19,12 @@ from ibkr_control.main import create_app
 from ibkr_control.db.base import Base
 from ibkr_control.db.session import get_async_session
 
+from tests.conftest_ephemeral_db import (  # noqa: F401
+    ephemeral_postgres,
+    ephemeral_db_url,
+    ephemeral_session_factory,
+)
+
 
 @pytest.fixture(scope="session")
 def anyio_backend():
