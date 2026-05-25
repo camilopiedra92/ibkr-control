@@ -76,6 +76,7 @@ Smoke test en dev YA está hecho (2026-05-24, ver §"Wizard redesign post-deploy
 
 - TDD: failing test → minimal impl → passing test → commit
 - Frequent commits: cada step del plan termina en commit
+- **No commitear shortcuts sin canonicalizar** — atajos en exploración/debugging OK; antes de `git commit` reemplazar por el flujo canónico documentado **O** pedir aprobación explícita al usuario surface-eando el trade-off (ver §Convenciones de código → "Shortcuts y flujos canónicos")
 - No emojis en código (Unicode arrows ✓ ⚠ ✗ → como content UI sí)
 - `Decimal` para dinero, nunca float
 - Postgres-specific allowed (JSONB, ON CONFLICT, advisory locks)
@@ -341,6 +342,23 @@ El plan fue escrito asumiendo Next 14 / Tailwind v3 / shadcn Slate. `pnpm create
 - **Postgres-specific** (JSONB, ON CONFLICT, ranges) — no abstraer a SQLite
 - **Dedup de imports por SHA-256** (mismo patrón que `renta/documentos/_hash.py`)
 - **No capturar `settings = get_settings()` a nivel módulo** — llamar `get_settings()` dentro de funciones/métodos. El patrón module-level cachea valores en cada módulo independientemente; cuando los tests hacen `monkeypatch.setenv` + `get_settings.cache_clear()`, los módulos ya cargados siguen viendo los settings viejos. (Code review de Task 5 detectó que los tests actuales pasan por coincidencia — los valores de conftest y fixture son idénticos.) Aplicar a código nuevo desde Task 6+; refactor de los 3 archivos existentes (`db/session.py`, `auth/manager.py`, `auth/backend.py`) está en el polish backlog.
+
+### Shortcuts y flujos canónicos
+
+Durante exploración o debugging, atajos están OK (generar artefactos offline, bypass temporal de scripts, comandos manuales con env vars puntuales). **Antes de `git commit`**:
+
+1. Reemplazar el atajo por el flujo canónico documentado (CLAUDE.md §Comandos comunes, scripts de `package.json`/`pyproject.toml`, conventions del `docker-compose.yml`), **O**
+2. Surface el trade-off al usuario con un por-qué explícito y pedir aprobación para commitear el estado no-canónico.
+
+**Señales de alerta** (revisar antes de cada commit):
+- Container running en código viejo mientras el source tiene cambios que afectan OpenAPI schema o comportamiento de endpoints
+- Build artifacts (`openapi.json`, `generated.ts`, migrations, `node_modules`) generados por un path no documentado en scripts del repo
+- Comandos manuales con env vars o flags inventados que no aparecen en ningún script documentado (e.g. `DATABASE_URL="..." uv run python -c "..."`)
+- El `docker compose ps` muestra containers "Created N hours ago" después de un cambio de source que debería estar en ellos
+
+**Caso ejemplo (2026-05-25 — D12 fix, commits `5dba1b4` + `d39ae3d`):** generé `frontend/openapi.json` offline via `app.openapi()` en lugar de `docker compose up -d --build backend && pnpm openapi:gen`. El output era idéntico al canónico, pero dejó (a) el container deployado en código viejo — out-of-sync con el source que el commit incluía, (b) `openapi.json` con `indent=2` en lugar del formato compact del repo, y (c) ningún signal de que el código nuevo arrancaba bien (lifespan, conexiones DB, scheduler). Resolución forzada después del usuario detectarlo: rebuild container, re-correr el `openapi:gen` canónico, amend del commit con el `openapi.json` reformatted. **Lección:** "output equivalente" no es suficiente — el camino importa porque valida boot, deja el entorno dev en estado reproducible, y matchea el repo (formatting incluido). Si tomás un atajo, replanteá antes del commit, no después de que el usuario te corrija.
+
+**No aplica a:** deuda aceptada como V1 documentada en `docs/plans/2026-05-24-phase2-polish-backlog.md` (D1-D11). Esa es deuda cerrada con rationale; este rule cubre deuda *nueva* no autorizada (workaround introducido en una sesión sin discutirlo).
 
 ## Polish backlog (cerrado, ver `docs/plans/2026-05-24-phase1-polish-backlog.md`)
 
