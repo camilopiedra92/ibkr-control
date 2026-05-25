@@ -29,34 +29,29 @@ Phase 3 = domain layer + 3 pantallas (Lotes Abiertos/Cerrados/Alertas 730d). Spe
 8. Branch: git checkout -b phase3/lotes main
 ```
 
-### Camino B — Push a remote + deploy a Coolify (tarea del usuario)
+### Camino B — Deploy a Coolify (tarea del usuario)
 
-Smoke test en dev YA está hecho (2026-05-24, ver §"Wizard redesign post-deploy"). Falta solo push + deploy prod:
+Smoke test en dev + push a remote YA están hechos (2026-05-24/25, ver §"Wizard redesign post-deploy"). Repo privado en `https://github.com/owner/ibkr-control`. Falta solo deploy prod:
 
 ```
-1. Push main + tags a remote (~30s):
-   git push origin main --follow-tags
-   # Sube los 4 commits post-merge (b458ac6, 8bd578f, 24aa5f9, 4eb4f80) +
-   # tags v0.2.0/v0.2.1/v0.2.2 a GitHub
-
-2. Configurar TOKEN_ENCRYPTION_KEY en Coolify (1 min):
+1. Configurar TOKEN_ENCRYPTION_KEY en Coolify (1 min):
    openssl rand -base64 32  # generar key
    # Pegarla en Coolify env vars del backend container
    # CRÍTICO: sin esta key, decrypt_token() crashea al primer fetch del cron
 
-3. Confirmar DNS en Coolify (1 min):
+2. Confirmar DNS en Coolify (1 min):
    # El compose.yml local ahora pinea `dns: [1.1.1.1, 8.8.8.8]` en backend.
    # Coolify normalmente usa DNS público por default — verificar que no
    # haya un override de network que herede DNS del host server. Si lo hay,
    # replicar el pin en la config de Coolify.
 
-4. Trigger redeploy desde Coolify UI apuntando a main (~3 min build):
+3. Trigger redeploy desde Coolify UI apuntando a main (~3 min build):
    # Verificar logs: "Registered 3 ingest jobs: flex_daily, trm_daily, cleanup_job_tracker"
    # Migration H wipea data legacy — preserva flex_credentials + apscheduler_jobs
    # Si las migrations no se aplican automáticamente:
    docker exec <backend-container> uv run alembic upgrade head
 
-5. Smoke test end-to-end del wizard en prod (~20-30 min):
+4. Smoke test end-to-end del wizard en prod (~20-30 min):
    # Mismo flow validado en dev: Step 1 creds → Step 2 detect (online o
    # XML fallback) → Step 2 configure → Step 3 históricos → finish.
    # Si IBKR responde 1001 BUSY (puede pasar — es 1x/día por design),
@@ -88,7 +83,7 @@ Smoke test en dev YA está hecho (2026-05-24, ver §"Wizard redesign post-deploy
 
 | Item | Quién | Bloquea? |
 |---|---|---|
-| **Push main + 4 commits post-merge + tags a remote** (`git push origin main --follow-tags`) | Usuario | No bloquea Phase 3 dev local |
+| **Push main + tags a remote** ✅ completado 2026-05-25 — repo privado `owner/ibkr-control` creado via `gh repo create`, main + 4 tags pushed | — | — |
 | **Deploy a Coolify + setear `TOKEN_ENCRYPTION_KEY` + verificar DNS público** | Usuario | No bloquea Phase 3 dev local |
 | **Smoke test end-to-end en dev** ✅ completado 2026-05-24 | — | — |
 | **Smoke test end-to-end en prod** | Usuario | No bloquea Phase 3 (dev validó el flow) |
