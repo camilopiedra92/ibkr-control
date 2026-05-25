@@ -56,10 +56,11 @@ async def test_upsert_snapshot_inserts_then_updates(
         snapshot_date=date(2025, 5, 25),
         qty=Decimal('10'), cost_basis_usd=Decimal('1500'),
         mark_price_usd=Decimal('170'), mark_value_usd=Decimal('1700'),
+        originating_transaction_id='OTID-TEST-001',
     )
     n_first = await _upsert_snapshot(
         db_session, OpenPositionLot.__table__, [base_row],
-        ['account_id', 'symbol', 'open_date', 'snapshot_date'],
+        ['account_id', 'symbol', 'open_date', 'snapshot_date', 'originating_transaction_id'],
         ['qty', 'cost_basis_usd', 'mark_price_usd', 'mark_value_usd', 'flex_import_id'],
     )
     assert n_first == 1
@@ -67,7 +68,7 @@ async def test_upsert_snapshot_inserts_then_updates(
     updated = dict(base_row, mark_price_usd=Decimal('180'), mark_value_usd=Decimal('1800'))
     n_second = await _upsert_snapshot(
         db_session, OpenPositionLot.__table__, [updated],
-        ['account_id', 'symbol', 'open_date', 'snapshot_date'],
+        ['account_id', 'symbol', 'open_date', 'snapshot_date', 'originating_transaction_id'],
         ['qty', 'cost_basis_usd', 'mark_price_usd', 'mark_value_usd', 'flex_import_id'],
     )
     assert n_second == 1  # touched (UPDATE path)

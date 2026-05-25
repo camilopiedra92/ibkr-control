@@ -59,9 +59,24 @@ Borrar un flex_import deja vivos a los children con `flex_import_id = NULL`. Fil
 
 | Tabla | Natural key | Semántica de UPDATE |
 |---|---|---|
-| `open_position_lots` | `(account_id, symbol, open_date, snapshot_date)` | UPDATE qty, cost_basis_usd, mark_price_usd, mark_value_usd, flex_import_id |
-| `change_in_dividend_accruals` | `(account_id, conid, ex_date, pay_date, accrual_date)` | UPDATE all mutable fields |
-| `open_dividend_accruals` | `(account_id, conid, ex_date, pay_date, report_date)` | UPDATE all mutable fields |
+| `open_position_lots` | `(account_id, symbol, open_date, snapshot_date, originating_transaction_id)` | UPDATE qty, cost_basis_usd, mark_price_usd, mark_value_usd, flex_import_id |
+| `change_in_dividend_accruals` | `(account_id, conid, ex_date, pay_date, accrual_date, report_date, action_id, code)` | UPDATE all mutable fields |
+| `open_dividend_accruals` | `(account_id, conid, ex_date, pay_date, report_date, action_id, code)` | UPDATE all mutable fields |
+
+**⚠ A3 AMENDED 2026-05-25 during Task 8 implementation:** original natural key for `open_position_lots` was `(account_id, symbol, open_date, snapshot_date)` — collided against real IBKR data where the SAME `(account, symbol, open_date)` has multiple distinct LOT rows from multi-fill orders (e.g., AMD 2025-02-05 has 2 lots: qty=0.8638 from txn 31233843972, qty=1 from txn 31233844034). IBKR distinguishes them via `originatingTransactionID` XML attribute. Added `originating_transaction_id` to the natural key. Required:
+- New parser field on `ParsedOpenPositionLot.originating_transaction_id: str`
+- New column on `OpenPositionLot` model (NOT NULL, since IBKR always emits it for LOT-level rows)
+- New Alembic Revision 3 to add column + swap UNIQUE constraint (drops `open_position_lots_natural_key` from Rev2, creates the same-named constraint with the extended column list)
+- Persister update: pass `originating_transaction_id` in conflict_cols
+- No impact on snapshot semantics — same lot keeps getting UPDATEd as mark price changes; different fills stay as separate rows.
+
+**⚠ A3 AMENDED #2 2026-05-25 during Task 8 implementation (accruals):** original natural keys for `change_in_dividend_accruals` and `open_dividend_accruals` were incomplete — collided against real IBKR data with multiple accrual lifecycle events (Posted/Reversed) for the same dividend payment. E.g., ASML ex_date=2025-02-11 + pay_date=2025-02-19 + accrual_date=2025-02-10 has 3 distinct rows discriminated by `report_date + action_id + code` (Po=Posted vs Re=Reversal). Extended natural keys with `(report_date, action_id, code)`. Required:
+- Promote `code` from raw_attrs to first-class column (Mapped[str | None] mapped_column(String, nullable=True)) on both `ChangeInDividendAccrual` and `OpenDividendAccrual` models (and add to `ParsedDividendAccrual` + `ParsedOpenDividendAccrual` dataclasses + parser extraction)
+- `report_date` and `action_id` already exist as columns — no change
+- New Alembic Revision 4: add `code` column + drop/recreate both UNIQUE constraints with extended column lists
+- Persister update: pass extended natural key in both `_upsert_snapshot` calls + include `code` in the row dict + `code` to update_cols
+- **Preemptive mirror to `open_dividend_accruals`:** the 2025 fixture has only 1 row (no observable collision), but the same IBKR pattern emits Po/Re events for open accruals too. Apply the same fix preemptively to avoid the bug surfacing in production with bigger fixtures (world-class = fix the class of bug, not just the observed instance).
+- `code` can be NULL for some IBKR rows (e.g., rows without a lifecycle marker), so UNIQUE on `(..., code)` works because Postgres treats NULL != NULL in UNIQUE constraints by default — but to avoid the surprise of "two rows with NULL code collide", we use Postgres's `NULLS NOT DISTINCT` option on the UNIQUE constraint (PG15+). Alternatively coalesce NULL to '' at write time. **Decision: COALESCE to '' at persister write time** (simpler, no PG15+ requirement; matches our pattern for other "or ''" fallbacks like `transaction_id`).
 
 **Why:** `snapshot_date` (y equivalentes `accrual_date`/`report_date` para accruals) en la natural key preserva series temporal naturalmente. Para Patrimonio Dec 31 (Art. 261-263 ET), Dec 31 queda preservado para siempre — el cron del Jan 1 inserta una row nueva, no sobreescribe. Sin `snapshot_date`, Opción 2 (overwrite in place) requeriría workaround tipo "freeze cron" que es exactamente el anti-patrón a evitar.
 

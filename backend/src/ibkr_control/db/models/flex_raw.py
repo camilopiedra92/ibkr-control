@@ -122,8 +122,14 @@ class OpenPositionLot(Base):
     __tablename__ = "open_position_lots"
     __table_args__ = (
         Index("open_position_lots_account_symbol_idx", "account_id", "symbol"),
+        # A3 amendment 2026-05-25: extended natural key with
+        # originating_transaction_id (IBKR's per-lot id) because multi-fill
+        # orders produce multiple distinct LOT rows for the same
+        # (account, symbol, open_date, snapshot_date) tuple. See Alembic
+        # Revision 3 (phase25_op_lots_otid_amendment).
         UniqueConstraint(
             "account_id", "symbol", "open_date", "snapshot_date",
+            "originating_transaction_id",
             name="open_position_lots_natural_key",
         ),
     )
@@ -142,6 +148,7 @@ class OpenPositionLot(Base):
     mark_price_usd: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
     mark_value_usd: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), nullable=True)
     snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
+    originating_transaction_id: Mapped[str] = mapped_column(String, nullable=False)
 
 
 class Transfer(Base):
@@ -209,8 +216,15 @@ class ChangeInDividendAccrual(Base):
     __table_args__ = (
         Index("change_in_dividend_accruals_report_date_idx", "report_date"),
         Index("change_in_dividend_accruals_account_symbol_idx", "account_id", "symbol"),
+        # A3 amendment #2 (2026-05-25): extended natural key with
+        # (report_date, action_id, code). Real IBKR data emits multiple accrual
+        # lifecycle events (Posted/Reversal) for the same dividend payment that
+        # share (account, conid, ex_date, pay_date, accrual_date) and only
+        # differ by report_date + action_id + code. See Alembic Rev 4
+        # (phase25_accruals_code_amendment).
         UniqueConstraint(
             "account_id", "conid", "ex_date", "pay_date", "accrual_date",
+            "report_date", "action_id", "code",
             name="change_in_dividend_accruals_natural_key",
         ),
     )
@@ -243,6 +257,9 @@ class ChangeInDividendAccrual(Base):
     asset_category: Mapped[str | None] = mapped_column(String, nullable=True)
     sub_category: Mapped[str | None] = mapped_column(String, nullable=True)
     level_of_detail: Mapped[str | None] = mapped_column(String, nullable=True)
+    code: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("''")
+    )
     raw_attrs: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
@@ -253,8 +270,13 @@ class OpenDividendAccrual(Base):
     __table_args__ = (
         Index("open_dividend_accruals_report_date_idx", "report_date"),
         Index("open_dividend_accruals_account_symbol_idx", "account_id", "symbol"),
+        # A3 amendment #2 preemptive mirror (2026-05-25): extended natural key
+        # with (action_id, code). The 2025 fixture has only 1 open accrual row
+        # so no collision is observed, but the same IBKR Po/Re lifecycle
+        # semantics apply — fix the class to avoid future regression.
         UniqueConstraint(
             "account_id", "conid", "ex_date", "pay_date", "report_date",
+            "action_id", "code",
             name="open_dividend_accruals_natural_key",
         ),
     )
@@ -285,6 +307,9 @@ class OpenDividendAccrual(Base):
     action_id: Mapped[str | None] = mapped_column(String, nullable=True)
     asset_category: Mapped[str | None] = mapped_column(String, nullable=True)
     sub_category: Mapped[str | None] = mapped_column(String, nullable=True)
+    code: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("''")
+    )
     raw_attrs: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )

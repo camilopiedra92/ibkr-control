@@ -97,61 +97,67 @@ async def test_ingest_xml_logs_failure_on_parse_error(db_session: AsyncSession, 
 
 @pytest.mark.asyncio
 async def test_ingest_xml_rolls_back_persister_on_failure(db_session: AsyncSession, db_engine, sample_user):
-    """Si persist() falla (dup transaction_id dentro del XML), el persister
-    no deja flex_imports rows ni trades, pero el ingest_log 'failed' persiste.
+    """Si persist() falla, el SAVEPOINT del job revierte writes parciales del
+    persister pero el ingest_log 'failed' persiste.
+
+    Post phase 2.5 rewrite: el persister es idempotent y absorbe intra-batch
+    duplicates de transaction_id via ON CONFLICT DO NOTHING — ya no levanta
+    IntegrityError en ese caso. Para ejercitar la ruta de error, forzamos un
+    fallo "real" pasando un FK inválido (account_id que no existe) en un row
+    de cash_transactions construido a mano via patch del persister.
     """
-    from ibkr_control.ingest.flex._models import (
-        ParsedAccount, ParsedTrade, ParsedXML,
-    )
     from datetime import date
     from decimal import Decimal
     from unittest.mock import patch
+    from ibkr_control.ingest.flex._models import (
+        ParsedAccount, ParsedCashTransaction, ParsedXML,
+    )
 
-    # Construir un ParsedXML que causara IntegrityError en el persister
-    # (trade duplicado con mismo transaction_id)
     account_id = "U99999042"
 
-    def _bad_parsed() -> "ParsedXML":
-        trade = ParsedTrade(
-            transaction_id="DUP-TXN-99",
-            ibkr_account_id=account_id,
-            symbol="AAPL",
-            asset_class="STK",
-            trade_date=date(2025, 3, 1),
-            settle_date=date(2025, 3, 3),
-            qty=Decimal("5"),
-            price_usd=Decimal("100"),
-            proceeds_usd=Decimal("-500"),
-            commission_usd=Decimal("1"),
-            open_close="O",
-            buy_sell="BUY",
-            raw_attrs={},
-        )
+    def _parsed_with_bad_account() -> "ParsedXML":
         return ParsedXML(
             anyo=2025,
             period_from=date(2025, 1, 1),
             period_to=date(2025, 12, 31),
             accounts=[ParsedAccount(ibkr_account_id=account_id, currency="USD")],
-            trades=[trade, trade],  # same object twice → duplicate transaction_id on flush
+            trades=[],
             closed_lots=[],
             open_position_lots=[],
-            cash_transactions=[],
+            cash_transactions=[
+                ParsedCashTransaction(
+                    transaction_id="TXN-CASH-001",
+                    ibkr_account_id=account_id,
+                    type="Dividends",
+                    currency="USD",
+                    amount_usd=Decimal("100"),
+                    description="ok",
+                    date=date(2025, 3, 1),
+                    symbol=None,
+                ),
+            ],
             transfers=[],
             change_in_dividend_accruals=[],
             open_dividend_accruals=[],
         )
 
-    # Patch parse to return our bad ParsedXML
+    async def fake_ensure_accounts(session, ibkr_ids):
+        # Devuelve un mapping con un account_id inválido (FK violation al INSERT cash_tx)
+        return {account_id: 999_999_999}
+
     with patch(
         "ibkr_control.ingest.flex.job.flex_parser_mod.parse",
-        return_value=_bad_parsed(),
+        return_value=_parsed_with_bad_account(),
+    ), patch(
+        "ibkr_control.ingest.flex.persister._ensure_accounts",
+        side_effect=fake_ensure_accounts,
     ):
         from sqlalchemy.exc import IntegrityError
         with pytest.raises(IntegrityError):
             await flex_job.ingest_xml(
                 db_session,
                 user_id=sample_user.id,
-                xml_bytes=b"<xml>bad</xml>",
+                xml_bytes=b"<xml>bad-fk</xml>",
                 source="manual_upload",
                 trigger="wizard",
             )
@@ -162,7 +168,7 @@ async def test_ingest_xml_rolls_back_persister_on_failure(db_session: AsyncSessi
     async with maker2() as s2:
         # No flex_imports should exist for this bad xml_hash
         from ibkr_control.ingest.hash_dedup import xml_hash
-        bad_hash = xml_hash(b"<xml>bad</xml>")
+        bad_hash = xml_hash(b"<xml>bad-fk</xml>")
         fi = await s2.scalar(
             select(FlexImport).where(FlexImport.xml_hash == bad_hash)
         )

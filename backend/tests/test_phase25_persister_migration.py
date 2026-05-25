@@ -178,10 +178,17 @@ async def test_phase25_rev2_promotes_xml_bytes_not_null(alembic_db_session):
 
 @pytest.mark.asyncio
 async def test_phase25_rev2_open_position_lots_natural_key_enforced(alembic_db_session):
-    """Insertar duplicate (account, symbol, open_date, snapshot_date) debe fallar."""
+    """Insertar duplicate natural key (incluyendo otid post-Rev3) debe fallar.
+
+    Updated for A3 amendment (2026-05-25 Rev3): natural key ahora incluye
+    originating_transaction_id. Insertar dos rows con todas las columnas del
+    key iguales (incluido el otid) debe fallar; insertar dos rows con mismo
+    (account, symbol, open_date, snapshot_date) pero distinto otid debe pasar
+    (caso multi-fill order — el escenario que motivó la amendment).
+    """
     from sqlalchemy.exc import IntegrityError
 
-    # Setup minimo: insertar account + flex_import + 2 open_position_lots con misma natural key
+    # Setup minimo: insertar account + flex_import + open_position_lots
     await alembic_db_session.execute(text("""
         INSERT INTO accounts (ibkr_account_id, currency)
         VALUES ('U99999099', 'USD') ON CONFLICT DO NOTHING
@@ -205,18 +212,108 @@ async def test_phase25_rev2_open_position_lots_natural_key_enforced(alembic_db_s
         text("SELECT id FROM accounts WHERE ibkr_account_id = 'U99999099'")
     )).scalar()
 
-    # Primer insert OK
+    # Primer insert OK (otid = 'OTID-001')
     await alembic_db_session.execute(text("""
-        INSERT INTO open_position_lots (flex_import_id, account_id, symbol, open_date, qty, cost_basis_usd, snapshot_date)
-        VALUES (9999, :acc, 'AAPL', '2026-01-15', 10, 1500, '2026-05-25')
+        INSERT INTO open_position_lots
+          (flex_import_id, account_id, symbol, open_date, qty, cost_basis_usd, snapshot_date, originating_transaction_id)
+        VALUES (9999, :acc, 'AAPL', '2026-01-15', 10, 1500, '2026-05-25', 'OTID-001')
     """).bindparams(acc=account_id))
     await alembic_db_session.commit()
 
-    # Segundo insert con mismo natural key -> IntegrityError
+    # Insert con mismo (account, symbol, open_date, snapshot_date) pero distinto otid
+    # DEBE pasar — este es el caso multi-fill que la amendment habilita.
+    await alembic_db_session.execute(text("""
+        INSERT INTO open_position_lots
+          (flex_import_id, account_id, symbol, open_date, qty, cost_basis_usd, snapshot_date, originating_transaction_id)
+        VALUES (9999, :acc, 'AAPL', '2026-01-15', 20, 3000, '2026-05-25', 'OTID-002')
+    """).bindparams(acc=account_id))
+    await alembic_db_session.commit()
+
+    # Insert con TODA la natural key igual (incluido otid='OTID-001') DEBE fallar.
     with pytest.raises(IntegrityError):
         await alembic_db_session.execute(text("""
-            INSERT INTO open_position_lots (flex_import_id, account_id, symbol, open_date, qty, cost_basis_usd, snapshot_date)
-            VALUES (9999, :acc, 'AAPL', '2026-01-15', 20, 3000, '2026-05-25')
+            INSERT INTO open_position_lots
+              (flex_import_id, account_id, symbol, open_date, qty, cost_basis_usd, snapshot_date, originating_transaction_id)
+            VALUES (9999, :acc, 'AAPL', '2026-01-15', 5, 750, '2026-05-25', 'OTID-001')
         """).bindparams(acc=account_id))
         await alembic_db_session.commit()
     await alembic_db_session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_phase25_rev3_natural_key_has_otid_column(alembic_db_session):
+    """A3 amendment Rev3 (2026-05-25): natural key on open_position_lots includes
+    originating_transaction_id as 5th column."""
+    result = await alembic_db_session.execute(text("""
+        SELECT a.attname
+        FROM pg_constraint c
+        JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+        WHERE c.conname = 'open_position_lots_natural_key'
+        ORDER BY array_position(c.conkey, a.attnum)
+    """))
+    cols = [row[0] for row in result.all()]
+    assert cols == [
+        'account_id', 'symbol', 'open_date', 'snapshot_date', 'originating_transaction_id'
+    ], f"Natural key columns wrong order/contents: {cols}"
+
+
+@pytest.mark.asyncio
+async def test_phase25_rev3_originating_transaction_id_not_null(alembic_db_session):
+    """A3 amendment: originating_transaction_id must be NOT NULL post-Rev3."""
+    result = await alembic_db_session.execute(text(
+        "SELECT is_nullable FROM information_schema.columns "
+        "WHERE table_name = 'open_position_lots' "
+        "AND column_name = 'originating_transaction_id'"
+    ))
+    row = result.first()
+    assert row is not None, "originating_transaction_id column missing"
+    assert row[0] == 'NO', "originating_transaction_id should be NOT NULL post-Rev3"
+
+
+@pytest.mark.asyncio
+async def test_phase25_rev4_change_in_accruals_natural_key_has_code(alembic_db_session):
+    """A3 amendment #2 Rev4 (2026-05-25): natural key on
+    change_in_dividend_accruals extended with (report_date, action_id, code)."""
+    result = await alembic_db_session.execute(text("""
+        SELECT a.attname FROM pg_attribute a
+        JOIN pg_constraint c ON a.attnum = ANY(c.conkey)
+        WHERE c.conname = 'change_in_dividend_accruals_natural_key'
+          AND a.attrelid = c.conrelid
+        ORDER BY array_position(c.conkey, a.attnum)
+    """))
+    cols = [row[0] for row in result.all()]
+    assert cols == [
+        'account_id', 'conid', 'ex_date', 'pay_date', 'accrual_date',
+        'report_date', 'action_id', 'code',
+    ], f"change_in_dividend_accruals_natural_key columns wrong: {cols}"
+
+
+@pytest.mark.asyncio
+async def test_phase25_rev4_open_accruals_natural_key_has_code(alembic_db_session):
+    """A3 amendment #2 preemptive mirror: open_dividend_accruals natural key
+    extended with (action_id, code)."""
+    result = await alembic_db_session.execute(text("""
+        SELECT a.attname FROM pg_attribute a
+        JOIN pg_constraint c ON a.attnum = ANY(c.conkey)
+        WHERE c.conname = 'open_dividend_accruals_natural_key'
+          AND a.attrelid = c.conrelid
+        ORDER BY array_position(c.conkey, a.attnum)
+    """))
+    cols = [row[0] for row in result.all()]
+    assert cols == [
+        'account_id', 'conid', 'ex_date', 'pay_date', 'report_date',
+        'action_id', 'code',
+    ], f"open_dividend_accruals_natural_key columns wrong: {cols}"
+
+
+@pytest.mark.asyncio
+async def test_phase25_rev4_accruals_code_columns_not_null(alembic_db_session):
+    """Both accrual tables must have `code` as NOT NULL post-Rev4."""
+    for table in ('change_in_dividend_accruals', 'open_dividend_accruals'):
+        result = await alembic_db_session.execute(text(
+            "SELECT is_nullable FROM information_schema.columns "
+            "WHERE table_name = :t AND column_name = 'code'"
+        ).bindparams(t=table))
+        row = result.first()
+        assert row is not None, f"`code` column missing from {table}"
+        assert row[0] == 'NO', f"{table}.code should be NOT NULL post-Rev4"

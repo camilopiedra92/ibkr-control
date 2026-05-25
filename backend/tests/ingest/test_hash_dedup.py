@@ -31,7 +31,8 @@ async def test_is_known_hash_true_when_exists(db_session: AsyncSession, sample_u
     h = xml_hash(b"sample content")
     db_session.add(FlexImport(
         user_id=sample_user.id, anyo=2025, xml_hash=h,
-        xml_size_bytes=100, source='manual_upload',
+        xml_size_bytes=100, xml_bytes=b"sample content",
+        source='manual_upload',
         period_covered_from=date(2025, 1, 1), period_covered_to=date(2025, 12, 31),
         status='ok',
     ))

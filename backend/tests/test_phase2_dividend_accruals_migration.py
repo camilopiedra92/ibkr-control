@@ -47,7 +47,7 @@ async def test_change_in_dividend_accruals_cascade_on_flex_import(
 
     fi = FlexImport(
         user_id=sample_user.id, anyo=2025, xml_hash="hash-cascade-div-chg",
-        xml_size_bytes=100, source="manual_upload",
+        xml_size_bytes=100, xml_bytes=b"<test/>", source="manual_upload",
         period_covered_from=date(2025, 1, 1), period_covered_to=date(2025, 12, 31),
         status="ok",
     )
@@ -87,7 +87,7 @@ async def test_open_dividend_accruals_cascade_on_flex_import(
 
     fi = FlexImport(
         user_id=sample_user.id, anyo=2025, xml_hash="hash-cascade-div-open",
-        xml_size_bytes=100, source="manual_upload",
+        xml_size_bytes=100, xml_bytes=b"<test/>", source="manual_upload",
         period_covered_from=date(2025, 1, 1), period_covered_to=date(2025, 12, 31),
         status="ok",
     )
@@ -126,7 +126,7 @@ async def test_change_in_dividend_accruals_report_date_not_null(
 
     fi = FlexImport(
         user_id=sample_user.id, anyo=2025, xml_hash="hash-div-nn-chg",
-        xml_size_bytes=100, source="manual_upload",
+        xml_size_bytes=100, xml_bytes=b"<test/>", source="manual_upload",
         period_covered_from=date(2025, 1, 1), period_covered_to=date(2025, 12, 31),
         status="ok",
     )
@@ -158,7 +158,7 @@ async def test_open_dividend_accruals_report_date_not_null(
 
     fi = FlexImport(
         user_id=sample_user.id, anyo=2025, xml_hash="hash-div-nn-open",
-        xml_size_bytes=100, source="manual_upload",
+        xml_size_bytes=100, xml_bytes=b"<test/>", source="manual_upload",
         period_covered_from=date(2025, 1, 1), period_covered_to=date(2025, 12, 31),
         status="ok",
     )

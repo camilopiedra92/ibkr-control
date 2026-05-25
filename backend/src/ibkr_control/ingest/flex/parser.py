@@ -334,6 +334,7 @@ def _parse_open_positions(elem) -> list[ParsedOpenPositionLot]:
             mark_price_usd=_dec(pos.get("markPrice")) if pos.get("markPrice") else None,
             mark_value_usd=_dec(pos.get("positionValue")) if pos.get("positionValue") else None,
             snapshot_date=snapshot_date,
+            originating_transaction_id=pos.get("originatingTransactionID") or "",
         ))
     return out
 
@@ -371,6 +372,9 @@ _DIV_ACCRUAL_TYPED_ATTRS: frozenset[str] = frozenset({
     "exDate", "payDate", "reportDate", "date", "quantity", "grossRate",
     "grossAmount", "tax", "fee", "netAmount", "actionID",
     "assetCategory", "subCategory", "levelOfDetail",
+    # `code` (Po/Re) promoted to first-class column post A3 amendment #2
+    # (2026-05-25). Excluded from raw_attrs so it's not stored twice.
+    "code",
 })
 
 # Schema fijo de OpenDividendAccrual.
@@ -379,6 +383,7 @@ _OPEN_DIV_ACCRUAL_TYPED_ATTRS: frozenset[str] = frozenset({
     "exDate", "payDate", "reportDate", "quantity", "grossRate",
     "grossAmount", "tax", "fee", "netAmount", "actionID",
     "assetCategory", "subCategory",
+    "code",  # promoted post A3 amendment #2 (preemptive mirror)
 })
 
 
@@ -424,6 +429,7 @@ def _parse_change_in_dividend_accruals(
             asset_category=_attr(row, "assetCategory"),
             sub_category=_attr(row, "subCategory"),
             level_of_detail=_attr(row, "levelOfDetail"),
+            code=row.get("code") or "",
             raw_attrs=raw_attrs,
         ))
 
@@ -465,6 +471,7 @@ def _parse_open_dividend_accruals(
             action_id=_attr(row, "actionID"),
             asset_category=_attr(row, "assetCategory"),
             sub_category=_attr(row, "subCategory"),
+            code=row.get("code") or "",
             raw_attrs=raw_attrs,
         ))
 
