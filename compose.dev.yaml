@@ -1,0 +1,44 @@
+# Override de desarrollo. Se aplica encima de compose.yaml via:
+#   docker compose -f compose.yaml -f compose.dev.yaml up -d
+# (envuelto por `make dev` — preferir el Makefile.)
+#
+# Diferencias clave vs prod:
+#   - target: dev en ambos Dockerfiles (incluye dev deps + watchers)
+#   - source bind-montado para hot reload
+#   - backend: uvicorn --reload --reload-dir src
+#   - frontend: next dev con WATCHPACK_POLLING (macOS/Docker Desktop necesita
+#     polling porque inotify nativo no se propaga al container)
+#   - frontend node_modules + .next como named volumes anónimos para que el
+#     host NO los pise (sino crashea: el host puede no tener pnpm install local)
+
+services:
+  backend:
+    build:
+      target: dev
+    volumes:
+      - ./backend/src:/app/src
+      - ./backend/alembic:/app/alembic
+      - ./backend/alembic.ini:/app/alembic.ini
+      - ./backend/tests:/app/tests
+      - ./backend/pyproject.toml:/app/pyproject.toml
+      - ./backend/uv.lock:/app/uv.lock
+    environment:
+      # Dev-only flags. CORS abierto a localhost:3000 para HMR del frontend.
+      LOG_LEVEL: DEBUG
+
+  frontend:
+    build:
+      target: dev
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      # macOS Docker Desktop file-event propagation es unreliable; polling
+      # garantiza que Next detecte cambios del bind mount. Costo: ~1-3% CPU
+      # extra del container, irrelevante en dev.
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
+      # Trae el reload de archivos generados por Orval (lib/api/generated.ts)
+      # cuando corras `pnpm openapi:gen` desde el host.
+      NEXT_PUBLIC_API_URL: http://localhost:8000

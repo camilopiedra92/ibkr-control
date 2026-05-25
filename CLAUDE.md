@@ -129,7 +129,7 @@ Detalles útiles para evitar re-depurar en fases futuras:
 - **Wizard redesign post-deploy (2026-05-24, tag v0.2.2-wizard-redesign)** — el smoke test end-to-end con datos reales reveló que el wizard pedía IDs de cuenta ciegos (typos), no validaba contra cuentas reales del usuario, y poblaba `accounts` con 3 F-suffix shadow accounts IB-UK Limited (NAV=0, fees/journals only). Reescritura "detect-first": Step 1 solo guarda creds, Step 2 fetchea Flex YTD + auto-detecta cuentas filtrando F-suffix, pre-pobla alias desde `<AccountInformation accountAlias=>`. Step 3 multi-file drag-drop con detect de cuentas nuevas en XMLs históricos (modal de confirmación). Filtro F a nivel persister (allowlist pattern del sibling renta) garantiza que ningún ingest futuro re-introduzca shadow accounts. Migration H wipea data legacy (preserva `flex_credentials` + `apscheduler_jobs`). Backend: 9 endpoints reescritos bajo `/api/setup/*` + in-memory `_step3_stash` con TTL. Frontend: state machine de 7 pantallas en `WizardPage` reemplaza los 4 steps lineales originales. Tests: 192 → 207 (+15 backend) + 3 nuevos Playwright wizard specs. Spec: `docs/specs/2026-05-24-wizard-redesign-design.md` (D1-D12 locked). Plan: `docs/plans/2026-05-24-wizard-redesign.md` (16 tareas). Branch: `feat/wizard-redesign` (17 commits + docs). Cleanup: legacy `frontend/e2e/wizard.spec.ts` eliminado (superseded por los 3 specs nuevos).
 
 - **Wizard redesign post-deploy fixes (smoke test dev, 2026-05-24, post-merge a main)** — el primer smoke test contra IBKR real reveló 4 problemas adicionales que el spec del wizard no contempló. Todos resueltos pre-deploy a prod, en `main` post-merge:
-  - **(1) DNS infra (`8bd578f`):** backend container heredaba el resolver del host (Docker Desktop → `/etc/resolv.conf` → `127.0.2.2/3`). En macOS con AdGuard/NextDNS/VPN/Little Snitch activo, `gdcdyn.interactivebrokers.com` daba `SERVFAIL`. Fix: pin `dns: [1.1.1.1, 8.8.8.8]` al servicio backend en `docker-compose.yml`. En Coolify hay que verificar que la red del compose use DNS público también.
+  - **(1) DNS infra (`8bd578f`):** backend container heredaba el resolver del host (Docker Desktop → `/etc/resolv.conf` → `127.0.2.2/3`). En macOS con AdGuard/NextDNS/VPN/Little Snitch activo, `gdcdyn.interactivebrokers.com` daba `SERVFAIL`. Fix: pin `dns: [1.1.1.1, 8.8.8.8]` al servicio backend en `compose.yaml`. En Coolify hay que verificar que la red del compose use DNS público también.
   - **(2) Fallback gap (`24aa5f9`):** el spec D2 mandaba `step2/detect_from_xml` como "parse-only, no DB writes". Pero `step2/save` valida cada `ibkr_account_id` contra `accounts` table (anti-typo) — entonces si IBKR responde 1001 BUSY y el usuario usa el fallback de upload manual, `save` rebotaba 400 `ACCOUNT_NOT_DETECTED` para cada cuenta. Fix: `detect_from_xml` ahora persiste igual que `detect` con `source="manual_upload"`. El persister ya dedupea por SHA-256 (idempotente). +2 tests (regression lock + dedup). Test count 207 → 209.
   - **(3) Migración Flex Web Service V3 (`4eb4f80`):** estábamos en el host legacy `gdcdyn.interactivebrokers.com` con paths `/Universal/servlet/FlexStatementService.*`. La V3 oficial (per `interactivebrokers.com/campus/ibkr-api-page/flex-web-service/`) vive en `ndcdyn.interactivebrokers.com` + `/AccountManagement/FlexWebService/`. Adicionalmente, V3 exige `User-Agent` header explícito ("all requests must include a User-Agent header") — sin él, httpx mandaba `python-httpx/x.y.z` que IBKR puede penalizar como bot. Tests + VCR cassettes actualizados con find-replace. El param `v=3` ya estaba.
   - **(4) Counterparty accounts (DEFERRED a Phase 3):** smoke test detectó una 4ta cuenta `CS-999999-99` huérfana en `accounts` post-wizard. Investigación: era un `<Transfer>` `IN` con symbol `GLOB` (94 acciones) desde Shareworks/Solium/Morgan Stanley StockPlan Connect (broker externo donde Globant deposita el bono RSU) a `U99999002` (cuenta personal del usuario). El persister recolecta `account_id` de TODOS los tags del XML (incluido `<Transfer>`), no solo de `<AccountInformation>`. Counterparties externos terminan como `Account` rows huérfanos (sin participation, sin trades, solo referenciados en 1 transfer). Fix sistémico: persister debería crear `Account` rows SOLO para IDs en `<AccountInformation>`; los counterparties en transfers deberían guardarse como `counterparty_ref TEXT` (no FK). Ver §Roadmap Phase 3 decisión #6.
@@ -342,7 +342,7 @@ El plan fue escrito asumiendo Next 14 / Tailwind v3 / shadcn Slate. `pnpm create
 
 Durante exploración o debugging, atajos están OK (generar artefactos offline, bypass temporal de scripts, comandos manuales con env vars puntuales). **Antes de `git commit`**:
 
-1. Reemplazar el atajo por el flujo canónico documentado (CLAUDE.md §Comandos comunes, scripts de `package.json`/`pyproject.toml`, conventions del `docker-compose.yml`), **O**
+1. Reemplazar el atajo por el flujo canónico documentado (CLAUDE.md §Comandos comunes, scripts de `package.json`/`pyproject.toml`, targets del `Makefile`, conventions de los `compose*.yaml`), **O**
 2. Surface el trade-off al usuario con un por-qué explícito y pedir aprobación para commitear el estado no-canónico.
 
 **Señales de alerta** (revisar antes de cada commit):
@@ -362,21 +362,27 @@ Los 6 items detectados durante Phase 1 fueron resueltos en el plan de polish del
 - ✓ CORS wildcard guard (config-level via `field_validator`, falla al boot — `backend/src/ibkr_control/config.py`)
 - ✓ `test_migrations_apply_cleanly_and_match_metadata` (corre `alembic upgrade head` contra container fresh, verifica drift contra `Base.metadata` — `backend/tests/test_migrations.py`)
 - ✓ Refactor module-level `settings = get_settings()` (lazy factories `@lru_cache` en `db/session.py`, `@property` en `auth/manager.py`, inline en `auth/backend.py`)
-- ✓ Dockerfile `USER appuser` (UID 1001, /home/appuser) + remove `ports: 5432` de docker-compose.yml
+- ✓ Dockerfile `USER appuser` (UID 1001, /home/appuser) + remove `ports: 5432` de compose.yaml
 - ✓ `UserSettingsUpdate.timezone` validado contra `zoneinfo.available_timezones()` (devuelve 422 si TZ desconocido)
 - ✓ `UserSettingsUpdate.marginal_rate` con `max_digits=5, decimal_places=4` (devuelve 422 en vez de silent rounding a Numeric(5,4))
 
 ## Comandos comunes
 
 ```bash
-# Dev local
-docker compose up -d --build
+# Dev stack (HMR backend + frontend, bind mounts)
+make dev          # equivale a: docker compose -f compose.yaml -f compose.dev.yaml up -d --build
+make dev-down
+make dev-logs     # tail de logs
+
+# Prod-like local (espejo de Coolify, sin reload — para validar el build de deploy)
+make prod-local   # equivale a: docker compose -f compose.yaml up -d --build
+
+# Coolify compose local (validar el compose de prod tal cual)
+make coolify-local
+make help         # lista todos los targets
 
 # Backend tests
 cd backend && uv run pytest -v
-
-# Frontend dev
-cd frontend && pnpm dev
 
 # Regenerar cliente TS del OpenAPI (cuando cambia el backend)
 cd frontend && pnpm openapi:gen
@@ -388,6 +394,11 @@ cd frontend && pnpm e2e
 cd backend && uv run alembic revision --autogenerate -m "descripción"
 cd backend && uv run alembic upgrade head
 ```
+
+**Diferencias dev vs prod (lock):**
+- **Dev** (`make dev`) — backend con `uvicorn --reload --reload-dir src` + dev deps (pytest, ruff disponibles en el container); frontend con `next dev` + HMR + `WATCHPACK_POLLING=true` (macOS Docker Desktop necesita polling para detectar file events del bind mount).
+- **Prod** (`make prod-local` y Coolify) — backend sin reload, dev deps excluidas (`--no-dev`); frontend con `next build` + `node server.js` (standalone bundle, sin source). Source horneado en la imagen.
+- Para iterar UI/lógica: `make dev`. Para validar antes de push a Coolify: `make prod-local` (debe arrancar igual que en Coolify).
 
 ## Sibling project: `renta`
 

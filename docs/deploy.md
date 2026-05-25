@@ -9,7 +9,7 @@
 
 1. **New Resource → Docker Compose** (no "Application").
 2. **Source**: conectar a este repo (GitHub/GitLab/self-hosted git).
-3. **Compose file**: `docker-compose.coolify.yml`.
+3. **Compose file**: `compose.coolify.yaml`. (Antes era `docker-compose.coolify.yml` — si actualizás un Coolify existente, cambiar el nombre en la UI antes del próximo deploy.)
 4. **Branch**: `main`.
 5. **Environment variables** (en Coolify, sección Secrets):
    - `POSTGRES_USER` = ibkr

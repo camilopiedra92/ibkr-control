@@ -49,7 +49,7 @@ etc.). Esta app es el **centro de control IBKR-only**.
 ## 3. Topología de despliegue
 
 ```
-docker-compose.yml (Coolify)
+compose.coolify.yaml (Coolify)   # compose.yaml para prod-like local, compose.dev.yaml override para HMR
 ├── backend           Python 3.12 / FastAPI / APScheduler / uvicorn
 ├── frontend          Next.js 14 production build
 └── postgres          Postgres 16 con volume persistente
@@ -762,10 +762,12 @@ ibkr-control/
 │   │   ├── lib/                  api client generado de openapi.json
 │   │   └── hooks/                useLots, useSimulator, etc.
 │   └── tests/
-├── docker-compose.yml            backend + frontend + postgres
-├── Dockerfile.backend
-├── Dockerfile.frontend
-├── coolify.json                  Config Coolify
+├── compose.yaml                  Baseline (espejo de Coolify, prod-like local)
+├── compose.dev.yaml              Override dev (HMR + bind mounts)
+├── compose.coolify.yaml          Deploy en Coolify
+├── Makefile                      Wrapper top-level (make dev/prod-local/...)
+├── backend/Dockerfile            Multi-stage: base, deps, dev, prod
+├── frontend/Dockerfile           Multi-stage: deps, dev, builder, prod
 └── README.md
 ```
 

@@ -18,6 +18,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      target: prod
     restart: unless-stopped
     environment:
       DATABASE_URL: ${DATABASE_URL}
@@ -47,6 +48,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      target: prod
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000

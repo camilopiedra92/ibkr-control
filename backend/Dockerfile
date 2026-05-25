@@ -1,4 +1,6 @@
 # syntax=docker/dockerfile:1.7
+
+# ---------- base: runtime común (Python, uv, user no-root) ----------
 FROM python:3.12-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \
@@ -22,6 +24,27 @@ RUN chown appuser:appuser /app
 USER appuser
 
 COPY --chown=appuser:appuser pyproject.toml uv.lock ./
+
+# ---------- dev: pytest/ruff incluidos, uvicorn --reload, source bind-mounted ----------
+FROM base AS dev
+
+RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=1001,gid=1001 \
+    uv sync --frozen --no-install-project
+
+# El source se bind-montea desde compose.dev.yaml. Copiamos un placeholder para
+# que el container arranque incluso si alguien construye sin volumes.
+COPY --chown=appuser:appuser src/ ./src/
+COPY --chown=appuser:appuser alembic.ini ./
+COPY --chown=appuser:appuser alembic/ ./alembic/
+
+EXPOSE 8000
+
+# --reload-dir limita el watcher a src/ para evitar restarts espurios por logs/cache.
+CMD ["sh", "-c", "uv run alembic upgrade head && exec uv run uvicorn ibkr_control.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir src"]
+
+# ---------- prod: solo runtime deps, source horneado, sin reload ----------
+FROM base AS prod
+
 RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=1001,gid=1001 \
     uv sync --frozen --no-install-project --no-dev
 
@@ -34,6 +57,4 @@ RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=1001,gid=1001 \
 
 EXPOSE 8000
 
-# Run alembic migrations before starting uvicorn. Idempotent: noop if schema is current.
-# Fails container start if a migration is broken — preferred over silently serving stale schema.
 CMD ["sh", "-c", "uv run alembic upgrade head && exec uv run uvicorn ibkr_control.main:app --host 0.0.0.0 --port 8000"]

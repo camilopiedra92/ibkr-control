@@ -14,9 +14,12 @@ con WHT (Art.254 ET), genera el subset IBKR del Form 210.
 ## Quick start (dev local)
 
 ```bash
-docker compose up -d --build
+make dev          # HMR en backend (uvicorn --reload) + frontend (next dev)
 # Backend: http://localhost:8000/docs
 # Frontend: http://localhost:3000
+
+make help         # Lista de todos los targets disponibles
+make prod-local   # Levanta compose.yaml (espejo de Coolify) en lugar de dev
 ```
 
 ## Deploy Coolify
@@ -32,8 +35,10 @@ ibkr-control/
 ├── docs/
 │   ├── specs/        Diseño del producto
 │   └── plans/        Planes de implementación por phase
-├── docker-compose.yml             Stack dev (creado en Phase 1)
-├── docker-compose.coolify.yml     Stack deploy (creado en Phase 1)
+├── compose.yaml                   Stack baseline (espejo de Coolify, prod-like local)
+├── compose.dev.yaml               Override de dev (HMR backend + frontend, bind mounts)
+├── compose.coolify.yaml           Stack deploy (Coolify)
+├── Makefile                       Wrapper top-level (`make dev`, `make prod-local`, ...)
 └── .github/workflows/             CI (creado en Phase 1)
 ```
 
