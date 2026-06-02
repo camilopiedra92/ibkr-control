@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Sanitized fixture for integration test: FOP IN from external broker + INTERNAL transfer.
+  All account IDs and transaction IDs are fake. Mirrors real IBKR Activity XML structure.
+
+  Accounts:
+    U99999001 - own account (receives FOP IN from CS-999999-99, then sends INTERNAL OUT to U99999002)
+    U99999002 - own account (receives INTERNAL IN from U99999001; declared in its own FlexStatement)
+    CS-999999-99 - external broker peer (Shareworks/StockPlan Connect style); must NOT become an Account row
+
+  Two FlexStatement blocks: one per own account. This matches the real consolidated multi-account
+  Flex Query response where IBKR returns each account in its own <FlexStatement> element.
+-->
+<FlexQueryResponse queryName="Activity" type="AF">
+  <FlexStatements count="2">
+    <FlexStatement accountId="U99999001" fromDate="20260101" toDate="20260522" period="YTD">
+      <AccountInformation accountId="U99999001" currency="USD" accountAlias="Personal - Swing" />
+      <Transfers>
+        <Transfer accountId="U99999001" assetCategory="STK" symbol="GLOB"
+          description="GLOBANT SA" conid="160756766" isin="LU0974299876"
+          reportDate="20260430" date="20260430" dateTime="20260430" settleDate="20260430"
+          type="FOP" direction="IN" account="CS-999999-99" deliveringBroker="0015"
+          quantity="94" transferPrice="0" positionAmount="3822.04"
+          cashTransfer="0" code="" transactionID="39584831194" levelOfDetail="TRANSFER" />
+        <Transfer accountId="U99999001" assetCategory="STK" symbol="GLOB"
+          description="GLOBANT SA" conid="160756766" isin="LU0974299876"
+          reportDate="20260501" date="20260501" dateTime="20260501" settleDate="20260501"
+          type="INTERNAL" direction="OUT" account="U99999002" deliveringBroker=""
+          quantity="-94" transferPrice="0" cashTransfer="0" code=""
+          transactionID="39601540411" levelOfDetail="TRANSFER" />
+      </Transfers>
+    </FlexStatement>
+    <FlexStatement accountId="U99999002" fromDate="20260101" toDate="20260522" period="YTD">
+      <AccountInformation accountId="U99999002" currency="USD" accountAlias="Personal - Micro Futures" />
+    </FlexStatement>
+  </FlexStatements>
+</FlexQueryResponse>

@@ -539,3 +539,66 @@ async def test_external_transfer_peer_becomes_counterparty_not_account(
     ))).first()
     assert row[0] is None and row[1] == cp.id        # src = counterparty
     assert row[2] is not None and row[3] is None     # dst = own account
+
+
+@pytest.mark.asyncio
+async def test_fop_fixture_creates_counterparty_no_orphan_account(
+    db_session: AsyncSession, sample_user
+):
+    """End-to-end: parse(xml) + persist del fixture FOP sanitizado.
+
+    Asserts:
+    - CS-999999-99 (external FOP peer) -> counterparties row, NOT in accounts
+    - U99999001 + U99999002 (own accounts, both in <AccountInformation>) -> accounts rows
+    - INTERNAL transfer peer (U99999002) resolves to account FK, not counterparty
+      because U99999002 appears in <AccountInformation> in its own FlexStatement
+
+    U99999002 nuance (Option A chosen): the fixture includes a second <FlexStatement>
+    with <AccountInformation accountId="U99999002">. This reflects the real multi-account
+    consolidated Flex Query where every own account has its own FlexStatement.
+    Without this, U99999002 would NOT appear in accounts_map (since transfer peers are
+    deliberately excluded from all_account_ids in the persister) and would be routed to
+    counterparties — incorrect behavior for an own account. Option A makes the fixture
+    realistic and keeps the assertion `own == 2` meaningful.
+    """
+    from pathlib import Path
+    from ibkr_control.ingest.flex.parser import parse
+    from ibkr_control.db.models.accounts import Account
+    from ibkr_control.db.models.counterparties import Counterparty
+    from sqlalchemy import func, select
+
+    xml = (Path(__file__).resolve().parents[2]
+           / "fixtures/xml/ACTIVITY_2026_FOP_sanitized.xml").read_bytes()
+    parsed = parse(xml)
+
+    # Sanity-check: parser extracted both accounts and both transfers
+    assert len(parsed.accounts) == 2
+    account_ids = {a.ibkr_account_id for a in parsed.accounts}
+    assert account_ids == {"U99999001", "U99999002"}
+    assert len(parsed.transfers) == 2
+    fop = next(t for t in parsed.transfers if t.transfer_type == "FOP")
+    assert fop.src_ibkr_account_id == "CS-999999-99"
+    assert fop.dst_ibkr_account_id == "U99999001"
+
+    await persist(
+        db_session, parsed=parsed, user_id=sample_user.id,
+        xml_bytes=xml, source="manual_upload",
+    )
+    await db_session.commit()
+
+    # CS-999999-99 must be in counterparties
+    cp = await db_session.scalar(
+        select(Counterparty).where(Counterparty.external_id == "CS-999999-99"))
+    assert cp is not None
+
+    # CS-999999-99 must NOT appear in accounts (no orphan account)
+    n_cp_in_accounts = await db_session.scalar(
+        select(func.count()).select_from(Account)
+        .where(Account.ibkr_account_id == "CS-999999-99"))
+    assert n_cp_in_accounts == 0
+
+    # Both own accounts must be in accounts
+    own = await db_session.scalar(
+        select(func.count()).select_from(Account)
+        .where(Account.ibkr_account_id.in_(["U99999001", "U99999002"])))
+    assert own == 2
