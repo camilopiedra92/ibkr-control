@@ -33,12 +33,10 @@ from ibkr_control.db.base import Base
 class FlexImport(Base):
     __tablename__ = "flex_imports"
     __table_args__ = (
-        CheckConstraint(
-            "source IN ('web_service', 'manual_upload')", name="ck_flex_imports_source"
-        ),
-        CheckConstraint("year_status IN ('rolling', 'sealed')", name="ck_flex_imports_year_status"),
-        CheckConstraint("status IN ('ok', 'poison')", name="ck_flex_imports_status"),
-        UniqueConstraint("user_id", "xml_hash", name="flex_imports_user_xml_hash_key"),
+        CheckConstraint("source IN ('web_service', 'manual_upload')", name="source"),
+        CheckConstraint("year_status IN ('rolling', 'sealed')", name="year_status"),
+        CheckConstraint("status IN ('ok', 'poison')", name="status"),
+        UniqueConstraint("user_id", "xml_hash"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -77,12 +75,10 @@ class FlexImport(Base):
 class Trade(Base):
     __tablename__ = "trades"
     __table_args__ = (
-        CheckConstraint(
-            "open_close IS NULL OR open_close IN ('O', 'C')", name="ck_trades_open_close"
-        ),
-        CheckConstraint("buy_sell IN ('BUY', 'SELL')", name="ck_trades_buy_sell"),
-        Index("trades_account_symbol_idx", "account_id", "symbol"),
-        Index("trades_trade_date_idx", "trade_date"),
+        CheckConstraint("open_close IS NULL OR open_close IN ('O', 'C')", name="open_close"),
+        CheckConstraint("buy_sell IN ('BUY', 'SELL')", name="buy_sell"),
+        Index(None, "account_id", "symbol"),
+        Index(None, "trade_date"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -109,13 +105,13 @@ class Trade(Base):
 class ClosedLot(Base):
     __tablename__ = "closed_lots"
     __table_args__ = (
-        Index("closed_lots_account_symbol_idx", "account_id", "symbol"),
+        Index(None, "account_id", "symbol"),
         UniqueConstraint(
             "transaction_id",
             "close_datetime",
             "qty",
             "fifo_pnl_usd",
-            name="closed_lots_natural_key",
+            name="uq_closed_lots_natural_key",
         ),
     )
 
@@ -144,7 +140,7 @@ class ClosedLot(Base):
 class OpenPositionLot(Base):
     __tablename__ = "open_position_lots"
     __table_args__ = (
-        Index("open_position_lots_account_symbol_idx", "account_id", "symbol"),
+        Index(None, "account_id", "symbol"),
         # A3 amendment 2026-05-25: extended natural key with
         # originating_transaction_id (IBKR's per-lot id) because multi-fill
         # orders produce multiple distinct LOT rows for the same
@@ -156,7 +152,7 @@ class OpenPositionLot(Base):
             "open_date",
             "snapshot_date",
             "originating_transaction_id",
-            name="open_position_lots_natural_key",
+            name="uq_open_position_lots_natural_key",
         ),
     )
 
@@ -178,14 +174,14 @@ class OpenPositionLot(Base):
 class Transfer(Base):
     __tablename__ = "transfers"
     __table_args__ = (
-        CheckConstraint("direction IN ('IN', 'OUT')", name="ck_transfers_direction"),
+        CheckConstraint("direction IN ('IN', 'OUT')", name="direction"),
         CheckConstraint(
             "(src_account_id IS NOT NULL) <> (src_counterparty_id IS NOT NULL)",
-            name="ck_transfers_src_arc",
+            name="src_arc",
         ),
         CheckConstraint(
             "(dst_account_id IS NOT NULL) <> (dst_counterparty_id IS NOT NULL)",
-            name="ck_transfers_dst_arc",
+            name="dst_arc",
         ),
     )
 
@@ -215,7 +211,7 @@ class Transfer(Base):
 
 class CashTransaction(Base):
     __tablename__ = "cash_transactions"
-    __table_args__ = (Index("cash_transactions_date_idx", "date"),)
+    __table_args__ = (Index(None, "date"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     flex_import_id: Mapped[int | None] = mapped_column(
@@ -234,8 +230,8 @@ class CashTransaction(Base):
 class ChangeInDividendAccrual(Base):
     __tablename__ = "change_in_dividend_accruals"
     __table_args__ = (
-        Index("change_in_dividend_accruals_report_date_idx", "report_date"),
-        Index("change_in_dividend_accruals_account_symbol_idx", "account_id", "symbol"),
+        Index(None, "report_date"),
+        Index(None, "account_id", "symbol"),
         # A3 amendment #2 (2026-05-25): extended natural key with
         # (report_date, action_id, code). Real IBKR data emits multiple accrual
         # lifecycle events (Posted/Reversal) for the same dividend payment that
@@ -251,7 +247,7 @@ class ChangeInDividendAccrual(Base):
             "report_date",
             "action_id",
             "code",
-            name="change_in_dividend_accruals_natural_key",
+            name="uq_change_in_dividend_accruals_natural_key",
         ),
     )
 
@@ -288,8 +284,8 @@ class ChangeInDividendAccrual(Base):
 class OpenDividendAccrual(Base):
     __tablename__ = "open_dividend_accruals"
     __table_args__ = (
-        Index("open_dividend_accruals_report_date_idx", "report_date"),
-        Index("open_dividend_accruals_account_symbol_idx", "account_id", "symbol"),
+        Index(None, "report_date"),
+        Index(None, "account_id", "symbol"),
         # A3 amendment #2 preemptive mirror (2026-05-25): extended natural key
         # with (action_id, code). The 2025 fixture has only 1 open accrual row
         # so no collision is observed, but the same IBKR Po/Re lifecycle
@@ -302,7 +298,7 @@ class OpenDividendAccrual(Base):
             "report_date",
             "action_id",
             "code",
-            name="open_dividend_accruals_natural_key",
+            name="uq_open_dividend_accruals_natural_key",
         ),
     )
 

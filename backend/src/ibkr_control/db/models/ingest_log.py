@@ -16,17 +16,17 @@ class IngestLog(Base):
     __table_args__ = (
         CheckConstraint(
             f"job_kind IN {_JOB_KIND_VALUES}",
-            name="ingest_log_job_kind_check",
+            name="job_kind",
         ),
         CheckConstraint(
             f"status IN {_STATUS_VALUES}",
-            name="ingest_log_status_check",
+            name="status",
         ),
         CheckConstraint(
             f"trigger IN {_TRIGGER_VALUES}",
-            name="ingest_log_trigger_check",
+            name="trigger",
         ),
-        Index("ingest_log_user_started_idx", "user_id", text("started_at DESC")),
+        Index("ix_ingest_log_user_id_started_at", "user_id", text("started_at DESC")),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

@@ -12,10 +12,8 @@ class Participation(Base):
     __tablename__ = "participations"
     __table_args__ = (
         PrimaryKeyConstraint("user_id", "account_id", "valid_from"),
-        CheckConstraint("pct >= 0 AND pct <= 1", name="ck_participations_pct_range"),
-        CheckConstraint(
-            "valid_to IS NULL OR valid_to > valid_from", name="ck_participations_valid_range"
-        ),
+        CheckConstraint("pct >= 0 AND pct <= 1", name="pct_range"),
+        CheckConstraint("valid_to IS NULL OR valid_to > valid_from", name="valid_range"),
     )
 
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))

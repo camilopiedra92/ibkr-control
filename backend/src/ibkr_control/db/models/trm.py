@@ -11,7 +11,7 @@ from ibkr_control.db.base import Base
 class TrmDay(Base):
     __tablename__ = "trm_days"
     __table_args__ = (
-        Index("trm_days_date_idx", "date"),
+        Index(None, "date"),
         {"comment": "1 row por día calendario, expandido desde vigencia_desde..vigencia_hasta"},
     )
 
