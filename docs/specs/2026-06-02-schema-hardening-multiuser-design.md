@@ -23,8 +23,9 @@ correctitud real.
 Adicionalmente se aclaró el modelo multi-user objetivo a largo plazo: **Joint Holder (y
 otros) loguean** y ven su participación; **un contador loguea con permisos
 read-only** sobre los datos del owner. Esa última relación (leer-sin-poseer) no la
-expresa `participations` — es un modelo de grants que hoy no existe y se diseña
-acá para una fase futura.
+expresa `participations` — es un modelo de grants que hoy no existe. Se construye
+acá (H5) como primitiva de autorización, ANTES de que Phase 3 cree las pantallas
+que la consumen, para que esas pantallas nazcan ya scopeadas en vez de parchearse.
 
 ## Hallazgo central: el modelo de identidad ya es correcto
 
@@ -143,32 +144,74 @@ Sin cambio estructural. Codificar la intención para que no se re-misdiagnostiqu
   con user_id") y reemplazar con el rationale correcto (misdiagnóstico; el modelo
   shared-identity + participations es el correcto).
 
-### H5 — Modelo multi-user + RBAC del contador (DISEÑO, no build)
+### H5 — Multi-user + RBAC del contador (BUILD)
 
-Capturado para una fase futura de enforcement. **No se construye nada hoy** — una
-tabla vacía sin lector sería tech debt, y su forma exacta depende de decisiones de
-enforcement aún no tomadas.
+Se construye ahora como **primitiva de autorización**, ANTES de que Phase 3 cree
+las pantallas que la consumen. Justificación de secuenciación: no existe hoy
+ningún endpoint que lea hechos (`/api/lots`, `/api/trades` son Phase 3+), así que
+no hay retrofit — Phase 3 nace ya scopeada. La primitiva es 100% testeable en
+aislado con usuarios sintéticos.
 
-**Primitivas:**
+**G1 — Tabla `data_access_grants` (en el baseline H2):**
 
-- **`participations`** (ya existe): `user ↔ account` con `pct` temporal
-  (`valid_from`/`valid_to`). Ownership + visibilidad. Joint Holder 50% en la conjunta.
-- **`data_access_grants`** (futuro): delegación de lectura.
-  - `grantor_user_id` → `grantee_user_id`, rol `read_only`.
-  - Scope = las participations del grantor (el contador ve todo lo del owner).
-  - `valid_from` / `valid_to` nullable → revocable + acotable a temporada fiscal.
-  - PK/UNIQUE `(grantor_user_id, grantee_user_id, valid_from)` (espeja participations).
-  - **Tabla separada de participations**, NO un flag: mezclarlas forzaría un `pct`
-    nullable ("contador participa 0%") — estado sin sentido semántico. Poseer vs
-    poder-leer son dos relaciones con invariantes propias → dos tablas.
+- `grantor_user_id` → `grantee_user_id`, rol con CHECK `IN ('read_only')`.
+- `valid_from` (NOT NULL) / `valid_to` (nullable) → revocable + acotable a
+  temporada fiscal. Vigencia evaluada contra `CURRENT_DATE`.
+- PK `(grantor_user_id, grantee_user_id, valid_from)` (espeja `participations`).
+- FK a `users` con `ON DELETE CASCADE` en ambos lados.
+- CHECK `grantor_user_id <> grantee_user_id` (no auto-grant).
+- CHECK `valid_to IS NULL OR valid_to > valid_from`.
+- **Tabla separada de `participations`**, NO un flag: mezclarlas forzaría un `pct`
+  nullable ("contador participa 0%") — estado sin sentido semántico. Poseer vs
+  poder-leer son dos relaciones con invariantes propias → dos tablas.
 
-**Enforcement (fase futura):**
+**G2 — Resolver de autorización (módulo domain puro):**
 
-- Dependency FastAPI `visible_account_ids(current_user)` =
-  `participations propias ∪ (grants donde grantee=yo → participations del grantor)`.
-- Grants read-only bloquean writes (el contador no dispara ingest ni edita).
-- Cada query de hechos se scopea por ese set de `account_id`.
-- Tests de aislamiento: usuario A no ve cuentas de B salvo grant/participation.
+```python
+visible_account_ids(session, user, on_behalf_of=None) -> set[int]
+```
+
+- `on_behalf_of=None` → participations propias de `user` vigentes (hoy).
+- `on_behalf_of=X` → valida grant read-only vigente `X → user`; devuelve las
+  participations de `X`. Sin grant vigente → 403.
+
+Función pura sobre la DB → los tests de aislamiento son tabla de verdad.
+
+**G3 — Modelo de contexto: parámetro `on_behalf_of` explícito, stateless.**
+
+Decisión locked (clase mundial, sin estado oculto):
+
+- Param de query opcional en endpoints de lectura; **default = uno mismo** (el
+  owner no lo pasa — caso 99%, sin verbosidad de URL).
+- El contador, al omitirlo, obtiene set **vacío** (sus participations propias son
+  vacías) → lo empuja a fijar contexto e imposibilita merge accidental de clientes.
+- **Rechazado:** merged view (mezclar declaraciones de dos personas = hazard
+  fiscal) y contexto en sesión/token (stateful, oculto, driftea).
+
+**G4 — Read-only enforced por diseño, no por chequeos dispersos:**
+
+`on_behalf_of` se honra **solo en endpoints de lectura**. Todos los writes
+(ingest, upload, setup, settings, credentials) operan sobre los recursos propios
+de `current_user`. El contador no tiene flex_credentials ni datos propios → no
+puede escribir en los del owner porque no existe endpoint que escriba "datos de
+otro usuario". El read-only es estructural, no un guard que se pueda olvidar.
+
+**G5 — Visibilidad binaria; `pct` es capa de dominio:**
+
+Tener participation (cualquier `pct`) → se ve toda la actividad de la cuenta. El
+50% de Joint Holder se aplica en la matemática fiscal (Phase 3+), no en qué filas ve (no
+se puede ver "medio trade").
+
+**G6 — CRUD de grants (owner-only) + dependency:**
+
+- `POST /api/grants` (crear: referencia al grantee por email), `GET /api/grants`
+  (los que otorgué + los que me otorgaron), `DELETE /api/grants/{...}` (revocar).
+  Solo el grantor crea/revoca sus grants.
+- Dependency FastAPI `require_account_scope` envuelve G2 → contrato que Phase 3
+  consume. Resuelve `(current_user, on_behalf_of)` a un `set[account_id]` o 403.
+- **Tests de aislamiento:** A no ve nada de B sin grant; grantee read-only no
+  escribe; grant expirado (`valid_to < hoy`) no da acceso; `on_behalf_of` sin
+  grant → 403; owner omite param → ve lo suyo.
 
 ## Alcance
 
@@ -178,13 +221,16 @@ enforcement aún no tomadas.
 - H2: squash a baseline pristino + wipe DB dev.
 - H3: drift test endurecido (constraints + índices + defaults).
 - H4: `comment=` en tablas + corrección de `CLAUDE.md`.
+- H5: tabla `data_access_grants` + resolver `visible_account_ids` + dependency
+  `require_account_scope` + CRUD de grants + tests de aislamiento (G1-G6).
 
-### OUT (diseñado en H5, construido en fase futura)
+### OUT (consumido en fases futuras)
 
-- Tabla `data_access_grants`.
-- Enforcement de authz per-user en la API.
-- Login real de Joint Holder / contador.
-- Tests de aislamiento multi-user.
+- Endpoints de lectura de hechos (`/api/lots/*`, etc.) que scopean vía el resolver
+  → Phase 3.
+- Login/registro y UI real de Joint Holder / contador (la primitiva queda lista y
+  testeada; la UI la activa su fase).
+- Aplicar `pct` en matemática fiscal → Phase 3+ (domain layer).
 
 ## Plan de verificación
 
@@ -194,6 +240,13 @@ enforcement aún no tomadas.
   de constraint hand-named — ej. `closed_lots_natural_key` en upserts — se
   actualizan a los nombres de convención si aplica).
 - `\d+` en psql muestra los `comment=` de H4.
+- **H5 — tests de aislamiento** (usuarios sintéticos A, B, contador C):
+  - A sin grant no ve cuentas de B (`visible_account_ids` disjunto).
+  - C con grant read-only A→C ve las cuentas de A vía `on_behalf_of=A`.
+  - C con `on_behalf_of=B` (sin grant) → 403.
+  - C omitiendo `on_behalf_of` → set vacío (no error).
+  - Grant expirado (`valid_to < hoy`) → 403.
+  - C no puede crear/revocar grants de A; no accede a writes.
 - Re-ingesta de XMLs (acción del usuario, post-wipe) reproduce los datos sanos.
 
 ## Riesgos
