@@ -187,17 +187,6 @@ class Transfer(Base):
     transfer_type: Mapped[str] = mapped_column(String, nullable=False)
 
 
-class TransferLot(Base):
-    __tablename__ = "transfer_lots"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    transfer_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("transfers.id", ondelete="CASCADE"), nullable=False
-    )
-    original_open_date: Mapped[date] = mapped_column(Date, nullable=False)
-    qty: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
-    cost_basis_usd: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
-
 
 class CashTransaction(Base):
     __tablename__ = "cash_transactions"

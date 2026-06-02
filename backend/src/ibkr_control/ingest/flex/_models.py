@@ -1,5 +1,5 @@
 """Dataclasses que el parser produce a partir del XML (intermediarias, no DB)."""
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -84,14 +84,6 @@ class ParsedTransfer:
     symbol: str
     qty: Decimal
     transfer_type: str
-    lots: list["ParsedTransferLot"] = field(default_factory=list)
-
-
-@dataclass
-class ParsedTransferLot:
-    original_open_date: date
-    qty: Decimal
-    cost_basis_usd: Decimal
 
 
 @dataclass

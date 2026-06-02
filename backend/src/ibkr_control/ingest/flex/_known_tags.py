@@ -18,7 +18,7 @@ KNOWN_TOP_LEVEL_TAGS: frozenset[str] = frozenset({
     "OpenPositions",                # OpenPosition rows
     "CashTransactions",             # CashTransaction rows
     "Transfers",                    # Transfer rows
-    "TransferLots",                 # TransferLot rows (may appear standalone)
+    "TransferLots",                 # ignored - unpopulatable from Activity Flex (spec 2026-06-02)
     # Tags que vienen en Activity XML pero ignoramos explícitamente en Phase 2:
     "AccountSummary",               # Summary wrapper
     "AccruedDividends",             # Dividend accruals (Phase 5+)

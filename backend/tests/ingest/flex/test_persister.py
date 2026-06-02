@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ibkr_control.ingest.flex.persister import persist
 from ibkr_control.ingest.flex._models import (
     ParsedAccount, ParsedTrade, ParsedClosedLot, ParsedOpenPositionLot,
-    ParsedCashTransaction, ParsedTransfer, ParsedTransferLot, ParsedXML,
+    ParsedCashTransaction, ParsedTransfer, ParsedXML,
     ParsedDividendAccrual, ParsedOpenDividendAccrual,
 )
 

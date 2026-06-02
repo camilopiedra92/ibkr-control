@@ -21,7 +21,7 @@ from lxml import etree
 from ibkr_control.ingest.flex._known_tags import KNOWN_TOP_LEVEL_TAGS, EXPLICITLY_IGNORED
 from ibkr_control.ingest.flex._models import (
     ParsedAccount, ParsedTrade, ParsedClosedLot, ParsedOpenPositionLot,
-    ParsedCashTransaction, ParsedTransfer, ParsedTransferLot, ParsedXML,
+    ParsedCashTransaction, ParsedTransfer, ParsedXML,
     ParsedDividendAccrual, ParsedOpenDividendAccrual,
     UnknownFlexTagError,
 )
@@ -151,8 +151,9 @@ def parse(xml_bytes: bytes) -> ParsedXML:
             elif tag == "Transfers":
                 transfers.extend(_parse_transfers(child))
             elif tag == "TransferLots":
-                # TransferLots can appear as a standalone top-level section;
-                # when nested inside a Transfer they are handled in _parse_transfers.
+                # Ignorado deliberadamente: <TransferLot> es sibling de <Transfer>
+                # (no anidado) y carece de cost_basis/open_date -> impoblable desde
+                # Activity Flex. Tabla transfer_lots eliminada (spec 2026-06-02).
                 pass
             elif tag == "ChangeInDividendAccruals":
                 _parse_change_in_dividend_accruals(child, change_in_dividend_accruals)
@@ -539,17 +540,5 @@ def _parse_transfers(elem) -> list[ParsedTransfer]:
             qty=_dec(tr.get("quantity")),
             transfer_type=tr.get("type") or tr.get("transferType") or "unknown",
         )
-        # Nested TransferLot rows (present in some query types)
-        for lot in tr.iterchildren("TransferLot"):
-            open_date = _parse_date(
-                lot.get("openDateTime") or lot.get("originalOpenDate")
-            )
-            if open_date is None:
-                continue
-            transfer.lots.append(ParsedTransferLot(
-                original_open_date=open_date,
-                qty=_dec(lot.get("quantity")),
-                cost_basis_usd=_dec(lot.get("costBasis")),
-            ))
         out.append(transfer)
     return out

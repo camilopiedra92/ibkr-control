@@ -85,9 +85,8 @@ async def _upsert_immutable_returning_inserted(
     """Como _upsert_immutable pero devuelve solo las rows insertadas con las
     columnas pedidas. Las NO-OP por conflicto NO aparecen en el resultado.
 
-    Usado por el patrón Transfers: necesitamos saber qué Transfers fueron
-    realmente insertados para decidir cuáles tienen que recibir sus TransferLot
-    children (los Transfers existentes ya tienen sus children en DB).
+    Usado cuando el caller necesita inspeccionar las rows nuevamente insertadas
+    (e.g. contar dividends por tipo en el path de CashTransaction).
     """
     if not rows:
         return []

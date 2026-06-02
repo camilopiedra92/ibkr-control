@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 async def test_flex_imports_tables_exist(db_session: AsyncSession):
     expected = {
         'flex_imports', 'trades', 'closed_lots', 'open_position_lots',
-        'transfers', 'transfer_lots', 'cash_transactions',
+        'transfers', 'cash_transactions',
     }
     for t in expected:
         result = await db_session.execute(text(f"SELECT to_regclass('{t}')"))

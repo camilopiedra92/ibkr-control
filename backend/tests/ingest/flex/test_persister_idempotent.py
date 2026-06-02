@@ -24,14 +24,12 @@ from ibkr_control.db.models.flex_raw import (
     OpenPositionLot,
     Trade,
     Transfer,
-    TransferLot,
 )
 from ibkr_control.ingest.flex._models import (
     ParsedAccount,
     ParsedOpenPositionLot,
     ParsedTrade,
     ParsedTransfer,
-    ParsedTransferLot,
     ParsedXML,
 )
 from ibkr_control.ingest.flex.persister import persist
@@ -220,11 +218,12 @@ async def test_snapshot_lot_different_snapshot_date_creates_new_row(
 
 
 @pytest.mark.asyncio
-async def test_transfer_lots_not_duplicated_on_reingest(
+async def test_transfer_not_duplicated_on_reingest(
     db_session: AsyncSession, sample_user, sample_account
 ):
-    """Re-ingest del mismo transfer NO duplica sus TransferLot children.
-    Spec § Transfers con children: if Transfer ya existe, skip lots."""
+    """Re-ingest del mismo transfer NO lo duplica (ON CONFLICT transaction_id
+    DO NOTHING). transfer_lots fue eliminado (impoblable desde Activity Flex,
+    spec 2026-06-02)."""
     transfer = ParsedTransfer(
         transaction_id="XFER-IDEMP-1",
         transfer_date=date(2026, 4, 30),
@@ -234,13 +233,6 @@ async def test_transfer_lots_not_duplicated_on_reingest(
         symbol="GLOB",
         qty=Decimal("94"),
         transfer_type="FOP",
-        lots=[
-            ParsedTransferLot(
-                original_open_date=date(2026, 4, 28),
-                qty=Decimal("94"),
-                cost_basis_usd=Decimal("3985.60"),
-            ),
-        ],
     )
     p1 = _minimal_parsed(n_trades=0, account_id=sample_account.ibkr_account_id)
     p1.transfers = [transfer]
@@ -260,11 +252,7 @@ async def test_transfer_lots_not_duplicated_on_reingest(
     n_transfers = await db_session.scalar(
         select(func.count()).select_from(Transfer)
     )
-    n_lots = await db_session.scalar(
-        select(func.count()).select_from(TransferLot)
-    )
     assert n_transfers == 1
-    assert n_lots == 1
 
 
 @pytest.mark.asyncio

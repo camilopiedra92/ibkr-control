@@ -10,11 +10,7 @@ Estrategia (spec A4 + A8):
 - Snapshot entities (OpenPositionLot, ChangeInDividendAccrual,
   OpenDividendAccrual): ON CONFLICT (natural_key) DO UPDATE → la fila refleja
   el último XML que la observó (spec A1-bis, `flex_import_id` "last updated by")
-- Transfers + TransferLot: usamos `_upsert_immutable_returning_inserted` para
-  identificar qué Transfers fueron realmente insertados (vs NO-OP por
-  duplicado) y solo entonces insertamos sus TransferLot children. Los
-  Transfers ya existentes ya tienen sus lots en DB — no re-insertamos
-  (TransferLot no tiene UNIQUE constraint, sería duplicación).
+- Transfers: immutable por transaction_id (ON CONFLICT DO NOTHING).
 - Counters n_observed_* (rows que llegaron en el XML) + n_new_* (rows que
   efectivamente se insertaron o actualizaron) persistidos en flex_imports
   (spec A5) y devueltos al caller en el dict de retorno.
@@ -31,7 +27,6 @@ DO NOTHING absorbe colisiones cross-XML sin error.
 from datetime import date
 
 from sqlalchemy import select, text
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ibkr_control.db.models.accounts import Account
@@ -44,7 +39,6 @@ from ibkr_control.db.models.flex_raw import (
     OpenPositionLot,
     Trade,
     Transfer,
-    TransferLot,
 )
 from ibkr_control.ingest.flex._models import ParsedXML
 from ibkr_control.ingest.flex._upsert_helpers import (
@@ -320,7 +314,7 @@ async def _upsert_all_children(
     n_new_cash = len(inserted_cash)
     n_new_dividends = sum(1 for row in inserted_cash if row.type == "Dividends")
 
-    # === Transfers + TransferLots (spec § "Transfers con children") ===
+    # === Transfers (immutable por transaction_id) ===
     transfer_rows: list[dict] = []
     for tr in parsed.transfers:
         src_shadow = tr.src_ibkr_account_id and _is_shadow_account(
@@ -353,37 +347,9 @@ async def _upsert_all_children(
             }
         )
 
-    inserted_transfers = await _upsert_immutable_returning_inserted(
-        session,
-        Transfer.__table__,
-        transfer_rows,
-        ["transaction_id"],
-        ["id", "transaction_id"],
+    n_new_transfers = await _upsert_immutable(
+        session, Transfer.__table__, transfer_rows, ["transaction_id"]
     )
-    inserted_tx_ids = {r.transaction_id for r in inserted_transfers}
-    transfer_id_map = {r.transaction_id: r.id for r in inserted_transfers}
-    n_new_transfers = len(inserted_transfers)
-
-    # Insert TransferLots solo para Transfers nuevos. Los Transfers existentes
-    # ya tienen sus children en DB; re-insertar duplicaría (TransferLot no
-    # tiene UNIQUE, no podríamos hacer ON CONFLICT).
-    lot_rows: list[dict] = []
-    for tr in parsed.transfers:
-        if tr.transaction_id not in inserted_tx_ids:
-            continue
-        transfer_db_id = transfer_id_map[tr.transaction_id]
-        for lot in tr.lots:
-            lot_rows.append(
-                {
-                    "transfer_id": transfer_db_id,
-                    "original_open_date": lot.original_open_date,
-                    "qty": lot.qty,
-                    "cost_basis_usd": lot.cost_basis_usd,
-                }
-            )
-    if lot_rows:
-        stmt = pg_insert(TransferLot.__table__).values(lot_rows)
-        await session.execute(stmt)
 
     # === OpenPositionLots (snapshot) ===
     # Natural key incluye originating_transaction_id (A3 amendment 2026-05-25):
