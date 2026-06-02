@@ -42,7 +42,9 @@ class DataAccessGrant(Base):
     grantee_user_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    role: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'read_only'"))
+    role: Mapped[str] = mapped_column(
+        String, nullable=False, default="read_only", server_default=text("'read_only'")
+    )
     valid_from: Mapped[date] = mapped_column(Date, nullable=False)
     valid_to: Mapped[date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
