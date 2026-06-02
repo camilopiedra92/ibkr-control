@@ -427,6 +427,12 @@ make help         # lista todos los targets
 # Backend tests
 cd backend && uv run pytest -v
 
+# Lint + format (deben quedar en 0 errores / 0 drift)
+cd backend && uv run ruff check .       # lint backend (raíz, no solo src/)
+cd backend && uv run ruff format .      # formatear backend (Phase 2.7: adoptado en toda la base)
+cd frontend && pnpm lint                # ESLint flat (eslint-config-next + typescript-eslint type-aware)
+cd frontend && pnpm lint:fix            # auto-fix
+
 # Regenerar cliente TS del OpenAPI (cuando cambia el backend)
 cd frontend && pnpm openapi:gen
 
