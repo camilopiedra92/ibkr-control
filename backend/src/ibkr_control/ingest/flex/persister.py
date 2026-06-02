@@ -29,6 +29,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ibkr_control.db.models.accounts import Account
+from ibkr_control.db.models.counterparties import Counterparty
 from ibkr_control.db.models.flex_raw import (
     CashTransaction,
     ChangeInDividendAccrual,
@@ -114,12 +115,8 @@ async def persist(
     for ct in parsed.cash_transactions:
         if not _is_shadow_account(ct.ibkr_account_id):
             all_account_ids.add(ct.ibkr_account_id)
-    # Transfers reference accounts via src/dst fields
-    for tr in parsed.transfers:
-        if tr.src_ibkr_account_id and not _is_shadow_account(tr.src_ibkr_account_id):
-            all_account_ids.add(tr.src_ibkr_account_id)
-        if tr.dst_ibkr_account_id and not _is_shadow_account(tr.dst_ibkr_account_id):
-            all_account_ids.add(tr.dst_ibkr_account_id)
+    # NOTE: transfer src/dst peers are NOT collected here — external peers go to
+    # counterparties (spec #6); own peers resolve via accounts_map below.
     for da in parsed.change_in_dividend_accruals:
         if not _is_shadow_account(da.ibkr_account_id):
             all_account_ids.add(da.ibkr_account_id)
@@ -314,32 +311,42 @@ async def _upsert_all_children(
     n_new_dividends = sum(1 for row in inserted_cash if row.type == "Dividends")
 
     # === Transfers (immutable por transaction_id) ===
+    # Resolucion de peer por lado: si el ibkr_account_id es una cuenta propia
+    # (en accounts_map) -> FK account; si no -> counterparty externo (spec #6).
+    external_ids: set[str] = set()
+    for tr in parsed.transfers:
+        for peer in (tr.src_ibkr_account_id, tr.dst_ibkr_account_id):
+            if peer and not _is_shadow_account(peer) and peer not in accounts_map:
+                external_ids.add(peer)
+    counterparties_map = await _ensure_counterparties(session, list(external_ids))
+
+    def _resolve_side(peer: str | None) -> tuple[int | None, int | None]:
+        """Returns (account_id, counterparty_id) — exactamente uno non-None,
+        o (None, None) si no hay peer (rebota contra el exclusive arc CHECK)."""
+        if not peer:
+            return (None, None)
+        if peer in accounts_map:
+            return (accounts_map[peer], None)
+        return (None, counterparties_map[peer])
+
     transfer_rows: list[dict] = []
     for tr in parsed.transfers:
-        src_shadow = tr.src_ibkr_account_id and _is_shadow_account(
-            tr.src_ibkr_account_id
-        )
-        dst_shadow = tr.dst_ibkr_account_id and _is_shadow_account(
-            tr.dst_ibkr_account_id
-        )
+        src_shadow = tr.src_ibkr_account_id and _is_shadow_account(tr.src_ibkr_account_id)
+        dst_shadow = tr.dst_ibkr_account_id and _is_shadow_account(tr.dst_ibkr_account_id)
         if src_shadow or dst_shadow:
             continue
+        src_acct, src_cp = _resolve_side(tr.src_ibkr_account_id)
+        dst_acct, dst_cp = _resolve_side(tr.dst_ibkr_account_id)
         transfer_rows.append(
             {
                 "flex_import_id": fi.id,
                 "transaction_id": tr.transaction_id,
                 "transfer_date": tr.transfer_date,
                 "direction": tr.direction,
-                "src_account_id": (
-                    accounts_map.get(tr.src_ibkr_account_id)
-                    if tr.src_ibkr_account_id
-                    else None
-                ),
-                "dst_account_id": (
-                    accounts_map.get(tr.dst_ibkr_account_id)
-                    if tr.dst_ibkr_account_id
-                    else None
-                ),
+                "src_account_id": src_acct,
+                "src_counterparty_id": src_cp,
+                "dst_account_id": dst_acct,
+                "dst_counterparty_id": dst_cp,
                 "symbol": tr.symbol,
                 "qty": tr.qty,
                 "transfer_type": tr.transfer_type,
@@ -514,6 +521,38 @@ async def _upsert_all_children(
         "dividends": n_new_dividends,
         "transfers": n_new_transfers,
     }
+
+
+async def _ensure_counterparties(
+    session: AsyncSession,
+    external_ids: list[str],
+) -> dict[str, int]:
+    """Ensure counterparties rows exist for external (non-own) transfer peers.
+
+    Returns external_id -> db id map. Mirrors _ensure_accounts (SELECT-then-INSERT
+    bajo el mismo advisory lock; UNIQUE(external_id) backstops manual-upload races).
+    """
+    if not external_ids:
+        return {}
+
+    result = await session.scalars(
+        select(Counterparty).where(Counterparty.external_id.in_(external_ids))
+    )
+    existing: dict[str, int] = {c.external_id: c.id for c in result.all()}
+
+    missing = set(external_ids) - set(existing.keys())
+    for ext_id in missing:
+        session.add(Counterparty(external_id=ext_id))
+
+    if missing:
+        await session.flush()
+        result2 = await session.scalars(
+            select(Counterparty).where(Counterparty.external_id.in_(missing))
+        )
+        for c in result2.all():
+            existing[c.external_id] = c.id
+
+    return existing
 
 
 async def _ensure_accounts(

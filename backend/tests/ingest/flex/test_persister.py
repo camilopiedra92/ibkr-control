@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ibkr_control.ingest.flex.persister import persist
 from ibkr_control.ingest.flex._models import (
-    ParsedAccount, ParsedTrade, ParsedXML,
+    ParsedAccount, ParsedTrade, ParsedTransfer, ParsedXML,
 )
 
 FIXTURE_DIR = __import__("pathlib").Path(__file__).parent.parent.parent / "fixtures" / "xml"
@@ -447,3 +447,95 @@ async def test_persist_does_not_delete_poison_rows(db_session, sample_user):
     )
     assert poison_row is not None
     assert poison_row.status == "poison"
+
+
+def _minimal_parsed(
+    n_trades: int = 1,
+    account_id: str = "U99999001",
+    anyo: int = 2026,
+) -> ParsedXML:
+    """Minimal ParsedXML with `account_id` in parsed.accounts (AccountInformation).
+
+    OWN account always ends up in accounts_map because it comes from
+    parsed.accounts (the authoritative source, per spec #6).
+    """
+    return ParsedXML(
+        anyo=anyo,
+        period_from=date(anyo, 1, 1),
+        period_to=date(anyo, 5, 25) if anyo == 2026 else date(anyo, 12, 31),
+        accounts=[ParsedAccount(ibkr_account_id=account_id, currency="USD")],
+        trades=[
+            ParsedTrade(
+                transaction_id=f"TX-CP-{i}",
+                ibkr_account_id=account_id,
+                symbol="AAPL",
+                asset_class="STK",
+                trade_date=date(anyo, 1, 15 + i),
+                settle_date=date(anyo, 1, 17 + i),
+                qty=Decimal("10"),
+                price_usd=Decimal("150"),
+                proceeds_usd=Decimal("-1500"),
+                commission_usd=Decimal("1"),
+                open_close="O",
+                buy_sell="BUY",
+                raw_attrs={},
+            )
+            for i in range(n_trades)
+        ],
+        closed_lots=[],
+        open_position_lots=[],
+        cash_transactions=[],
+        transfers=[],
+        change_in_dividend_accruals=[],
+        open_dividend_accruals=[],
+    )
+
+
+@pytest.mark.asyncio
+async def test_external_transfer_peer_becomes_counterparty_not_account(
+    db_session: AsyncSession, sample_user
+):
+    """Un <Transfer> FOP IN desde un broker externo (CS-...) crea fila en
+    counterparties, NO en accounts; el transfer queda con src_counterparty_id
+    set y src_account_id NULL (exclusive arc)."""
+    from ibkr_control.db.models.accounts import Account
+    from ibkr_control.db.models.counterparties import Counterparty
+    from sqlalchemy import func, select, text
+
+    OWN = "U99999002"
+    EXT = "CS-999999-99"
+    transfer = ParsedTransfer(
+        transaction_id="XFER-FOP-1",
+        transfer_date=date(2026, 4, 30),
+        direction="IN",
+        src_ibkr_account_id=EXT,        # peer externo
+        dst_ibkr_account_id=OWN,        # cuenta propia
+        symbol="GLOB",
+        qty=Decimal("94"),
+        transfer_type="FOP",
+    )
+    p = _minimal_parsed(n_trades=0, account_id=OWN)  # OWN in <AccountInformation>
+    p.transfers = [transfer]
+    await persist(
+        db_session, parsed=p, user_id=sample_user.id,
+        xml_bytes=b"<fop/>", source="web_service",
+    )
+    await db_session.commit()
+
+    # EXT NOT in accounts
+    n_ext_acct = await db_session.scalar(
+        select(func.count()).select_from(Account).where(Account.ibkr_account_id == EXT)
+    )
+    assert n_ext_acct == 0
+    # EXT IS in counterparties
+    cp = await db_session.scalar(
+        select(Counterparty).where(Counterparty.external_id == EXT)
+    )
+    assert cp is not None
+    # transfer points src->counterparty, dst->own account
+    row = (await db_session.execute(text(
+        "SELECT src_account_id, src_counterparty_id, dst_account_id, dst_counterparty_id "
+        "FROM transfers WHERE transaction_id='XFER-FOP-1'"
+    ))).first()
+    assert row[0] is None and row[1] == cp.id        # src = counterparty
+    assert row[2] is not None and row[3] is None     # dst = own account
