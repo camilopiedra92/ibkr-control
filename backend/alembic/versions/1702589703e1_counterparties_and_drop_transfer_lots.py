@@ -7,8 +7,8 @@ Create Date: 2026-06-02 17:18:10.089889
 Spec docs/specs/2026-06-02-persister-counterparties-cleanup-design.md
 - #6: counterparties table + src/dst_counterparty_id FK + exclusive-arc CHECK.
   Reconcilia accounts huerfanos (counterparties externos mal creados como
-  Account) moviendolos a counterparties.
-- #7: drop transfer_lots (impoblable desde Activity Flex).
+  Account) moviéndolos a counterparties.
+- #7: drop transfer_lots (no poblable desde Activity Flex).
 """
 from typing import Sequence, Union
 
@@ -92,8 +92,10 @@ def upgrade() -> None:
     """)).scalar()
     if bad:
         raise RuntimeError(
-            f"{bad} transfers violate exclusive-arc precondition (a side with "
-            f"zero or two endpoints); cannot add CHECK. Investigate before migrating."
+            f"{bad} transfers violate exclusive-arc precondition: a side with "
+            f"zero endpoints (NULL peer not in accounts/counterparties) or two "
+            f"endpoints. NULL-peer transfers predate this migration and must be "
+            f"reconciled manually before upgrading; cannot add CHECK."
         )
 
     # 5. CHECK constraints (exclusive arc, exactly-one por lado)
@@ -106,7 +108,7 @@ def upgrade() -> None:
         "(dst_account_id IS NOT NULL) <> (dst_counterparty_id IS NOT NULL)",
     )
 
-    # 6. drop transfer_lots (impoblable, #7)
+    # 6. drop transfer_lots (no poblable, #7)
     op.drop_table("transfer_lots")
 
 

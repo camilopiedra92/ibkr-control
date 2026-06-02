@@ -24,6 +24,33 @@ def _alembic_cfg(async_url: str) -> Config:
     return cfg
 
 
+async def _seed_orphan_scenario(conn):
+    """Seed own account U99999001 (with a participation, so it is NOT an orphan),
+    orphan CS-999999-99 (no participation/facts), and a FOP IN transfer
+    (src=orphan, dst=own). Returns (u1_id, csx_id)."""
+    uid = await conn.scalar(text(
+        "INSERT INTO users (name, email, hashed_password, is_active, "
+        "is_superuser, is_verified) "
+        "VALUES ('t','t@example.com','x', true, false, false) RETURNING id"))
+    u1 = await conn.scalar(text(
+        "INSERT INTO accounts (ibkr_account_id, currency) "
+        "VALUES ('U99999001','USD') RETURNING id"))
+    # participation marks U1 as an owned account -> excluded from orphan sweep
+    await conn.execute(text(
+        "INSERT INTO participations (user_id, account_id, pct, valid_from) "
+        "VALUES (:uid, :u1, 1.0, '2026-01-01')"
+    ), {"uid": uid, "u1": u1})
+    csx = await conn.scalar(text(
+        "INSERT INTO accounts (ibkr_account_id, currency) "
+        "VALUES ('CS-999999-99','USD') RETURNING id"))
+    await conn.execute(text(
+        "INSERT INTO transfers (transaction_id, transfer_date, direction, "
+        "src_account_id, dst_account_id, symbol, qty, transfer_type) "
+        "VALUES ('T-FOP-1','2026-04-30','IN', :csx, :u1, 'GLOB', 94, 'FOP')"
+    ), {"csx": csx, "u1": u1})
+    return u1, csx
+
+
 @pytest.mark.asyncio
 async def test_upgrade_reconciles_orphan_and_drops_transfer_lots():
     with PostgresContainer("postgres:16-alpine", driver="psycopg2") as pg:
@@ -37,17 +64,7 @@ async def test_upgrade_reconciles_orphan_and_drops_transfer_lots():
         # (2) seed: cuenta propia U1, account huerfano CSX, transfer FOP IN
         eng = create_async_engine(async_url)
         async with eng.begin() as conn:
-            u1 = await conn.scalar(text(
-                "INSERT INTO accounts (ibkr_account_id, currency) "
-                "VALUES ('U99999001','USD') RETURNING id"))
-            csx = await conn.scalar(text(
-                "INSERT INTO accounts (ibkr_account_id, currency) "
-                "VALUES ('CS-999999-99','USD') RETURNING id"))
-            await conn.execute(text(
-                "INSERT INTO transfers (transaction_id, transfer_date, direction, "
-                "src_account_id, dst_account_id, symbol, qty, transfer_type) "
-                "VALUES ('T-FOP-1','2026-04-30','IN', :csx, :u1, 'GLOB', 94, 'FOP')"
-            ), {"csx": csx, "u1": u1})
+            u1, _csx = await _seed_orphan_scenario(conn)
 
         # (3) upgrade head (aplica la revision nueva)
         await asyncio.to_thread(command.upgrade, cfg, "head")
@@ -56,10 +73,14 @@ async def test_upgrade_reconciles_orphan_and_drops_transfer_lots():
             cps = [r[0] for r in await conn.execute(text("SELECT external_id FROM counterparties"))]
             assert "CS-999999-99" in cps, f"orphan not in counterparties: {cps}"
             row = (await conn.execute(text(
-                "SELECT src_account_id, src_counterparty_id FROM transfers "
+                "SELECT src_account_id, src_counterparty_id, "
+                "dst_account_id, dst_counterparty_id FROM transfers "
                 "WHERE transaction_id='T-FOP-1'"))).first()
             assert row[0] is None, "src_account_id should be NULL after re-pointing to counterparty"
             assert row[1] is not None, "src_counterparty_id should be set after re-pointing"
+            # dst is the own account U1: must stay an account FK, not moved to counterparty.
+            assert row[2] == u1, "dst_account_id should remain the own account (U1)"
+            assert row[3] is None, "dst_counterparty_id should remain NULL (own account, not moved)"
             n_orphan = await conn.scalar(text(
                 "SELECT count(*) FROM accounts WHERE ibkr_account_id='CS-999999-99'"))
             assert n_orphan == 0, "orphan account should be deleted from accounts table"
@@ -82,17 +103,7 @@ async def test_downgrade_reverts_cleanly():
         #     loop de reversion de data corra >0 iteraciones al hacer downgrade.
         eng = create_async_engine(async_url)
         async with eng.begin() as conn:
-            u1 = await conn.scalar(text(
-                "INSERT INTO accounts (ibkr_account_id, currency) "
-                "VALUES ('U99999001','USD') RETURNING id"))
-            csx = await conn.scalar(text(
-                "INSERT INTO accounts (ibkr_account_id, currency) "
-                "VALUES ('CS-999999-99','USD') RETURNING id"))
-            await conn.execute(text(
-                "INSERT INTO transfers (transaction_id, transfer_date, direction, "
-                "src_account_id, dst_account_id, symbol, qty, transfer_type) "
-                "VALUES ('T-FOP-1','2026-04-30','IN', :csx, :u1, 'GLOB', 94, 'FOP')"
-            ), {"csx": csx, "u1": u1})
+            await _seed_orphan_scenario(conn)
 
         # (3) upgrade head (mueve el orphan a counterparties), luego downgrade
         await asyncio.to_thread(command.upgrade, cfg, "head")
