@@ -327,6 +327,7 @@ async def _upsert_all_children(
             return (None, None)
         if peer in accounts_map:
             return (accounts_map[peer], None)
+        # peer not in accounts_map: must be external — guaranteed by external_ids pre-scan above
         return (None, counterparties_map[peer])
 
     transfer_rows: list[dict] = []

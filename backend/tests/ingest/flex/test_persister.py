@@ -508,8 +508,8 @@ async def test_external_transfer_peer_becomes_counterparty_not_account(
         transaction_id="XFER-FOP-1",
         transfer_date=date(2026, 4, 30),
         direction="IN",
-        src_ibkr_account_id=EXT,        # peer externo
-        dst_ibkr_account_id=OWN,        # cuenta propia
+        src_ibkr_account_id=EXT, # peer externo
+        dst_ibkr_account_id=OWN, # cuenta propia
         symbol="GLOB",
         qty=Decimal("94"),
         transfer_type="FOP",
