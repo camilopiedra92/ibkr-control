@@ -34,18 +34,18 @@ def upgrade() -> None:
             "created_at", sa.DateTime(timezone=True),
             nullable=False, server_default=sa.text("NOW()"),
         ),
-        sa.UniqueConstraint("external_id", name="uq_counterparties_external_id"),
+        sa.UniqueConstraint("external_id", name="counterparties_external_id_key"),
     )
 
     # 2. transfers: columnas counterparty (FK nullable)
     op.add_column("transfers", sa.Column("src_counterparty_id", sa.BigInteger(), nullable=True))
     op.add_column("transfers", sa.Column("dst_counterparty_id", sa.BigInteger(), nullable=True))
     op.create_foreign_key(
-        "fk_transfers_src_counterparty", "transfers", "counterparties",
+        "transfers_src_counterparty_id_fkey", "transfers", "counterparties",
         ["src_counterparty_id"], ["id"],
     )
     op.create_foreign_key(
-        "fk_transfers_dst_counterparty", "transfers", "counterparties",
+        "transfers_dst_counterparty_id_fkey", "transfers", "counterparties",
         ["dst_counterparty_id"], ["id"],
     )
 
@@ -146,8 +146,8 @@ def downgrade() -> None:
         ), {"a": acct_id, "cp": cp_id})
 
     # 4. drop columnas counterparty
-    op.drop_constraint("fk_transfers_src_counterparty", "transfers", type_="foreignkey")
-    op.drop_constraint("fk_transfers_dst_counterparty", "transfers", type_="foreignkey")
+    op.drop_constraint("transfers_src_counterparty_id_fkey", "transfers", type_="foreignkey")
+    op.drop_constraint("transfers_dst_counterparty_id_fkey", "transfers", type_="foreignkey")
     op.drop_column("transfers", "src_counterparty_id")
     op.drop_column("transfers", "dst_counterparty_id")
 
