@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { isAxiosError } from "axios";
 import { useQuery } from "@tanstack/react-query";
 import { axiosInstance } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -53,8 +54,8 @@ export default function SettingsPage() {
         setRate(r.data.marginal_rate);
         setTz(r.data.timezone);
       })
-      .catch((e) => {
-        if (e?.response?.status === 401) return;
+      .catch((e: unknown) => {
+        if (isAxiosError(e) && e.response?.status === 401) return;
         setLoadError("No pude cargar settings. Reintentá en unos segundos.");
       });
   }, []);

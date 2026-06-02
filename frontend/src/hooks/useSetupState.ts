@@ -22,6 +22,9 @@ export function useSetupState(): SetupStateResult {
   return {
     state: query.data,
     isLoading: query.isLoading,
-    refetch: query.refetch,
+    // Public API is fire-and-forget (() => void); callers don't await the refetch.
+    refetch: () => {
+      void query.refetch();
+    },
   };
 }

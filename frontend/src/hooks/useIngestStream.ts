@@ -47,10 +47,14 @@ export function useIngestStream(jobId: number | null): IngestStreamState {
   useEffect(() => {
     if (jobId === null) return;
 
-    // Reset state for new job
+    // Subscription effect (SSE stream): reset state for the new job before
+    // subscribing. Synchronous resets are intrinsic to re-subscribing to an
+    // external system on jobId change — the legitimate use of effects.
+    /* eslint-disable react-hooks/set-state-in-effect */
     setEvents([]);
     setIsDone(false);
     setError(null);
+    /* eslint-enable react-hooks/set-state-in-effect */
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -58,7 +62,7 @@ export function useIngestStream(jobId: number | null): IngestStreamState {
     const token = getToken();
     const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "";
 
-    (async () => {
+    void (async () => {
       try {
         const resp = await fetch(`${apiUrl}/api/ingest/stream/${jobId}`, {
           headers: {

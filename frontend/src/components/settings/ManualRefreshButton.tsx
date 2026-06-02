@@ -3,10 +3,7 @@
 import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import {
-  triggerManualRefreshApiIngestTriggerPost,
-  IngestJobStarted,
-} from "@/lib/api";
+import { triggerManualRefreshApiIngestTriggerPost } from "@/lib/api";
 import { useIngestStream, StreamEvent } from "@/hooks/useIngestStream";
 
 const SUBSTEP_LABELS: Record<string, string> = {
@@ -88,7 +85,7 @@ export function ManualRefreshButton({ onDone }: ManualRefreshButtonProps) {
     mutationFn: () =>
       triggerManualRefreshApiIngestTriggerPost({ kind: "both" }),
     onSuccess: (data) => {
-      const d = data as IngestJobStarted;
+      const d = data;
       if (d?.job_id !== undefined) {
         setTriggerError(null);
         setJobId(d.job_id);

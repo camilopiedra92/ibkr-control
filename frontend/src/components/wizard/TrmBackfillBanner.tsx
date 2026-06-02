@@ -28,10 +28,14 @@ export function TrmBackfillBanner({
   const [dismissed, setDismissed] = useState(false);
   const { events, error: streamError } = useIngestStream(jobId);
 
-  // Reset dismissed flag when the parent gives us a new jobId.
-  useEffect(() => {
+  // Reset the dismissed flag when the parent gives us a new jobId. React-recommended
+  // pattern: adjust state during render on a prop change (no effect needed).
+  // https://react.dev/learn/you-might-not-need-an-effect
+  const [prevJobId, setPrevJobId] = useState(jobId);
+  if (jobId !== prevJobId) {
+    setPrevJobId(jobId);
     setDismissed(false);
-  }, [jobId]);
+  }
 
   const trmEvents = events.filter((e) => e.step === "trm_backfill");
   const okEvent = trmEvents.find((e) => e.status === "ok");

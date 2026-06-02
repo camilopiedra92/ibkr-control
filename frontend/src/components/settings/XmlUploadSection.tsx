@@ -77,7 +77,7 @@ export function XmlUploadSection() {
     }
   }, []);
 
-  const onDrop = useCallback(
+  const handleDrop = useCallback(
     async (accepted: File[]) => {
       if (isUploading) return;
 
@@ -104,7 +104,8 @@ export function XmlUploadSection() {
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,
+    // react-dropzone's onDrop expects a void return; fire-and-forget the async handler.
+    onDrop: (accepted) => void handleDrop(accepted),
     accept: { "text/xml": [".xml"], "application/xml": [".xml"] },
     multiple: true,
     disabled: isUploading,

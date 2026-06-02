@@ -15,7 +15,7 @@ export function FlexCredentialsSection() {
   const { mutate: fetchCreds, isPending } = useMutation({
     mutationFn: () => getFlexCredentialsApiCredentialsFlexGet(),
     onSuccess: (data) => {
-      setCreds(data as FlexCredentialsRead);
+      setCreds(data);
       setFetchError(null);
     },
     onError: (err) => {

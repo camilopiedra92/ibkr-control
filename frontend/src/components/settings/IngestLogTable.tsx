@@ -45,7 +45,7 @@ export function IngestLogTable({ refreshKey }: IngestLogTableProps) {
   const { mutate: fetchLogs, isPending } = useMutation({
     mutationFn: () => listLogsApiIngestLogsGet({ limit: 10 }),
     onSuccess: (data) => {
-      setLogs(data as IngestLogRead[]);
+      setLogs(data);
       setFetchError(null);
     },
     onError: () => {

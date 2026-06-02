@@ -71,7 +71,7 @@ function mapAxiosErrorToDetectError(e: unknown): DetectError {
     typeof detail === "object" &&
     detail !== null &&
     "code" in detail &&
-    (detail as { code: unknown }).code === "IBKR_BUSY"
+    (detail).code === "IBKR_BUSY"
   ) {
     const attempts = Number(
       (detail as { attempts?: unknown }).attempts ?? 0,
@@ -83,12 +83,10 @@ function mapAxiosErrorToDetectError(e: unknown): DetectError {
   if (status === 504) return { code: "TIMEOUT" };
   if (status === 502) {
     const message =
-      typeof detail === "object" && detail !== null
-        ? JSON.stringify(detail)
-        : String(detail ?? "");
+      typeof detail === "string" ? detail : JSON.stringify(detail ?? "");
     return { code: "IBKR_ERROR", message };
   }
-  return { code: "UNKNOWN", message: String(e) };
+  return { code: "UNKNOWN", message: `Error inesperado (HTTP ${status})` };
 }
 
 /**

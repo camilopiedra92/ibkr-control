@@ -5,7 +5,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { step2SaveApiSetupStep2SavePost } from "@/lib/api";
-import type { DetectedAccount, Step2SaveResponse } from "@/lib/api";
+import type { DetectedAccount } from "@/lib/api";
 
 interface Step2ConfigureAccountsProps {
   detected: DetectedAccount[];
@@ -63,7 +63,7 @@ export function Step2ConfigureAccounts({
         })),
       }),
     onSuccess: (data) => {
-      const resp = data as Step2SaveResponse;
+      const resp = data;
       onComplete(resp.trm_backfill_job_id);
     },
     onError: (err: unknown) => {

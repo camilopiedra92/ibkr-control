@@ -17,16 +17,21 @@ axiosInstance.interceptors.request.use((cfg) => {
 
 axiosInstance.interceptors.response.use(
   (r) => r,
-  (error) => {
+  (error: unknown) => {
     if (
       typeof window !== "undefined" &&
-      error?.response?.status === 401 &&
+      Axios.isAxiosError(error) &&
+      error.response?.status === 401 &&
       !window.location.pathname.startsWith("/login")
     ) {
       localStorage.removeItem("auth_token");
       window.location.replace("/login");
     }
-    return Promise.reject(error);
+    // Axios always rejects with an AxiosError (an Error subclass); the wrapper
+    // is a type-safety fallback for the theoretical non-Error case.
+    return Promise.reject(
+      error instanceof Error ? error : new Error("Request failed"),
+    );
   },
 );
 
