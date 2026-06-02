@@ -561,14 +561,12 @@ async def test_fop_fixture_creates_counterparty_no_orphan_account(
     counterparties — incorrect behavior for an own account. Option A makes the fixture
     realistic and keeps the assertion `own == 2` meaningful.
     """
-    from pathlib import Path
     from ibkr_control.ingest.flex.parser import parse
     from ibkr_control.db.models.accounts import Account
     from ibkr_control.db.models.counterparties import Counterparty
-    from sqlalchemy import func, select
+    from sqlalchemy import func, select, text
 
-    xml = (Path(__file__).resolve().parents[2]
-           / "fixtures/xml/ACTIVITY_2026_FOP_sanitized.xml").read_bytes()
+    xml = (FIXTURE_DIR / "ACTIVITY_2026_FOP_sanitized.xml").read_bytes()
     parsed = parse(xml)
 
     # Sanity-check: parser extracted both accounts and both transfers
@@ -602,3 +600,13 @@ async def test_fop_fixture_creates_counterparty_no_orphan_account(
         select(func.count()).select_from(Account)
         .where(Account.ibkr_account_id.in_(["U99999001", "U99999002"])))
     assert own == 2
+
+    # INTERNAL transfer (own -> own) must resolve to account FKs on both sides,
+    # NOT counterparties (exclusive arc the other way).
+    internal_row = (await db_session.execute(text(
+        "SELECT src_account_id, src_counterparty_id, dst_account_id, dst_counterparty_id "
+        "FROM transfers WHERE transaction_id='39601540411'"
+    ))).first()
+    assert internal_row is not None
+    assert internal_row[0] is not None and internal_row[1] is None  # src = own account
+    assert internal_row[2] is not None and internal_row[3] is None  # dst = own account

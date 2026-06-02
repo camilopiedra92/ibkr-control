@@ -22,6 +22,7 @@
           type="FOP" direction="IN" account="CS-999999-99" deliveringBroker="0015"
           quantity="94" transferPrice="0" positionAmount="3822.04"
           cashTransfer="0" code="" transactionID="39584831194" levelOfDetail="TRANSFER" />
+        <!-- positionAmount: kept for realism; not read by the parser -->
         <Transfer accountId="U99999001" assetCategory="STK" symbol="GLOB"
           description="GLOBANT SA" conid="160756766" isin="LU0974299876"
           reportDate="20260501" date="20260501" dateTime="20260501" settleDate="20260501"
