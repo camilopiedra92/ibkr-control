@@ -90,10 +90,12 @@ async def test_upsert_immutable_returning_inserted_filters_noop(
     db_session: AsyncSession, sample_account, sample_flex_import
 ):
     """Returning helper para Transfers: solo rows insertadas, no NO-OP."""
+    # src_account_id must be non-NULL (exclusive arc: exactly one of
+    # src_account_id / src_counterparty_id required per ck_transfers_src_arc).
     base = dict(
         flex_import_id=sample_flex_import.id,
         transfer_date=date(2025, 3, 1), direction='IN',
-        src_account_id=None, dst_account_id=sample_account.id,
+        src_account_id=sample_account.id, dst_account_id=sample_account.id,
         symbol='MSFT', qty=Decimal('100'), transfer_type='ACATS',
     )
     rows_round1 = [dict(base, transaction_id='XFER-1'), dict(base, transaction_id='XFER-2')]

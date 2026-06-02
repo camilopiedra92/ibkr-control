@@ -224,11 +224,16 @@ async def test_transfer_not_duplicated_on_reingest(
     """Re-ingest del mismo transfer NO lo duplica (ON CONFLICT transaction_id
     DO NOTHING). transfer_lots fue eliminado (impoblable desde Activity Flex,
     spec 2026-06-02)."""
+    # src_ibkr_account_id uses the same account as dst so the persister can
+    # resolve it via accounts_map. The test only checks idempotency (count=1),
+    # not the business semantics of who sent the transfer.
+    # (src_account_id=None would violate ck_transfers_src_arc added in Task 2;
+    # the persister's counterparty mapping is a later task.)
     transfer = ParsedTransfer(
         transaction_id="XFER-IDEMP-1",
         transfer_date=date(2026, 4, 30),
         direction="IN",
-        src_ibkr_account_id=None,
+        src_ibkr_account_id=sample_account.ibkr_account_id,
         dst_ibkr_account_id=sample_account.ibkr_account_id,
         symbol="GLOB",
         qty=Decimal("94"),

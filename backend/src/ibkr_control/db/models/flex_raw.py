@@ -167,6 +167,14 @@ class Transfer(Base):
     __tablename__ = "transfers"
     __table_args__ = (
         CheckConstraint("direction IN ('IN', 'OUT')", name="ck_transfers_direction"),
+        CheckConstraint(
+            "(src_account_id IS NOT NULL) <> (src_counterparty_id IS NOT NULL)",
+            name="ck_transfers_src_arc",
+        ),
+        CheckConstraint(
+            "(dst_account_id IS NOT NULL) <> (dst_counterparty_id IS NOT NULL)",
+            name="ck_transfers_dst_arc",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -179,8 +187,14 @@ class Transfer(Base):
     src_account_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("accounts.id"), nullable=True
     )
+    src_counterparty_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("counterparties.id"), nullable=True
+    )
     dst_account_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("accounts.id"), nullable=True
+    )
+    dst_counterparty_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("counterparties.id"), nullable=True
     )
     symbol: Mapped[str] = mapped_column(String, nullable=False)
     qty: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
