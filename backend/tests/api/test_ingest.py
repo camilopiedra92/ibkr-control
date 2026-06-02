@@ -1,4 +1,5 @@
 """Tests de /api/ingest/* (trigger + stream + logs)."""
+
 import asyncio
 
 from httpx import AsyncClient
@@ -26,9 +27,7 @@ async def test_trigger_rate_limit_429(client: AsyncClient, auth_headers: dict, m
 
 
 async def test_trigger_invalid_kind_returns_422(client: AsyncClient, auth_headers: dict):
-    resp = await client.post(
-        "/api/ingest/trigger", json={"kind": "garbage"}, headers=auth_headers
-    )
+    resp = await client.post("/api/ingest/trigger", json={"kind": "garbage"}, headers=auth_headers)
     assert resp.status_code == 422
 
 
@@ -94,9 +93,7 @@ async def test_run_manual_emits_substep_keys_matching_frontend(monkeypatch):
         ("flex_ytd", "ok"),
         ("done", None),
     ]
-    trm_ok = next(
-        e for e in events if e["step"] == "trm_backfill" and e.get("status") == "ok"
-    )
+    trm_ok = next(e for e in events if e["step"] == "trm_backfill" and e.get("status") == "ok")
     assert trm_ok["n_days"] == 7
 
 
@@ -148,9 +145,7 @@ async def test_trigger_persists_timestamp_in_user_row(
     session_local = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with session_local() as s:
-            user = (
-                await s.scalars(select(User).where(User.email == "api_test@test.com"))
-            ).one()
+            user = (await s.scalars(select(User).where(User.email == "api_test@test.com"))).one()
             assert user.last_ingest_trigger_at is not None, (
                 "trigger endpoint did not persist last_ingest_trigger_at"
             )

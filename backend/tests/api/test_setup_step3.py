@@ -12,6 +12,7 @@ the DB.
 
 The `set_token_key` autouse fixture is inherited from tests/api/conftest.py.
 """
+
 from httpx import AsyncClient
 
 
@@ -33,9 +34,7 @@ async def test_step3_upload_stashes_xml_and_returns_new_accounts(
 ):
     """Upload returns a fresh temp_id, the parsed year, and the new-account list."""
     files = {"file": ("h.xml", _XML_NEW_ACCT, "application/xml")}
-    r = await client.post(
-        "/api/setup/step3/upload", headers=auth_headers, files=files
-    )
+    r = await client.post("/api/setup/step3/upload", headers=auth_headers, files=files)
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["flex_import_temp_id"]
@@ -47,9 +46,7 @@ async def test_step3_upload_stashes_xml_and_returns_new_accounts(
     assert body["period"]["to"] == "2024-12-31"
 
 
-async def test_step3_upload_409_on_duplicate_in_stash(
-    client: AsyncClient, auth_headers: dict
-):
+async def test_step3_upload_409_on_duplicate_in_stash(client: AsyncClient, auth_headers: dict):
     """Same bytes uploaded twice → second upload returns 409 DUPLICATE_XML_STASHED.
 
     Both posts use the same auth_headers value (function-scoped fixture
@@ -57,31 +54,23 @@ async def test_step3_upload_409_on_duplicate_in_stash(
     requests.
     """
     files = {"file": ("h.xml", _XML_NEW_ACCT, "application/xml")}
-    r1 = await client.post(
-        "/api/setup/step3/upload", headers=auth_headers, files=files
-    )
+    r1 = await client.post("/api/setup/step3/upload", headers=auth_headers, files=files)
     assert r1.status_code == 200, r1.text
     # Re-create the multipart dict because httpx consumes the iterator.
     files2 = {"file": ("h.xml", _XML_NEW_ACCT, "application/xml")}
-    r2 = await client.post(
-        "/api/setup/step3/upload", headers=auth_headers, files=files2
-    )
+    r2 = await client.post("/api/setup/step3/upload", headers=auth_headers, files=files2)
     assert r2.status_code == 409
     assert r2.json()["detail"]["code"] == "DUPLICATE_XML_STASHED"
 
 
-async def test_step3_commit_empty_marks_step3_xmls(
-    client: AsyncClient, auth_headers: dict
-):
+async def test_step3_commit_empty_marks_step3_xmls(client: AsyncClient, auth_headers: dict):
     """Empty temp_ids list = explicit `skip historicos`. Sets the step3_xmls flag.
 
     Returns 0 ids/rows since nothing was persisted; the side effect we care
     about is the user.setup_progress["step3_xmls"] flag flipping to True,
     visible through GET /api/setup/state.
     """
-    r = await client.post(
-        "/api/setup/step3/commit", headers=auth_headers, json={"temp_ids": []}
-    )
+    r = await client.post("/api/setup/step3/commit", headers=auth_headers, json={"temp_ids": []})
     assert r.status_code == 200, r.text
     assert r.json() == {"flex_import_ids": [], "total_rows_inserted": 0}
     state = await client.get("/api/setup/state", headers=auth_headers)
@@ -94,9 +83,7 @@ async def test_step3_commit_rejects_unresolved_new_accounts(
 ):
     """Stashed XML references U88888888 but it was never saved → 400."""
     files = {"file": ("h.xml", _XML_NEW_ACCT, "application/xml")}
-    r = await client.post(
-        "/api/setup/step3/upload", headers=auth_headers, files=files
-    )
+    r = await client.post("/api/setup/step3/upload", headers=auth_headers, files=files)
     assert r.status_code == 200, r.text
     temp_id = r.json()["flex_import_temp_id"]
 
@@ -109,9 +96,7 @@ async def test_step3_commit_rejects_unresolved_new_accounts(
     assert r2.json()["detail"]["code"] == "UNRESOLVED_NEW_ACCOUNTS"
 
 
-async def test_step3_commit_expired_temp_id_returns_410(
-    client: AsyncClient, auth_headers: dict
-):
+async def test_step3_commit_expired_temp_id_returns_410(client: AsyncClient, auth_headers: dict):
     """temp_id absent from stash (expired or invented) → 410 TEMP_ID_EXPIRED."""
     r = await client.post(
         "/api/setup/step3/commit",

@@ -7,6 +7,7 @@ filtered at the persister boundary.
 
 The `set_token_key` autouse fixture is inherited from tests/api/conftest.py.
 """
+
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -47,9 +48,7 @@ async def test_detect_from_xml_returns_accounts_filtering_f(
     client: AsyncClient, auth_headers: dict
 ):
     files = {"file": ("y.xml", _XML_OK, "application/xml")}
-    r = await client.post(
-        "/api/setup/step2/detect_from_xml", headers=auth_headers, files=files
-    )
+    r = await client.post("/api/setup/step2/detect_from_xml", headers=auth_headers, files=files)
     assert r.status_code == 200, r.text
     body = r.json()
     ids = [a["ibkr_account_id"] for a in body["detected_accounts"]]
@@ -62,9 +61,7 @@ async def test_detect_from_xml_persists_accounts_and_flex_import(
 ):
     """Regression: detect_from_xml must persist so step2/save sees the accounts."""
     files = {"file": ("y.xml", _XML_OK, "application/xml")}
-    r = await client.post(
-        "/api/setup/step2/detect_from_xml", headers=auth_headers, files=files
-    )
+    r = await client.post("/api/setup/step2/detect_from_xml", headers=auth_headers, files=files)
     assert r.status_code == 200
 
     settings = get_settings()
@@ -81,19 +78,13 @@ async def test_detect_from_xml_persists_accounts_and_flex_import(
         await engine.dispose()
 
 
-async def test_detect_from_xml_is_idempotent_on_same_sha(
-    client: AsyncClient, auth_headers: dict
-):
+async def test_detect_from_xml_is_idempotent_on_same_sha(client: AsyncClient, auth_headers: dict):
     """Re-uploading the same XML must not create duplicate flex_imports."""
     files = {"file": ("y.xml", _XML_OK, "application/xml")}
-    r1 = await client.post(
-        "/api/setup/step2/detect_from_xml", headers=auth_headers, files=files
-    )
+    r1 = await client.post("/api/setup/step2/detect_from_xml", headers=auth_headers, files=files)
     assert r1.status_code == 200
     files2 = {"file": ("y.xml", _XML_OK, "application/xml")}
-    r2 = await client.post(
-        "/api/setup/step2/detect_from_xml", headers=auth_headers, files=files2
-    )
+    r2 = await client.post("/api/setup/step2/detect_from_xml", headers=auth_headers, files=files2)
     assert r2.status_code == 200
 
     settings = get_settings()
@@ -107,24 +98,16 @@ async def test_detect_from_xml_is_idempotent_on_same_sha(
         await engine.dispose()
 
 
-async def test_detect_from_xml_only_f_returns_empty(
-    client: AsyncClient, auth_headers: dict
-):
+async def test_detect_from_xml_only_f_returns_empty(client: AsyncClient, auth_headers: dict):
     files = {"file": ("z.xml", _XML_ONLY_F, "application/xml")}
-    r = await client.post(
-        "/api/setup/step2/detect_from_xml", headers=auth_headers, files=files
-    )
+    r = await client.post("/api/setup/step2/detect_from_xml", headers=auth_headers, files=files)
     assert r.status_code == 200, r.text
     assert r.json()["detected_accounts"] == []
 
 
-async def test_detect_from_xml_malformed_returns_422(
-    client: AsyncClient, auth_headers: dict
-):
+async def test_detect_from_xml_malformed_returns_422(client: AsyncClient, auth_headers: dict):
     files = {"file": ("bad.xml", b"<not xml", "application/xml")}
-    r = await client.post(
-        "/api/setup/step2/detect_from_xml", headers=auth_headers, files=files
-    )
+    r = await client.post("/api/setup/step2/detect_from_xml", headers=auth_headers, files=files)
     assert r.status_code == 422
     body = r.json()
     assert body["detail"]["code"] == "PARSE_ERROR"

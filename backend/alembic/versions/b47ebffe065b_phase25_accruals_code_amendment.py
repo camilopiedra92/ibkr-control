@@ -37,6 +37,7 @@ both accrual tables are still empty post-Task5 wipe, so the NOT NULL column
 add is trivial. server_default handles defensive backfill if applied on a
 dev DB that has been re-populated.
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -44,8 +45,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'b47ebffe065b'
-down_revision: Union[str, Sequence[str], None] = 'a5d5e36fb471'
+revision: str = "b47ebffe065b"
+down_revision: Union[str, Sequence[str], None] = "a5d5e36fb471"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -56,61 +57,68 @@ def upgrade() -> None:
     #    (`row.get("code") or ""`) so existing-row backfill matches new-row
     #    behavior.
     op.add_column(
-        'change_in_dividend_accruals',
-        sa.Column('code', sa.String(), nullable=False, server_default=sa.text("''")),
+        "change_in_dividend_accruals",
+        sa.Column("code", sa.String(), nullable=False, server_default=sa.text("''")),
     )
     op.add_column(
-        'open_dividend_accruals',
-        sa.Column('code', sa.String(), nullable=False, server_default=sa.text("''")),
+        "open_dividend_accruals",
+        sa.Column("code", sa.String(), nullable=False, server_default=sa.text("''")),
     )
 
     # 2. Drop old UNIQUE constraints (created by Rev2).
     op.drop_constraint(
-        'change_in_dividend_accruals_natural_key',
-        'change_in_dividend_accruals',
-        type_='unique',
+        "change_in_dividend_accruals_natural_key",
+        "change_in_dividend_accruals",
+        type_="unique",
     )
     op.drop_constraint(
-        'open_dividend_accruals_natural_key',
-        'open_dividend_accruals',
-        type_='unique',
+        "open_dividend_accruals_natural_key",
+        "open_dividend_accruals",
+        type_="unique",
     )
 
     # 3. Recreate with extended natural keys.
     op.create_unique_constraint(
-        'change_in_dividend_accruals_natural_key',
-        'change_in_dividend_accruals',
-        ['account_id', 'conid', 'ex_date', 'pay_date', 'accrual_date',
-         'report_date', 'action_id', 'code'],
+        "change_in_dividend_accruals_natural_key",
+        "change_in_dividend_accruals",
+        [
+            "account_id",
+            "conid",
+            "ex_date",
+            "pay_date",
+            "accrual_date",
+            "report_date",
+            "action_id",
+            "code",
+        ],
     )
     op.create_unique_constraint(
-        'open_dividend_accruals_natural_key',
-        'open_dividend_accruals',
-        ['account_id', 'conid', 'ex_date', 'pay_date', 'report_date',
-         'action_id', 'code'],
+        "open_dividend_accruals_natural_key",
+        "open_dividend_accruals",
+        ["account_id", "conid", "ex_date", "pay_date", "report_date", "action_id", "code"],
     )
 
 
 def downgrade() -> None:
     op.drop_constraint(
-        'open_dividend_accruals_natural_key',
-        'open_dividend_accruals',
-        type_='unique',
+        "open_dividend_accruals_natural_key",
+        "open_dividend_accruals",
+        type_="unique",
     )
     op.drop_constraint(
-        'change_in_dividend_accruals_natural_key',
-        'change_in_dividend_accruals',
-        type_='unique',
+        "change_in_dividend_accruals_natural_key",
+        "change_in_dividend_accruals",
+        type_="unique",
     )
     op.create_unique_constraint(
-        'open_dividend_accruals_natural_key',
-        'open_dividend_accruals',
-        ['account_id', 'conid', 'ex_date', 'pay_date', 'report_date'],
+        "open_dividend_accruals_natural_key",
+        "open_dividend_accruals",
+        ["account_id", "conid", "ex_date", "pay_date", "report_date"],
     )
     op.create_unique_constraint(
-        'change_in_dividend_accruals_natural_key',
-        'change_in_dividend_accruals',
-        ['account_id', 'conid', 'ex_date', 'pay_date', 'accrual_date'],
+        "change_in_dividend_accruals_natural_key",
+        "change_in_dividend_accruals",
+        ["account_id", "conid", "ex_date", "pay_date", "accrual_date"],
     )
-    op.drop_column('open_dividend_accruals', 'code')
-    op.drop_column('change_in_dividend_accruals', 'code')
+    op.drop_column("open_dividend_accruals", "code")
+    op.drop_column("change_in_dividend_accruals", "code")

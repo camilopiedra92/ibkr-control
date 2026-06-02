@@ -1,4 +1,5 @@
 """Scheduler factory — single source of truth for AsyncIOScheduler config."""
+
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 

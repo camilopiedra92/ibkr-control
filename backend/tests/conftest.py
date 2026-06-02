@@ -50,6 +50,7 @@ async def app_with_db(postgres_container, monkeypatch):
     monkeypatch.setenv("BACKEND_CORS_ORIGINS", "")
 
     from ibkr_control.config import get_settings
+
     get_settings.cache_clear()
 
     engine = create_async_engine(url)
@@ -92,6 +93,7 @@ async def db_session(postgres_container, monkeypatch):
     monkeypatch.setenv("JWT_SECRET", "test-secret-32-chars-minimum-please-ok")
 
     from ibkr_control.config import get_settings
+
     get_settings.cache_clear()
 
     import ibkr_control.db  # noqa: F401 — registra todos los modelos en Base.metadata
@@ -129,7 +131,8 @@ async def db_engine(postgres_container):
 @pytest.fixture
 async def sample_user(db_session: AsyncSession):
     from ibkr_control.auth.models import User
-    u = User(email='fixture@t.com', hashed_password='x', is_active=True, name='Fixture User')
+
+    u = User(email="fixture@t.com", hashed_password="x", is_active=True, name="Fixture User")
     db_session.add(u)
     await db_session.commit()
     await db_session.refresh(u)
@@ -140,7 +143,13 @@ async def sample_user(db_session: AsyncSession):
 async def second_sample_user(db_session: AsyncSession):
     """A second User for multi-user isolation tests."""
     from ibkr_control.auth.models import User
-    u = User(email='second_fixture@t.com', hashed_password='x', is_active=True, name='Second Fixture User')
+
+    u = User(
+        email="second_fixture@t.com",
+        hashed_password="x",
+        is_active=True,
+        name="Second Fixture User",
+    )
     db_session.add(u)
     await db_session.commit()
     await db_session.refresh(u)
@@ -167,7 +176,11 @@ async def second_auth_headers(client: AsyncClient) -> dict:
     """Registra un segundo usuario para tests de isolation R6."""
     await client.post(
         "/api/auth/register",
-        json={"email": "api_test_2@test.com", "password": "supersecret123", "name": "API Test User 2"},
+        json={
+            "email": "api_test_2@test.com",
+            "password": "supersecret123",
+            "name": "API Test User 2",
+        },
     )
     login = await client.post(
         "/api/auth/jwt/login",
@@ -180,7 +193,8 @@ async def second_auth_headers(client: AsyncClient) -> dict:
 @pytest.fixture
 async def sample_account(db_session: AsyncSession):
     from ibkr_control.db.models.accounts import Account
-    a = Account(ibkr_account_id='U99999999', alias='fixture-acc', currency='USD')
+
+    a = Account(ibkr_account_id="U99999999", alias="fixture-acc", currency="USD")
     db_session.add(a)
     await db_session.commit()
     await db_session.refresh(a)
@@ -191,16 +205,18 @@ async def sample_account(db_session: AsyncSession):
 async def sample_flex_import(db_session: AsyncSession, sample_user):
     from datetime import date
     from ibkr_control.db.models.flex_raw import FlexImport
+
     fi = FlexImport(
-        user_id=sample_user.id, anyo=2025,
-        xml_hash='helper-test-hash',
+        user_id=sample_user.id,
+        anyo=2025,
+        xml_hash="helper-test-hash",
         xml_size_bytes=100,
-        xml_bytes=b'<test/>',
-        source='manual_upload',
+        xml_bytes=b"<test/>",
+        source="manual_upload",
         period_covered_from=date(2025, 1, 1),
         period_covered_to=date(2025, 12, 31),
-        year_status='sealed',
-        status='ok',
+        year_status="sealed",
+        status="ok",
     )
     db_session.add(fi)
     await db_session.flush()

@@ -9,6 +9,7 @@ users, user_settings, apscheduler_jobs, ingest_log, trm_days, trm_imports.
 Después de correr este script, ejecutar `alembic upgrade head` para aplicar
 Revision 2 (promote transaction_id NOT NULL + UNIQUE + xml_bytes NOT NULL).
 """
+
 import asyncio
 import sys
 

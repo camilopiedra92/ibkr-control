@@ -1,4 +1,5 @@
 """E2E: full wizard flow from credentials to finish, asserting invariants."""
+
 from unittest.mock import AsyncMock
 
 from httpx import AsyncClient
@@ -33,9 +34,7 @@ _HIST_XML = b"""<?xml version="1.0"?>
 """
 
 
-async def test_full_wizard_flow_no_f_in_db(
-    client: AsyncClient, auth_headers: dict, monkeypatch
-):
+async def test_full_wizard_flow_no_f_in_db(client: AsyncClient, auth_headers: dict, monkeypatch):
     monkeypatch.setattr("ibkr_control.api.setup._trm_backfill_background", AsyncMock())
 
     # Step 1
@@ -48,7 +47,9 @@ async def test_full_wizard_flow_no_f_in_db(
 
     # Step 2 detect
     monkeypatch.setattr(flex_client_mod.FlexClient, "send_request", AsyncMock(return_value="r"))
-    monkeypatch.setattr(flex_client_mod.FlexClient, "get_statement", AsyncMock(return_value=_YTD_XML))
+    monkeypatch.setattr(
+        flex_client_mod.FlexClient, "get_statement", AsyncMock(return_value=_YTD_XML)
+    )
     r = await client.post("/api/setup/step2/detect", headers=auth_headers)
     assert r.status_code == 200, r.text
     detected = r.json()["detected_accounts"]

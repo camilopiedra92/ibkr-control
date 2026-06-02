@@ -5,6 +5,7 @@ Exposes two public symbols:
 - check_hash_status(session, user_id, hash_hex) -> 'absent' | 'ok' | 'poison'
   Scoped to (user_id, xml_hash) matching the UNIQUE constraint on flex_imports.
 """
+
 import hashlib
 from typing import Literal
 

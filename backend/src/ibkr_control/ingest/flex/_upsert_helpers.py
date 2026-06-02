@@ -4,6 +4,7 @@ Usa sqlalchemy.dialects.postgresql.insert + ON CONFLICT semantics. Batched
 con _BATCH_SIZE para respetar el techo de asyncpg de 32767 bind params per
 statement (mismo patrón que TRM bulk_upsert_days post-commit 989652d).
 """
+
 from collections.abc import Iterable, Sequence
 from typing import Any
 

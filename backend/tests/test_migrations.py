@@ -27,6 +27,7 @@ def test_migrations_apply_cleanly_and_match_metadata(fresh_postgres, monkeypatch
     monkeypatch.setenv("DATABASE_URL", async_url)
     monkeypatch.setenv("JWT_SECRET", "test-secret-32-chars-minimum-please-ok")
     from ibkr_control.config import get_settings
+
     get_settings.cache_clear()
 
     backend_root = Path(__file__).resolve().parents[1]

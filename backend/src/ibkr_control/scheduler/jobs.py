@@ -1,4 +1,5 @@
 """APScheduler setup: 3 jobs idempotentes (Flex YTD diario + TRM diario + cleanup)."""
+
 import logging
 from datetime import timedelta
 
@@ -45,13 +46,9 @@ async def _run_flex_for_all_users() -> None:
             except LockHeldError:
                 logger.warning("flex_daily skipped user_id=%s — lock held", uid)
             except FlexAuthError as e:
-                logger.error(
-                    "flex_daily auth error for user_id=%s — %s", uid, e.error_message
-                )
+                logger.error("flex_daily auth error for user_id=%s — %s", uid, e.error_message)
             except httpx.HTTPError as e:
-                logger.error(
-                    "flex_daily network error for user_id=%s — %s", uid, e
-                )
+                logger.error("flex_daily network error for user_id=%s — %s", uid, e)
             except Exception:
                 # Outer catch-all: must stay broad to log unexpected failures without
                 # crashing the per-user loop or the scheduler.

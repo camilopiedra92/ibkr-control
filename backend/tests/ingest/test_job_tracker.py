@@ -1,4 +1,5 @@
 """Tests del singleton in-memory job_tracker para SSE."""
+
 from ibkr_control.ingest.job_tracker import JobTracker
 
 

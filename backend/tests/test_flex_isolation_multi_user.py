@@ -1,4 +1,5 @@
 """Tests del aislamiento multi-user (R6)."""
+
 from pathlib import Path
 
 import pytest
@@ -11,14 +12,15 @@ from ibkr_control.ingest.flex.parser import parse
 from ibkr_control.ingest.lock import LockHeldError, advisory_lock
 
 
-FIXTURE_XML = (
-    Path(__file__).parent / "fixtures" / "xml" / "ACTIVITY_2025_sanitized.xml"
-)
+FIXTURE_XML = Path(__file__).parent / "fixtures" / "xml" / "ACTIVITY_2025_sanitized.xml"
 
 
 @pytest.mark.asyncio
 async def test_persister_isolation_two_users_parallel(
-    db_engine, db_session, sample_user, second_sample_user,
+    db_engine,
+    db_session,
+    sample_user,
+    second_sample_user,
 ):
     """R6: persisting the same XML for 2 users creates 2 distinct FlexImport rows.
 
@@ -36,8 +38,11 @@ async def test_persister_isolation_two_users_parallel(
         async with session_factory() as session:
             parsed = parse(xml_bytes)
             flex_import_id, _ = await flex_persister_mod.persist(
-                session, parsed=parsed, user_id=user_id,
-                xml_bytes=xml_bytes, source="web_service",
+                session,
+                parsed=parsed,
+                user_id=user_id,
+                xml_bytes=xml_bytes,
+                source="web_service",
             )
             await session.commit()
             return flex_import_id
@@ -59,7 +64,9 @@ async def test_persister_isolation_two_users_parallel(
 
 @pytest.mark.asyncio
 async def test_advisory_lock_is_per_user(
-    db_engine, sample_user, second_sample_user,
+    db_engine,
+    sample_user,
+    second_sample_user,
 ):
     """R6: User A holds (source='flex', user_id=A) lock -> User B acquires (source='flex', user_id=B) without conflict."""
     session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
@@ -75,7 +82,8 @@ async def test_advisory_lock_is_per_user(
 
 @pytest.mark.asyncio
 async def test_advisory_lock_same_user_two_sessions_conflict(
-    db_engine, sample_user,
+    db_engine,
+    sample_user,
 ):
     """R6 sanity: User A holds lock -> User A second session cannot acquire."""
     session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
@@ -88,7 +96,10 @@ async def test_advisory_lock_same_user_two_sessions_conflict(
 
 @pytest.mark.asyncio
 async def test_same_xml_hash_two_users_no_unique_collision(
-    db_engine, db_session, sample_user, second_sample_user,
+    db_engine,
+    db_session,
+    sample_user,
+    second_sample_user,
 ):
     """R6 migration: UNIQUE(user_id, xml_hash) allows the same hash for two distinct users."""
     xml_bytes = FIXTURE_XML.read_bytes()
@@ -98,8 +109,11 @@ async def test_same_xml_hash_two_users_no_unique_collision(
     async with session_factory() as session:
         parsed = parse(xml_bytes)
         await flex_persister_mod.persist(
-            session, parsed=parsed, user_id=sample_user.id,
-            xml_bytes=xml_bytes, source="web_service",
+            session,
+            parsed=parsed,
+            user_id=sample_user.id,
+            xml_bytes=xml_bytes,
+            source="web_service",
         )
         await session.commit()
 
@@ -107,8 +121,11 @@ async def test_same_xml_hash_two_users_no_unique_collision(
     async with session_factory() as session:
         parsed = parse(xml_bytes)
         await flex_persister_mod.persist(
-            session, parsed=parsed, user_id=second_sample_user.id,
-            xml_bytes=xml_bytes, source="web_service",
+            session,
+            parsed=parsed,
+            user_id=second_sample_user.id,
+            xml_bytes=xml_bytes,
+            source="web_service",
         )
         await session.commit()
 

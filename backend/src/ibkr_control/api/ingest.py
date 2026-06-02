@@ -1,4 +1,5 @@
 """Endpoints /api/ingest/* — manual trigger, SSE stream, logs viewer."""
+
 import asyncio
 import json
 from datetime import datetime, timedelta, timezone
@@ -21,6 +22,7 @@ except ImportError:
     EventSourceResponse = None  # type: ignore[assignment,misc]
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
+
 
 @router.post("/trigger", response_model=IngestJobStarted)
 async def trigger_manual_refresh(
@@ -63,7 +65,9 @@ async def trigger_manual_refresh(
             select(UserModel.last_ingest_trigger_at).where(UserModel.id == user.id)
         )
         wait_seconds = (
-            int((cooldown - (now - current)).total_seconds()) if current else int(cooldown.total_seconds())
+            int((cooldown - (now - current)).total_seconds())
+            if current
+            else int(cooldown.total_seconds())
         )
         raise HTTPException(
             status_code=429,

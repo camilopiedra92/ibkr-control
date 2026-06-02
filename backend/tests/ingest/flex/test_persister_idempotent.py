@@ -12,6 +12,7 @@ Scenario #1 (same xml_bytes -> hash dedup) ya cubierto en
 test_persister.py::test_persist_duplicate_hash_returns_existing_id.
 Aqui van los 6 restantes que test_persister.py NO cubre.
 """
+
 from datetime import date
 from decimal import Decimal
 
@@ -80,16 +81,22 @@ async def test_persist_modified_xml_same_trades_yields_zero_n_new(
     no duplicates. Este es el caso central del cron diario YTD."""
     parsed = _minimal_parsed(n_trades=2, account_id=sample_account.ibkr_account_id)
     _, c1 = await persist(
-        db_session, parsed=parsed, user_id=sample_user.id,
-        xml_bytes=b"<v1/>", source="web_service",
+        db_session,
+        parsed=parsed,
+        user_id=sample_user.id,
+        xml_bytes=b"<v1/>",
+        source="web_service",
     )
     await db_session.commit()
     assert c1["n_new_trades"] == 2
 
     # v2: diff hash, mismos trades
     _, c2 = await persist(
-        db_session, parsed=parsed, user_id=sample_user.id,
-        xml_bytes=b"<v2 changed/>", source="web_service",
+        db_session,
+        parsed=parsed,
+        user_id=sample_user.id,
+        xml_bytes=b"<v2 changed/>",
+        source="web_service",
     )
     assert c2["hash_dedup"] is False
     assert c2["n_new_trades"] == 0
@@ -106,15 +113,21 @@ async def test_persist_modified_xml_plus_one_new_trade(
     """v2 trae 1 trade adicional -> n_new=1, total en DB = 3."""
     parsed_v1 = _minimal_parsed(n_trades=2, account_id=sample_account.ibkr_account_id)
     await persist(
-        db_session, parsed=parsed_v1, user_id=sample_user.id,
-        xml_bytes=b"<v1/>", source="web_service",
+        db_session,
+        parsed=parsed_v1,
+        user_id=sample_user.id,
+        xml_bytes=b"<v1/>",
+        source="web_service",
     )
     await db_session.commit()
 
     parsed_v2 = _minimal_parsed(n_trades=3, account_id=sample_account.ibkr_account_id)
     _, c2 = await persist(
-        db_session, parsed=parsed_v2, user_id=sample_user.id,
-        xml_bytes=b"<v2/>", source="web_service",
+        db_session,
+        parsed=parsed_v2,
+        user_id=sample_user.id,
+        xml_bytes=b"<v2/>",
+        source="web_service",
     )
     assert c2["n_new_trades"] == 1
     total = await db_session.scalar(select(func.count()).select_from(Trade))
@@ -145,8 +158,11 @@ async def test_snapshot_lot_mark_price_updates_in_place(
         )
     ]
     await persist(
-        db_session, parsed=p1, user_id=sample_user.id,
-        xml_bytes=b"<lot v1/>", source="web_service",
+        db_session,
+        parsed=p1,
+        user_id=sample_user.id,
+        xml_bytes=b"<lot v1/>",
+        source="web_service",
     )
     await db_session.commit()
 
@@ -160,19 +176,18 @@ async def test_snapshot_lot_mark_price_updates_in_place(
         )
     ]
     await persist(
-        db_session, parsed=p2, user_id=sample_user.id,
-        xml_bytes=b"<lot v2/>", source="web_service",
+        db_session,
+        parsed=p2,
+        user_id=sample_user.id,
+        xml_bytes=b"<lot v2/>",
+        source="web_service",
     )
 
-    total_lots = await db_session.scalar(
-        select(func.count()).select_from(OpenPositionLot)
-    )
+    total_lots = await db_session.scalar(select(func.count()).select_from(OpenPositionLot))
     assert total_lots == 1  # NO duplicate
 
     current_mark = await db_session.scalar(
-        select(OpenPositionLot.mark_price_usd).where(
-            OpenPositionLot.symbol == "MSFT"
-        )
+        select(OpenPositionLot.mark_price_usd).where(OpenPositionLot.symbol == "MSFT")
     )
     assert current_mark == Decimal("420")
 
@@ -194,26 +209,26 @@ async def test_snapshot_lot_different_snapshot_date_creates_new_row(
         originating_transaction_id="OTID-LOT-A",
     )
     p1 = _minimal_parsed(n_trades=0, account_id=sample_account.ibkr_account_id)
-    p1.open_position_lots = [
-        ParsedOpenPositionLot(**base_args, snapshot_date=date(2026, 5, 25))
-    ]
+    p1.open_position_lots = [ParsedOpenPositionLot(**base_args, snapshot_date=date(2026, 5, 25))]
     p2 = _minimal_parsed(n_trades=0, account_id=sample_account.ibkr_account_id)
-    p2.open_position_lots = [
-        ParsedOpenPositionLot(**base_args, snapshot_date=date(2026, 5, 26))
-    ]
+    p2.open_position_lots = [ParsedOpenPositionLot(**base_args, snapshot_date=date(2026, 5, 26))]
     await persist(
-        db_session, parsed=p1, user_id=sample_user.id,
-        xml_bytes=b"<day1/>", source="web_service",
+        db_session,
+        parsed=p1,
+        user_id=sample_user.id,
+        xml_bytes=b"<day1/>",
+        source="web_service",
     )
     await db_session.commit()
     await persist(
-        db_session, parsed=p2, user_id=sample_user.id,
-        xml_bytes=b"<day2/>", source="web_service",
+        db_session,
+        parsed=p2,
+        user_id=sample_user.id,
+        xml_bytes=b"<day2/>",
+        source="web_service",
     )
 
-    total = await db_session.scalar(
-        select(func.count()).select_from(OpenPositionLot)
-    )
+    total = await db_session.scalar(select(func.count()).select_from(OpenPositionLot))
     assert total == 2
 
 
@@ -242,21 +257,25 @@ async def test_transfer_not_duplicated_on_reingest(
     p1 = _minimal_parsed(n_trades=0, account_id=sample_account.ibkr_account_id)
     p1.transfers = [transfer]
     await persist(
-        db_session, parsed=p1, user_id=sample_user.id,
-        xml_bytes=b"<xfer v1/>", source="web_service",
+        db_session,
+        parsed=p1,
+        user_id=sample_user.id,
+        xml_bytes=b"<xfer v1/>",
+        source="web_service",
     )
     await db_session.commit()
 
     p2 = _minimal_parsed(n_trades=0, account_id=sample_account.ibkr_account_id)
     p2.transfers = [transfer]
     await persist(
-        db_session, parsed=p2, user_id=sample_user.id,
-        xml_bytes=b"<xfer v2/>", source="web_service",
+        db_session,
+        parsed=p2,
+        user_id=sample_user.id,
+        xml_bytes=b"<xfer v2/>",
+        source="web_service",
     )
 
-    n_transfers = await db_session.scalar(
-        select(func.count()).select_from(Transfer)
-    )
+    n_transfers = await db_session.scalar(select(func.count()).select_from(Transfer))
     assert n_transfers == 1
 
 
@@ -266,11 +285,12 @@ async def test_xml_bytes_persisted(db_session: AsyncSession, sample_user):
     parsed = _minimal_parsed(n_trades=1)
     test_bytes = b"<replayable_xml>...payload...</replayable_xml>"
     fi_id, _ = await persist(
-        db_session, parsed=parsed, user_id=sample_user.id,
-        xml_bytes=test_bytes, source="manual_upload",
+        db_session,
+        parsed=parsed,
+        user_id=sample_user.id,
+        xml_bytes=test_bytes,
+        source="manual_upload",
     )
     await db_session.commit()
-    retrieved = await db_session.scalar(
-        select(FlexImport.xml_bytes).where(FlexImport.id == fi_id)
-    )
+    retrieved = await db_session.scalar(select(FlexImport.xml_bytes).where(FlexImport.id == fi_id))
     assert retrieved == test_bytes

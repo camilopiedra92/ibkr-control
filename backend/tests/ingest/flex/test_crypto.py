@@ -1,4 +1,5 @@
 """Tests de AES-GCM para Flex token encryption."""
+
 import base64
 import pytest
 

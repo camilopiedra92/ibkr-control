@@ -1,4 +1,5 @@
 """Tests de /api/imports/upload."""
+
 import base64
 from pathlib import Path
 
@@ -63,13 +64,12 @@ async def test_upload_requires_auth(client: AsyncClient):
 def test_upload_size_limit_default_is_50mb():
     """Default upload size cap is 50 MB (from settings)."""
     from ibkr_control.config import get_settings
+
     settings = get_settings()
     assert settings.max_xml_size_bytes == 50 * 1024 * 1024
 
 
-async def test_upload_rejects_oversize_via_content_length(
-    client: AsyncClient, auth_headers: dict
-):
+async def test_upload_rejects_oversize_via_content_length(client: AsyncClient, auth_headers: dict):
     """File declared at 51 MB via Content-Length is rejected with 413 before streaming."""
     # 51 MB > 50 MB default limit.
     # httpx sends Content-Length from the bytes size, so file.size will be set.

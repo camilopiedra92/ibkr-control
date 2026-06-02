@@ -1,4 +1,5 @@
 """Dataclasses que el parser produce a partir del XML (intermediarias, no DB)."""
+
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
@@ -26,7 +27,7 @@ class ParsedTrade:
     proceeds_usd: Decimal
     commission_usd: Decimal
     open_close: str | None  # 'O' | 'C' | None
-    buy_sell: str           # 'BUY' | 'SELL'
+    buy_sell: str  # 'BUY' | 'SELL'
     raw_attrs: dict
 
 
@@ -36,7 +37,9 @@ class ParsedClosedLot:
     symbol: str
     open_date: date
     close_date: date
-    close_datetime: datetime  # A3 amendment #3: per-execution timestamp, discriminator for natural key
+    close_datetime: (
+        datetime  # A3 amendment #3: per-execution timestamp, discriminator for natural key
+    )
     qty: Decimal
     cost_basis_usd: Decimal
     proceeds_usd: Decimal

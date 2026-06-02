@@ -1,4 +1,5 @@
 """TRM Socrata DIAN — un row por día (con expansión de vigencia)."""
+
 from datetime import date, datetime
 from decimal import Decimal
 from sqlalchemy import BigInteger, Date, DateTime, Index, Integer, Numeric, String, text

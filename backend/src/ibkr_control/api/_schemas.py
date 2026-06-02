@@ -1,4 +1,5 @@
 """Pydantic schemas para los endpoints Phase 2."""
+
 from datetime import datetime
 from decimal import Decimal
 from pydantic import BaseModel, Field
@@ -80,6 +81,7 @@ class IngestCounters(BaseModel):
     `hash_dedup=True` indica que el XML era byte-identico a uno previo y se
     aplico el fast-path; en ese caso los `n_new_*` son todos 0.
     """
+
     n_observed_trades: int = 0
     n_observed_lots_closed: int = 0
     n_observed_open_lots: int = 0

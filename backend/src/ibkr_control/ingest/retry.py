@@ -2,6 +2,7 @@
 
 HTTP-agnostic. Usable en cualquier async fn que pueda fallar transient.
 """
+
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
@@ -27,6 +28,7 @@ class RetryPolicy:
         retryable_predicate: extra check sobre la exception. Si devuelve False,
             no retry incluso si el class matchea retryable_exceptions.
     """
+
     initial_delay_s: float
     max_delay_s: float
     multiplier: float
@@ -36,9 +38,7 @@ class RetryPolicy:
 
     def __post_init__(self) -> None:
         if self.max_attempts < 1:
-            raise ValueError(
-                f"RetryPolicy.max_attempts must be >= 1, got {self.max_attempts}"
-            )
+            raise ValueError(f"RetryPolicy.max_attempts must be >= 1, got {self.max_attempts}")
 
 
 async def execute_with_retry(

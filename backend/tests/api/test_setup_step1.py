@@ -2,6 +2,7 @@
 
 Note: the `set_token_key` autouse fixture is inherited from tests/api/conftest.py.
 """
+
 from httpx import AsyncClient
 
 
@@ -15,9 +16,7 @@ async def test_step1_save_persists_creds_without_ibkr_call(
         called.append(True)
         raise RuntimeError("step1 must not call IBKR")
 
-    monkeypatch.setattr(
-        "ibkr_control.ingest.flex.client.FlexClient.send_request", boom
-    )
+    monkeypatch.setattr("ibkr_control.ingest.flex.client.FlexClient.send_request", boom)
 
     r = await client.post(
         "/api/setup/step1/save",
@@ -37,9 +36,7 @@ async def test_step1_save_is_idempotent_upsert(
     def boom(*a, **k):
         raise AssertionError("step1 must not call IBKR")
 
-    monkeypatch.setattr(
-        "ibkr_control.ingest.flex.client.FlexClient.send_request", boom
-    )
+    monkeypatch.setattr("ibkr_control.ingest.flex.client.FlexClient.send_request", boom)
 
     r1 = await client.post(
         "/api/setup/step1/save",

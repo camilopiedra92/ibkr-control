@@ -3,6 +3,7 @@
 Usa pg_try_advisory_lock — non-blocking, falla rapido si esta tomado.
 El lock se libera explicitamente en el finally del context manager.
 """
+
 import zlib
 from contextlib import asynccontextmanager
 
@@ -42,9 +43,7 @@ async def advisory_lock(session: AsyncSession, user_id: int | None, source: str)
         source: 'flex' | 'trm' | 'manual_upload' | ...
     """
     key = _lock_key(source, user_id)
-    acquired = await session.scalar(
-        text("SELECT pg_try_advisory_lock(:k)"), {"k": key}
-    )
+    acquired = await session.scalar(text("SELECT pg_try_advisory_lock(:k)"), {"k": key})
     if not acquired:
         raise LockHeldError(source=source, user_id=user_id)
     try:

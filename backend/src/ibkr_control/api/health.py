@@ -1,4 +1,5 @@
 """GET /api/health/ingest — per-user ingest health summary (R4 backend + R6 API)."""
+
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -39,14 +40,20 @@ async def _source_health(
 
     last_success = await session.scalar(
         select(IngestLog.started_at)
-        .where(IngestLog.user_id == user_id, IngestLog.job_kind == job_kind, IngestLog.status == "ok")
+        .where(
+            IngestLog.user_id == user_id, IngestLog.job_kind == job_kind, IngestLog.status == "ok"
+        )
         .order_by(IngestLog.started_at.desc())
         .limit(1)
     )
 
     last_failure_row = await session.execute(
         select(IngestLog.started_at, IngestLog.error_message)
-        .where(IngestLog.user_id == user_id, IngestLog.job_kind == job_kind, IngestLog.status == "failed")
+        .where(
+            IngestLog.user_id == user_id,
+            IngestLog.job_kind == job_kind,
+            IngestLog.status == "failed",
+        )
         .order_by(IngestLog.started_at.desc())
         .limit(1)
     )

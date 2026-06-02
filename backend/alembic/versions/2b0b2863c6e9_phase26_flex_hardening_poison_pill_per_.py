@@ -15,6 +15,7 @@ Phase 2.6 R2 + R6 schema changes:
 - Drop UNIQUE(xml_hash) global; create UNIQUE(user_id, xml_hash) — fixes
   latent multi-user collision bug.
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -22,8 +23,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '2b0b2863c6e9'
-down_revision: Union[str, Sequence[str], None] = 'a5199ec783c6'
+revision: str = "2b0b2863c6e9"
+down_revision: Union[str, Sequence[str], None] = "a5199ec783c6"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -62,12 +63,8 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # Reverse order of upgrade
-    op.drop_constraint(
-        "flex_imports_user_xml_hash_key", "flex_imports", type_="unique"
-    )
-    op.create_unique_constraint(
-        "flex_imports_xml_hash_key", "flex_imports", ["xml_hash"]
-    )
+    op.drop_constraint("flex_imports_user_xml_hash_key", "flex_imports", type_="unique")
+    op.create_unique_constraint("flex_imports_xml_hash_key", "flex_imports", ["xml_hash"])
 
     op.drop_column("flex_imports", "poison_reason")
 

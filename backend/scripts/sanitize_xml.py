@@ -5,6 +5,7 @@ Uso:
 
 Idempotente: si vuelve a correr sobre el output, no cambia nada.
 """
+
 import re
 import sys
 from pathlib import Path

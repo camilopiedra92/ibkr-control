@@ -1,4 +1,5 @@
 """Tests del router /api/credentials/flex."""
+
 import base64
 
 import httpx
@@ -188,9 +189,7 @@ async def test_put_credentials_query_id_only_updates_without_ibkr_ping(
     assert get_resp.json()["query_id"] == "NEW-QID"
 
 
-async def test_put_credentials_ibkr_unreachable_returns_502(
-    client: AsyncClient, monkeypatch
-):
+async def test_put_credentials_ibkr_unreachable_returns_502(client: AsyncClient, monkeypatch):
     """Network error contacting IBKR during PUT returns 502."""
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", _make_test_key())
     token = await _register_and_login_unique(client, "ibkrtimeout@test.com")
@@ -246,9 +245,7 @@ async def test_put_credentials_first_time_requires_both_only_token(
     assert resp.status_code == 400
 
 
-async def test_put_credentials_updates_existing_credentials_token(
-    client: AsyncClient, monkeypatch
-):
+async def test_put_credentials_updates_existing_credentials_token(client: AsyncClient, monkeypatch):
     """PUT with new token on existing credentials validates + rotates the token."""
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", _make_test_key())
     token = await _register_and_login_unique(client, "rotatetoken@test.com")
@@ -300,6 +297,7 @@ async def test_put_credentials_requires_auth(client: AsyncClient):
 # on the async handler bodies (sys.settrace doesn't follow ASGI coroutines).
 # ---------------------------------------------------------------------------
 
+
 async def test_get_flex_credentials_handler_404_branch(db_session, sample_user, monkeypatch):
     """Direct call to get_flex_credentials raises 404 when no credentials exist."""
     import pytest
@@ -346,7 +344,11 @@ async def test_update_flex_credentials_handler_first_time_no_token_raises_400(
     with pytest.raises(Exception) as exc_info:
         await update_flex_credentials(payload=payload, user=sample_user, session=db_session)
 
-    assert "400" in str(exc_info.value) or "Primera vez" in str(exc_info.value) or "token" in str(exc_info.value).lower()
+    assert (
+        "400" in str(exc_info.value)
+        or "Primera vez" in str(exc_info.value)
+        or "token" in str(exc_info.value).lower()
+    )
 
 
 async def test_update_flex_credentials_handler_token_ping_succeeds(
@@ -382,6 +384,7 @@ async def test_update_flex_credentials_handler_ibkr_auth_error_raises_401(
 ):
     """Direct call: IBKR returns FlexAuthError → raises 401."""
     import pytest
+
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", _make_test_key())
 
     from ibkr_control.api.credentials import update_flex_credentials
@@ -402,7 +405,11 @@ async def test_update_flex_credentials_handler_ibkr_auth_error_raises_401(
     with pytest.raises(Exception) as exc_info:
         await update_flex_credentials(payload=payload, user=sample_user, session=db_session)
 
-    assert "401" in str(exc_info.value) or "invalido" in str(exc_info.value).lower() or "Invalid" in str(exc_info.value)
+    assert (
+        "401" in str(exc_info.value)
+        or "invalido" in str(exc_info.value).lower()
+        or "Invalid" in str(exc_info.value)
+    )
 
 
 async def test_update_flex_credentials_handler_ibkr_network_error_raises_502(
@@ -410,6 +417,7 @@ async def test_update_flex_credentials_handler_ibkr_network_error_raises_502(
 ):
     """Direct call: network error → raises 502."""
     import pytest
+
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", _make_test_key())
 
     from ibkr_control.api.credentials import update_flex_credentials
@@ -469,6 +477,7 @@ async def test_update_flex_credentials_handler_token_with_no_query_id_available_
 ):
     """Direct call: token provided but no query_id anywhere (no payload, no existing creds) → 400."""
     import pytest
+
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", _make_test_key())
 
     from ibkr_control.api.credentials import update_flex_credentials

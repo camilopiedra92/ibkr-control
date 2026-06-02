@@ -7,6 +7,7 @@ Deletes the flex_imports row with status='poison' for the given (user_id,
 xml_hash). The next ingest of the same XML will reprocess from scratch
 (presumably after the underlying parser bug was fixed).
 """
+
 import argparse
 import asyncio
 import sys
@@ -18,9 +19,7 @@ from ibkr_control.db.models.flex_raw import FlexImport
 from ibkr_control.db.session import get_engine
 
 
-async def reset_poison(
-    session: AsyncSession, *, user_id: int, xml_hash: str
-) -> int:
+async def reset_poison(session: AsyncSession, *, user_id: int, xml_hash: str) -> int:
     """Delete poison row. Returns count of rows deleted (0 or 1).
 
     Safety: only deletes rows with status='poison'. Never touches 'ok' rows.
@@ -41,9 +40,7 @@ async def _main(user_id: int, xml_hash: str) -> int:
     session_local = async_sessionmaker(engine, expire_on_commit=False)
     async with session_local() as session:
         n = await reset_poison(session, user_id=user_id, xml_hash=xml_hash)
-    print(
-        f"Deleted {n} poison row(s) for user_id={user_id} xml_hash={xml_hash[:12]}..."
-    )
+    print(f"Deleted {n} poison row(s) for user_id={user_id} xml_hash={xml_hash[:12]}...")
     return 0 if n > 0 else 1
 
 

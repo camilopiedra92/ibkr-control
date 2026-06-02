@@ -7,6 +7,7 @@ El upsert es idem potente por diseno: si el mismo dia se ingiere dos veces
 (e.g., backfill sobre datos existentes), value_cop y vigencia_* se actualizan
 y fetched_at se pone a NOW() para que los updates sean auditables.
 """
+
 from datetime import date as date_type
 
 from sqlalchemy import text

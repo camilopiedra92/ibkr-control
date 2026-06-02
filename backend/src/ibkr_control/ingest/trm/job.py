@@ -10,6 +10,7 @@ Patron de transaccion:
 
 TRM es global (no per-user): advisory_lock con user_id=None.
 """
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -80,9 +81,7 @@ async def run(
                         n_days_expanded=n_days,
                     )
 
-                    log_row = await session.scalar(
-                        select(IngestLog).where(IngestLog.id == log_id)
-                    )
+                    log_row = await session.scalar(select(IngestLog).where(IngestLog.id == log_id))
                     log_row.items_processed = n_days
                     await sp.commit()
                 except Exception:

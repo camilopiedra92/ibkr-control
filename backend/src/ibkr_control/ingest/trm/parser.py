@@ -1,4 +1,5 @@
 """Expansion de rows Socrata (vigencia_desde..vigencia_hasta) a 1 row por dia."""
+
 import logging
 from datetime import date, datetime, timedelta
 from decimal import Decimal

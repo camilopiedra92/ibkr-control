@@ -1,4 +1,5 @@
 """Tests del orchestrator flex_job (lock + log + parser + persister)."""
+
 import logging
 from datetime import date as _date
 from pathlib import Path
@@ -65,7 +66,9 @@ async def test_ingest_xml_duplicate_returns_existing(db_session: AsyncSession, s
 
 
 @pytest.mark.asyncio
-async def test_ingest_xml_logs_failure_on_parse_error(db_session: AsyncSession, db_engine, sample_user):
+async def test_ingest_xml_logs_failure_on_parse_error(
+    db_session: AsyncSession, db_engine, sample_user
+):
     """Si el parser lanza XMLSyntaxError, ingest_log queda en 'failed' con error_message."""
     bad_xml = (FIXTURE_DIR / "malformed_xml.xml").read_bytes()
     with pytest.raises(XMLSyntaxError):
@@ -83,6 +86,7 @@ async def test_ingest_xml_logs_failure_on_parse_error(db_session: AsyncSession, 
     # Abrimos una sesion nueva para verificar (la sesion principal puede estar
     # en estado de error post-excepcion).
     from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession as AS2
+
     maker2 = async_sessionmaker(db_engine, expire_on_commit=False, class_=AS2)
     async with maker2() as s2:
         row = await s2.scalar(
@@ -100,7 +104,9 @@ async def test_ingest_xml_logs_failure_on_parse_error(db_session: AsyncSession, 
 
 
 @pytest.mark.asyncio
-async def test_ingest_xml_rolls_back_persister_on_failure(db_session: AsyncSession, db_engine, sample_user):
+async def test_ingest_xml_rolls_back_persister_on_failure(
+    db_session: AsyncSession, db_engine, sample_user
+):
     """Si persist() falla, el SAVEPOINT del job revierte writes parciales del
     persister pero el ingest_log 'failed' persiste.
 
@@ -114,7 +120,9 @@ async def test_ingest_xml_rolls_back_persister_on_failure(db_session: AsyncSessi
     from decimal import Decimal
     from unittest.mock import patch
     from ibkr_control.ingest.flex._models import (
-        ParsedAccount, ParsedCashTransaction, ParsedXML,
+        ParsedAccount,
+        ParsedCashTransaction,
+        ParsedXML,
     )
 
     account_id = "U99999042"
@@ -149,14 +157,18 @@ async def test_ingest_xml_rolls_back_persister_on_failure(db_session: AsyncSessi
         # Devuelve un mapping con un account_id inválido (FK violation al INSERT cash_tx)
         return {account_id: 999_999_999}
 
-    with patch(
-        "ibkr_control.ingest.flex.job.flex_parser_mod.parse",
-        return_value=_parsed_with_bad_account(),
-    ), patch(
-        "ibkr_control.ingest.flex.persister._ensure_accounts",
-        side_effect=fake_ensure_accounts,
+    with (
+        patch(
+            "ibkr_control.ingest.flex.job.flex_parser_mod.parse",
+            return_value=_parsed_with_bad_account(),
+        ),
+        patch(
+            "ibkr_control.ingest.flex.persister._ensure_accounts",
+            side_effect=fake_ensure_accounts,
+        ),
     ):
         from sqlalchemy.exc import IntegrityError
+
         with pytest.raises(IntegrityError):
             await flex_job.ingest_xml(
                 db_session,
@@ -168,6 +180,7 @@ async def test_ingest_xml_rolls_back_persister_on_failure(db_session: AsyncSessi
 
     # Verify via a fresh session (db_session may be in error state after exception)
     from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession as AS2
+
     maker2 = async_sessionmaker(db_engine, expire_on_commit=False, class_=AS2)
     async with maker2() as s2:
         # Post-Task-7: a poison FlexImport row must exist (R2 contract).
@@ -176,17 +189,14 @@ async def test_ingest_xml_rolls_back_persister_on_failure(db_session: AsyncSessi
         # the savepoint and committed by ingest_log_entry's finally clause.
         from ibkr_control.ingest.hash_dedup import xml_hash
         from ibkr_control.db.models.flex_raw import CashTransaction
+
         bad_hash = xml_hash(b"<xml>bad-fk</xml>")
-        fi = await s2.scalar(
-            select(FlexImport).where(FlexImport.xml_hash == bad_hash)
-        )
+        fi = await s2.scalar(select(FlexImport).where(FlexImport.xml_hash == bad_hash))
         assert fi is not None, "Poison FlexImport row must exist after persist failure"
         assert fi.status == "poison", f"FlexImport should be status='poison', got {fi.status!r}"
 
         # SAVEPOINT rollback was effective: no partial cash_transactions from the bad insert
-        n_cash = await s2.scalar(
-            select(func.count(CashTransaction.id))
-        )
+        n_cash = await s2.scalar(select(func.count(CashTransaction.id)))
         assert n_cash == 0, "CashTransaction writes should have been rolled back by SAVEPOINT"
 
         # The ingest_log 'failed' row must persist
@@ -205,6 +215,7 @@ async def test_ingest_xml_rolls_back_persister_on_failure(db_session: AsyncSessi
 # ---------------------------------------------------------------------------
 # Tests for run() — the cron entry point
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_run_happy_path_with_mocked_flex_client(
@@ -251,9 +262,8 @@ async def test_run_happy_path_with_mocked_flex_client(
     SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
 
     from ibkr_control.ingest.flex import job as flex_job_mod
-    flex_import_id = await flex_job_mod.run(
-        SessionLocal, user_id=sample_user.id, trigger="cron"
-    )
+
+    flex_import_id = await flex_job_mod.run(SessionLocal, user_id=sample_user.id, trigger="cron")
     assert flex_import_id is not None
 
     # Verify FlexImport row was created correctly
@@ -304,11 +314,13 @@ async def test_run_idempotent_across_different_xmls_with_overlapping_trades(
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", test_key)
 
     encrypted = crypto_mod.encrypt_token("test-token-d13")
-    db_session.add(FlexCredentials(
-        user_id=sample_user.id,
-        token_encrypted=encrypted,
-        ytd_query_id="QUERY-D13",
-    ))
+    db_session.add(
+        FlexCredentials(
+            user_id=sample_user.id,
+            token_encrypted=encrypted,
+            ytd_query_id="QUERY-D13",
+        )
+    )
     await db_session.commit()
 
     # Use the real 2025 sanitized fixture (has trades + accruals + transfers
@@ -369,18 +381,14 @@ async def test_run_idempotent_across_different_xmls_with_overlapping_trades(
 
         # 2 flex_imports rows (one per distinct hash)
         n_fi = await s2.scalar(
-            select(func.count(FlexImport.id)).where(
-                FlexImport.user_id == sample_user.id
-            )
+            select(func.count(FlexImport.id)).where(FlexImport.user_id == sample_user.id)
         )
         assert n_fi == 2
 
         # Trades: ALL trades from the fixture, NOT duplicated across the 2 runs.
         # Count by distinct transaction_id should equal total count.
         n_trades = await s2.scalar(select(func.count(Trade.id)))
-        n_distinct_tx = await s2.scalar(
-            select(func.count(func.distinct(Trade.transaction_id)))
-        )
+        n_distinct_tx = await s2.scalar(select(func.count(func.distinct(Trade.transaction_id))))
         assert n_trades == n_distinct_tx, (
             f"trades duplicated across runs: {n_trades} rows but {n_distinct_tx} "
             f"distinct transaction_ids — exactly the D13 bug if these differ"
@@ -412,11 +420,13 @@ async def test_run_returns_none_if_hash_already_known(
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", test_key)
 
     encrypted = crypto_mod.encrypt_token("test-token-2")
-    db_session.add(FlexCredentials(
-        user_id=sample_user.id,
-        token_encrypted=encrypted,
-        ytd_query_id="QUERY-456",
-    ))
+    db_session.add(
+        FlexCredentials(
+            user_id=sample_user.id,
+            token_encrypted=encrypted,
+            ytd_query_id="QUERY-456",
+        )
+    )
     await db_session.commit()
 
     xml_bytes = (FIXTURE_DIR / "empty_query_response.xml").read_bytes()
@@ -443,9 +453,7 @@ async def test_run_returns_none_if_hash_already_known(
     async with SessionLocal() as s2:
         # Only 1 FlexImport row should exist (the first one, not duplicated)
         n_fi = await s2.scalar(
-            select(func.count(FlexImport.id)).where(
-                FlexImport.user_id == sample_user.id
-            )
+            select(func.count(FlexImport.id)).where(FlexImport.user_id == sample_user.id)
         )
         assert n_fi == 1
 
@@ -467,7 +475,11 @@ async def test_run_returns_none_if_hash_already_known(
 
 @pytest.mark.asyncio
 async def test_run_logs_info_on_ok_hash_skip(
-    monkeypatch, caplog, db_session, db_engine, sample_user,
+    monkeypatch,
+    caplog,
+    db_session,
+    db_engine,
+    sample_user,
 ):
     """run() encuentra hash con status='ok' -> skip + info log."""
     from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -483,34 +495,42 @@ async def test_run_logs_info_on_ok_hash_skip(
 
     # Seed credentials + existing flex_imports row with status='ok'
     import base64
+
     test_key = base64.b64encode(b"K" * 32).decode("ascii")
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", test_key)
 
-    db_session.add(FlexCredentials(
-        user_id=sample_user.id,
-        token_encrypted=flex_crypto_mod.encrypt_token("dummy-token"),
-        ytd_query_id="123456",
-    ))
-    db_session.add(FI(
-        user_id=sample_user.id, xml_hash=h, xml_bytes=xml,
-        xml_size_bytes=len(xml), anyo=2025, source="web_service",
-        year_status="sealed", status="ok",
-        period_covered_from=_date(2025, 1, 1),
-        period_covered_to=_date(2025, 12, 31),
-    ))
+    db_session.add(
+        FlexCredentials(
+            user_id=sample_user.id,
+            token_encrypted=flex_crypto_mod.encrypt_token("dummy-token"),
+            ytd_query_id="123456",
+        )
+    )
+    db_session.add(
+        FI(
+            user_id=sample_user.id,
+            xml_hash=h,
+            xml_bytes=xml,
+            xml_size_bytes=len(xml),
+            anyo=2025,
+            source="web_service",
+            year_status="sealed",
+            status="ok",
+            period_covered_from=_date(2025, 1, 1),
+            period_covered_to=_date(2025, 12, 31),
+        )
+    )
     await db_session.commit()
 
     session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
 
     from ibkr_control.ingest.flex import client as client_mod
-    monkeypatch.setattr(
-        client_mod.FlexClient, "send_request", AsyncMock(return_value="ref-ok")
-    )
-    monkeypatch.setattr(
-        client_mod.FlexClient, "poll_statement", AsyncMock(return_value=xml)
-    )
+
+    monkeypatch.setattr(client_mod.FlexClient, "send_request", AsyncMock(return_value="ref-ok"))
+    monkeypatch.setattr(client_mod.FlexClient, "poll_statement", AsyncMock(return_value=xml))
 
     from ibkr_control.ingest.flex import job as flex_job_mod
+
     result = await flex_job_mod.run(session_factory, user_id=sample_user.id, trigger="cron")
 
     assert result is None
@@ -519,7 +539,11 @@ async def test_run_logs_info_on_ok_hash_skip(
 
 @pytest.mark.asyncio
 async def test_run_logs_warning_on_poison_hash_skip(
-    monkeypatch, caplog, db_session, db_engine, sample_user,
+    monkeypatch,
+    caplog,
+    db_session,
+    db_engine,
+    sample_user,
 ):
     """run() encuentra hash con status='poison' -> skip + warning log con recovery hint."""
     from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -535,34 +559,41 @@ async def test_run_logs_warning_on_poison_hash_skip(
     h = xml_hash(xml)
 
     import base64
+
     test_key = base64.b64encode(b"P" * 32).decode("ascii")
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", test_key)
 
-    db_session.add(FlexCredentials(
-        user_id=sample_user.id,
-        token_encrypted=flex_crypto_mod.encrypt_token("dummy-token"),
-        ytd_query_id="123456",
-    ))
-    db_session.add(FI(
-        user_id=sample_user.id, xml_hash=h, xml_bytes=xml,
-        xml_size_bytes=len(xml), anyo=2025, source="web_service",
-        year_status="sealed", status="poison",
-        poison_reason="forced parser crash",
-        period_covered_from=_date(2025, 1, 1),
-        period_covered_to=_date(2025, 12, 31),
-    ))
+    db_session.add(
+        FlexCredentials(
+            user_id=sample_user.id,
+            token_encrypted=flex_crypto_mod.encrypt_token("dummy-token"),
+            ytd_query_id="123456",
+        )
+    )
+    db_session.add(
+        FI(
+            user_id=sample_user.id,
+            xml_hash=h,
+            xml_bytes=xml,
+            xml_size_bytes=len(xml),
+            anyo=2025,
+            source="web_service",
+            year_status="sealed",
+            status="poison",
+            poison_reason="forced parser crash",
+            period_covered_from=_date(2025, 1, 1),
+            period_covered_to=_date(2025, 12, 31),
+        )
+    )
     await db_session.commit()
 
     session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
 
-    monkeypatch.setattr(
-        client_mod.FlexClient, "send_request", AsyncMock(return_value="ref-poison")
-    )
-    monkeypatch.setattr(
-        client_mod.FlexClient, "poll_statement", AsyncMock(return_value=xml)
-    )
+    monkeypatch.setattr(client_mod.FlexClient, "send_request", AsyncMock(return_value="ref-poison"))
+    monkeypatch.setattr(client_mod.FlexClient, "poll_statement", AsyncMock(return_value=xml))
 
     from ibkr_control.ingest.flex import job as flex_job_mod
+
     result = await flex_job_mod.run(session_factory, user_id=sample_user.id, trigger="cron")
 
     assert result is None

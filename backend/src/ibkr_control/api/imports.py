@@ -1,4 +1,5 @@
 """POST /api/imports/upload — multipart XML upload reusado por wizard step 3 + Settings."""
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from lxml.etree import XMLSyntaxError
 from sqlalchemy import select
@@ -61,9 +62,7 @@ async def upload_xml(
 
     # Pre-check: hash duplicado -> 409 sin parsear
     h = xml_hash(xml_bytes)
-    existing = await session.scalar(
-        select(FlexImport).where(FlexImport.xml_hash == h)
-    )
+    existing = await session.scalar(select(FlexImport).where(FlexImport.xml_hash == h))
     if existing is not None:
         raise HTTPException(
             status_code=409,

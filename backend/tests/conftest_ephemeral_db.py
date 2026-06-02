@@ -7,6 +7,7 @@ factory. Used by test_flex_ingest_replay.py + similar tests.
 Pattern is the same as test_migrations.py::fresh_postgres but wrapped as
 reusable fixtures with the alembic upgrade pre-applied.
 """
+
 import asyncio
 from pathlib import Path
 
@@ -44,6 +45,7 @@ async def ephemeral_session_factory(ephemeral_postgres, ephemeral_db_url, monkey
     monkeypatch.setenv("JWT_SECRET", "test-secret-32-chars-minimum-please-ok")
 
     from ibkr_control.config import get_settings
+
     get_settings.cache_clear()
 
     backend_root = Path(__file__).resolve().parent.parent

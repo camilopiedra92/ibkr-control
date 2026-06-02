@@ -7,6 +7,7 @@ Para regrabar con cassettes reales cuando IBKR cambie el API:
     RECORD_MODE=new_episodes uv run pytest tests/ingest/flex/test_client.py -v
     uv run python -m scripts.sanitize_cassette tests/fixtures/cassettes/flex/*.yaml
 """
+
 import pytest
 import respx
 from httpx import Response
@@ -105,10 +106,7 @@ async def test_poll_statement_succeeds_after_few_polls():
         b"</FlexStatementResponse>"
     )
     ready_body = (
-        b"<?xml version='1.0'?>"
-        b"<FlexQueryResponse>"
-        b"<FlexStatements count='1'/>"
-        b"</FlexQueryResponse>"
+        b"<?xml version='1.0'?><FlexQueryResponse><FlexStatements count='1'/></FlexQueryResponse>"
     )
 
     with patch("asyncio.sleep"):
@@ -136,7 +134,7 @@ async def test_poll_statement_uses_retry_policy_on_pending(monkeypatch):
         call_count += 1
         if call_count < 3:
             raise FlexStatementPendingError(ref)
-        return b'<FlexQueryResponse>ok</FlexQueryResponse>'
+        return b"<FlexQueryResponse>ok</FlexQueryResponse>"
 
     monkeypatch.setattr(FlexClient, "_poll_once", fake_poll_once)
 
@@ -145,7 +143,7 @@ async def test_poll_statement_uses_retry_policy_on_pending(monkeypatch):
     with patch("asyncio.sleep", new=AsyncMock()):
         result = await client.poll_statement("ref123")
 
-    assert result == b'<FlexQueryResponse>ok</FlexQueryResponse>'
+    assert result == b"<FlexQueryResponse>ok</FlexQueryResponse>"
     assert call_count == 3
 
 
@@ -163,7 +161,9 @@ async def test_poll_statement_raises_timeout_when_max_attempts_exceeded(monkeypa
     monkeypatch.setattr(FlexClient, "_poll_once", always_pending)
     # Use a tight policy for the test so it doesn't loop 30x
     tight_policy = POLL_STATEMENT_POLICY.__class__(
-        initial_delay_s=0.001, max_delay_s=0.001, multiplier=2,
+        initial_delay_s=0.001,
+        max_delay_s=0.001,
+        multiplier=2,
         max_attempts=3,
         retryable_exceptions=(FlexStatementPendingError,),
     )
@@ -305,5 +305,7 @@ async def test_send_request_logs_retry(monkeypatch, caplog):
         await client.send_request("query-1")
 
     # 2 retries → 2 warning lines
-    retry_logs = [r for r in caplog.records if "retry" in r.message and r.levelno == logging.WARNING]
+    retry_logs = [
+        r for r in caplog.records if "retry" in r.message and r.levelno == logging.WARNING
+    ]
     assert len(retry_logs) == 2

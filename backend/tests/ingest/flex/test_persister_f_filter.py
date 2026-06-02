@@ -12,6 +12,7 @@ shape of the persister API and parser dataclasses in this codebase:
   living in `ibkr_control.ingest.flex._models`.
 - `Trade` and `CashTransaction` ORM models live in `ibkr_control.db.models.flex_raw`.
 """
+
 from datetime import date
 from decimal import Decimal
 
@@ -62,9 +63,7 @@ def _make_cash_tx(account_id: str, amount: str, description: str) -> ParsedCashT
 
 
 @pytest.mark.asyncio
-async def test_persister_filters_f_accounts_from_all_tables(
-    db_session: AsyncSession, sample_user
-):
+async def test_persister_filters_f_accounts_from_all_tables(db_session: AsyncSession, sample_user):
     """Single ParsedXML with both U99999999 and U99999999F across all entities.
 
     Only the non-shadow account row + its trade + its cash_tx must persist.
@@ -118,9 +117,7 @@ async def test_persister_filters_f_accounts_from_all_tables(
 
 
 @pytest.mark.asyncio
-async def test_persister_handles_xml_with_only_f_accounts(
-    db_session: AsyncSession, sample_user
-):
+async def test_persister_handles_xml_with_only_f_accounts(db_session: AsyncSession, sample_user):
     """Degenerate case: XML where every accountId ends in F. Insert nothing, no error.
 
     The persister must not crash on a KeyError trying to look up an F-account in

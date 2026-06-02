@@ -13,6 +13,7 @@ Endpoints:
     POST /api/setup/finish                  mark setup_completed_at
     GET  /api/setup/state                   derived + stored state
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -86,11 +87,7 @@ def _is_shadow(ibkr_account_id: str) -> bool:
 
 
 def _detected_from_parsed(parsed) -> list[DetectedAccount]:
-    return [
-        _to_detected_account(a)
-        for a in parsed.accounts
-        if not _is_shadow(a.ibkr_account_id)
-    ]
+    return [_to_detected_account(a) for a in parsed.accounts if not _is_shadow(a.ibkr_account_id)]
 
 
 def _counters_to_ingest(counters: dict) -> IngestCounters:
@@ -119,9 +116,7 @@ async def _trm_backfill_background(user_id: int, job_id: int) -> None:
     tracker = get_tracker()
     try:
         tracker.emit(job_id, {"step": "trm_backfill", "status": "running"})
-        result = await trm_job_mod.run(
-            session_local, trigger="wizard", full_backfill=True
-        )
+        result = await trm_job_mod.run(session_local, trigger="wizard", full_backfill=True)
         tracker.emit(
             job_id,
             {"step": "trm_backfill", "status": "ok", "n_days": result["n_days"]},
@@ -151,16 +146,12 @@ async def get_state(
 ) -> WizardStateResponse:
     has_creds = (
         await session.scalar(
-            select(func.count(FlexCredentials.user_id)).where(
-                FlexCredentials.user_id == user.id
-            )
+            select(func.count(FlexCredentials.user_id)).where(FlexCredentials.user_id == user.id)
         )
     ) > 0
     has_parts = (
         await session.scalar(
-            select(func.count(Participation.user_id)).where(
-                Participation.user_id == user.id
-            )
+            select(func.count(Participation.user_id)).where(Participation.user_id == user.id)
         )
     ) > 0
     n_xmls = (
@@ -197,9 +188,7 @@ async def step1_save(
     session: AsyncSession = Depends(get_async_session),
 ) -> dict:
     """Save creds (encrypt token). Does NOT call IBKR per spec D5."""
-    creds = await session.scalar(
-        select(FlexCredentials).where(FlexCredentials.user_id == user.id)
-    )
+    creds = await session.scalar(select(FlexCredentials).where(FlexCredentials.user_id == user.id))
     encrypted = flex_crypto_mod.encrypt_token(payload.token)
     if creds is None:
         creds = FlexCredentials(
@@ -231,9 +220,7 @@ async def step2_detect(
 
     Retry policy per spec D10: server-side retry on 1001 with backoff [5, 15, 30]s.
     """
-    creds = await session.scalar(
-        select(FlexCredentials).where(FlexCredentials.user_id == user.id)
-    )
+    creds = await session.scalar(select(FlexCredentials).where(FlexCredentials.user_id == user.id))
     if creds is None:
         raise HTTPException(status_code=400, detail="MISSING_CREDENTIALS")
 
@@ -443,9 +430,7 @@ async def step3_upload(
 
     sha = hashlib.sha256(content).hexdigest()
 
-    existing_import = await session.scalar(
-        select(FlexImport).where(FlexImport.xml_hash == sha)
-    )
+    existing_import = await session.scalar(select(FlexImport).where(FlexImport.xml_hash == sha))
     if existing_import is not None:
         raise HTTPException(
             status_code=409,
@@ -467,14 +452,10 @@ async def step3_upload(
             detail={"code": "PARSE_ERROR", "message": str(e)[:500]},
         ) from e
 
-    existing_accounts = {
-        a.ibkr_account_id for a in (await session.scalars(select(Account))).all()
-    }
+    existing_accounts = {a.ibkr_account_id for a in (await session.scalars(select(Account))).all()}
 
     detected = _detected_from_parsed(parsed)
-    new_accounts = [
-        da for da in detected if da.ibkr_account_id not in existing_accounts
-    ]
+    new_accounts = [da for da in detected if da.ibkr_account_id not in existing_accounts]
 
     period_from = parsed.period_from
     period_to = parsed.period_to
@@ -575,9 +556,7 @@ async def step3_commit(
     total_rows = 0
 
     # Validate first pass: all temp_ids exist + no unresolved new accounts
-    existing_accounts = {
-        a.ibkr_account_id for a in (await session.scalars(select(Account))).all()
-    }
+    existing_accounts = {a.ibkr_account_id for a in (await session.scalars(select(Account))).all()}
     for temp_id in payload.temp_ids:
         entry = stash.get(user_id=user.id, temp_id=temp_id)
         if entry is None:
@@ -647,9 +626,7 @@ async def finish(
 
     has_parts = (
         await session.scalar(
-            select(func.count(Participation.user_id)).where(
-                Participation.user_id == user.id
-            )
+            select(func.count(Participation.user_id)).where(Participation.user_id == user.id)
         )
     ) > 0
     if not has_parts:

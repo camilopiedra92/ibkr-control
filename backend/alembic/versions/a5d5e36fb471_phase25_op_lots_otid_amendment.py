@@ -25,6 +25,7 @@ ran the wipe via backend/scripts/wipe_flex_data.py. open_position_lots is empty
 at apply time, so the NOT NULL add is safe. If a future application of this rev
 ever encounters existing data with NULL otid, we backfill with '' first (defensive).
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -32,8 +33,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'a5d5e36fb471'
-down_revision: Union[str, Sequence[str], None] = '256faf0dfa89'
+revision: str = "a5d5e36fb471"
+down_revision: Union[str, Sequence[str], None] = "256faf0dfa89"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -43,8 +44,8 @@ def upgrade() -> None:
     # somehow not empty at apply time (e.g. running it on a dev DB that has
     # been re-populated after Rev2 wipe).
     op.add_column(
-        'open_position_lots',
-        sa.Column('originating_transaction_id', sa.String(), nullable=True),
+        "open_position_lots",
+        sa.Column("originating_transaction_id", sa.String(), nullable=True),
     )
 
     # Defensive backfill: empty string for any existing rows that lack the
@@ -57,31 +58,31 @@ def upgrade() -> None:
     )
 
     # Promote NOT NULL.
-    op.alter_column('open_position_lots', 'originating_transaction_id', nullable=False)
+    op.alter_column("open_position_lots", "originating_transaction_id", nullable=False)
 
     # Swap UNIQUE constraint: drop the old 4-column key from Rev2 and recreate
     # with the same name + the additional discriminator column.
     op.drop_constraint(
-        'open_position_lots_natural_key',
-        'open_position_lots',
-        type_='unique',
+        "open_position_lots_natural_key",
+        "open_position_lots",
+        type_="unique",
     )
     op.create_unique_constraint(
-        'open_position_lots_natural_key',
-        'open_position_lots',
-        ['account_id', 'symbol', 'open_date', 'snapshot_date', 'originating_transaction_id'],
+        "open_position_lots_natural_key",
+        "open_position_lots",
+        ["account_id", "symbol", "open_date", "snapshot_date", "originating_transaction_id"],
     )
 
 
 def downgrade() -> None:
     op.drop_constraint(
-        'open_position_lots_natural_key',
-        'open_position_lots',
-        type_='unique',
+        "open_position_lots_natural_key",
+        "open_position_lots",
+        type_="unique",
     )
     op.create_unique_constraint(
-        'open_position_lots_natural_key',
-        'open_position_lots',
-        ['account_id', 'symbol', 'open_date', 'snapshot_date'],
+        "open_position_lots_natural_key",
+        "open_position_lots",
+        ["account_id", "symbol", "open_date", "snapshot_date"],
     )
-    op.drop_column('open_position_lots', 'originating_transaction_id')
+    op.drop_column("open_position_lots", "originating_transaction_id")

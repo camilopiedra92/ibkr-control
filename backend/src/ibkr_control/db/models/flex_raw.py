@@ -4,13 +4,25 @@
 Estas tablas se pueblan tal-cual del XML, sin transformaciones fiscales.
 La capa de classification (lot_classifications) vive en Phase 3.
 """
+
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
-    BigInteger, CheckConstraint, Date, DateTime, ForeignKey, Index,
-    Integer, LargeBinary, Numeric, String, Text, UniqueConstraint, text,
+    BigInteger,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    LargeBinary,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -21,7 +33,9 @@ from ibkr_control.db.base import Base
 class FlexImport(Base):
     __tablename__ = "flex_imports"
     __table_args__ = (
-        CheckConstraint("source IN ('web_service', 'manual_upload')", name="ck_flex_imports_source"),
+        CheckConstraint(
+            "source IN ('web_service', 'manual_upload')", name="ck_flex_imports_source"
+        ),
         CheckConstraint("year_status IN ('rolling', 'sealed')", name="ck_flex_imports_year_status"),
         CheckConstraint("status IN ('ok', 'poison')", name="ck_flex_imports_status"),
         UniqueConstraint("user_id", "xml_hash", name="flex_imports_user_xml_hash_key"),
@@ -56,9 +70,7 @@ class FlexImport(Base):
     n_new_cash_tx: Mapped[int | None] = mapped_column(Integer, nullable=True)
     n_new_dividends: Mapped[int | None] = mapped_column(Integer, nullable=True)
     n_new_transfers: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, server_default=text("'ok'")
-    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'ok'"))
     poison_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -78,9 +90,7 @@ class Trade(Base):
         BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )
     transaction_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
-    account_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("accounts.id"), nullable=False
-    )
+    account_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("accounts.id"), nullable=False)
     symbol: Mapped[str] = mapped_column(String, nullable=False)
     asset_class: Mapped[str] = mapped_column(String, nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -101,7 +111,10 @@ class ClosedLot(Base):
     __table_args__ = (
         Index("closed_lots_account_symbol_idx", "account_id", "symbol"),
         UniqueConstraint(
-            "transaction_id", "close_datetime", "qty", "fifo_pnl_usd",
+            "transaction_id",
+            "close_datetime",
+            "qty",
+            "fifo_pnl_usd",
             name="closed_lots_natural_key",
         ),
     )
@@ -111,9 +124,7 @@ class ClosedLot(Base):
         BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )
     transaction_id: Mapped[str] = mapped_column(String, nullable=False)
-    account_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("accounts.id"), nullable=False
-    )
+    account_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("accounts.id"), nullable=False)
     symbol: Mapped[str] = mapped_column(String, nullable=False)
     open_date: Mapped[date] = mapped_column(Date, nullable=False)
     close_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -140,7 +151,10 @@ class OpenPositionLot(Base):
         # (account, symbol, open_date, snapshot_date) tuple. See Alembic
         # Revision 3 (phase25_op_lots_otid_amendment).
         UniqueConstraint(
-            "account_id", "symbol", "open_date", "snapshot_date",
+            "account_id",
+            "symbol",
+            "open_date",
+            "snapshot_date",
             "originating_transaction_id",
             name="open_position_lots_natural_key",
         ),
@@ -150,9 +164,7 @@ class OpenPositionLot(Base):
     flex_import_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )
-    account_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("accounts.id"), nullable=False
-    )
+    account_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("accounts.id"), nullable=False)
     symbol: Mapped[str] = mapped_column(String, nullable=False)
     open_date: Mapped[date] = mapped_column(Date, nullable=False)
     qty: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
@@ -203,22 +215,16 @@ class Transfer(Base):
 
 class CashTransaction(Base):
     __tablename__ = "cash_transactions"
-    __table_args__ = (
-        Index("cash_transactions_date_idx", "date"),
-    )
+    __table_args__ = (Index("cash_transactions_date_idx", "date"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     flex_import_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )
     transaction_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
-    account_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("accounts.id"), nullable=False
-    )
+    account_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("accounts.id"), nullable=False)
     type: Mapped[str] = mapped_column(String, nullable=False)
-    currency: Mapped[str] = mapped_column(
-        String, nullable=False, server_default=text("'USD'")
-    )
+    currency: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'USD'"))
     amount_usd: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -237,8 +243,14 @@ class ChangeInDividendAccrual(Base):
         # differ by report_date + action_id + code. See Alembic Rev 4
         # (phase25_accruals_code_amendment).
         UniqueConstraint(
-            "account_id", "conid", "ex_date", "pay_date", "accrual_date",
-            "report_date", "action_id", "code",
+            "account_id",
+            "conid",
+            "ex_date",
+            "pay_date",
+            "accrual_date",
+            "report_date",
+            "action_id",
+            "code",
             name="change_in_dividend_accruals_natural_key",
         ),
     )
@@ -247,16 +259,12 @@ class ChangeInDividendAccrual(Base):
     flex_import_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )
-    account_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("accounts.id"), nullable=False
-    )
+    account_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("accounts.id"), nullable=False)
     symbol: Mapped[str] = mapped_column(String, nullable=False)
     conid: Mapped[str | None] = mapped_column(String, nullable=True)
     isin: Mapped[str | None] = mapped_column(String, nullable=True)
     issuer_country: Mapped[str | None] = mapped_column(String, nullable=True)
-    currency: Mapped[str] = mapped_column(
-        String, nullable=False, server_default=text("'USD'")
-    )
+    currency: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'USD'"))
     ex_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     pay_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     report_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -271,9 +279,7 @@ class ChangeInDividendAccrual(Base):
     asset_category: Mapped[str | None] = mapped_column(String, nullable=True)
     sub_category: Mapped[str | None] = mapped_column(String, nullable=True)
     level_of_detail: Mapped[str | None] = mapped_column(String, nullable=True)
-    code: Mapped[str] = mapped_column(
-        String, nullable=False, server_default=text("''")
-    )
+    code: Mapped[str] = mapped_column(String, nullable=False, server_default=text("''"))
     raw_attrs: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
@@ -289,8 +295,13 @@ class OpenDividendAccrual(Base):
         # so no collision is observed, but the same IBKR Po/Re lifecycle
         # semantics apply — fix the class to avoid future regression.
         UniqueConstraint(
-            "account_id", "conid", "ex_date", "pay_date", "report_date",
-            "action_id", "code",
+            "account_id",
+            "conid",
+            "ex_date",
+            "pay_date",
+            "report_date",
+            "action_id",
+            "code",
             name="open_dividend_accruals_natural_key",
         ),
     )
@@ -299,16 +310,12 @@ class OpenDividendAccrual(Base):
     flex_import_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )
-    account_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("accounts.id"), nullable=False
-    )
+    account_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("accounts.id"), nullable=False)
     symbol: Mapped[str] = mapped_column(String, nullable=False)
     conid: Mapped[str | None] = mapped_column(String, nullable=True)
     isin: Mapped[str | None] = mapped_column(String, nullable=True)
     issuer_country: Mapped[str | None] = mapped_column(String, nullable=True)
-    currency: Mapped[str] = mapped_column(
-        String, nullable=False, server_default=text("'USD'")
-    )
+    currency: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'USD'"))
     ex_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     pay_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     report_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -321,9 +328,7 @@ class OpenDividendAccrual(Base):
     action_id: Mapped[str | None] = mapped_column(String, nullable=True)
     asset_category: Mapped[str | None] = mapped_column(String, nullable=True)
     sub_category: Mapped[str | None] = mapped_column(String, nullable=True)
-    code: Mapped[str] = mapped_column(
-        String, nullable=False, server_default=text("''")
-    )
+    code: Mapped[str] = mapped_column(String, nullable=False, server_default=text("''"))
     raw_attrs: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )

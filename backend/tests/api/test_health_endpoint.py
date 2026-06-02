@@ -1,4 +1,5 @@
 """Tests del endpoint /api/health/ingest (R4 backend + R6 API)."""
+
 from datetime import datetime, timedelta, timezone
 
 from httpx import AsyncClient

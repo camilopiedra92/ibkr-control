@@ -16,6 +16,7 @@ Nota: el plan original pedía 3 fixtures (2024 + 2025 + 2026_ytd), pero solo hay
 2 sanitizados en el repo. La intención del spec R3 (idempotency + count parity
 × múltiples fixtures reales) está cubierta con los 2 disponibles.
 """
+
 import asyncio as _asyncio
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
@@ -33,8 +34,13 @@ from sqlalchemy.ext.asyncio import (
 
 from ibkr_control.auth.models import User
 from ibkr_control.db.models.flex_raw import (
-    Trade, ClosedLot, OpenPositionLot, CashTransaction,
-    Transfer, ChangeInDividendAccrual, OpenDividendAccrual,
+    Trade,
+    ClosedLot,
+    OpenPositionLot,
+    CashTransaction,
+    Transfer,
+    ChangeInDividendAccrual,
+    OpenDividendAccrual,
 )
 from ibkr_control.ingest.flex.parser import parse
 from ibkr_control.ingest.flex.persister import persist
@@ -77,24 +83,25 @@ async def _create_user(session_factory) -> int:
     """Insert a minimal User row; return its id."""
     async with session_factory() as session:
         result = await session.execute(
-            insert(User).values(
+            insert(User)
+            .values(
                 email="replay@test.local",
                 hashed_password="x",
                 name="Replay Test User",
                 is_active=True,
                 is_verified=True,
                 is_superuser=False,
-            ).returning(User.id)
+            )
+            .returning(User.id)
         )
         await session.commit()
         return result.scalar_one()
 
 
-@pytest.mark.parametrize(
-    "fixture_name", ["ACTIVITY_2024_sanitized", "ACTIVITY_2025_sanitized"]
-)
+@pytest.mark.parametrize("fixture_name", ["ACTIVITY_2024_sanitized", "ACTIVITY_2025_sanitized"])
 async def test_persist_twice_yields_zero_new(
-    ephemeral_session_factory, fixture_name,
+    ephemeral_session_factory,
+    fixture_name,
 ):
     """R3 idempotency: persist 2× consecutive → counters_2 reports hash_dedup=True.
 
@@ -108,8 +115,11 @@ async def test_persist_twice_yields_zero_new(
     async with ephemeral_session_factory() as session:
         parsed = parse(xml)
         _, counters_1 = await persist(
-            session, parsed=parsed, user_id=user_id,
-            xml_bytes=xml, source="web_service",
+            session,
+            parsed=parsed,
+            user_id=user_id,
+            xml_bytes=xml,
+            source="web_service",
         )
         await session.commit()
 
@@ -117,8 +127,11 @@ async def test_persist_twice_yields_zero_new(
     async with ephemeral_session_factory() as session:
         parsed = parse(xml)
         _, counters_2 = await persist(
-            session, parsed=parsed, user_id=user_id,
-            xml_bytes=xml, source="web_service",
+            session,
+            parsed=parsed,
+            user_id=user_id,
+            xml_bytes=xml,
+            source="web_service",
         )
         await session.commit()
 
@@ -130,11 +143,10 @@ async def test_persist_twice_yields_zero_new(
     assert counters_2["hash_status"] == "ok"
 
 
-@pytest.mark.parametrize(
-    "fixture_name", ["ACTIVITY_2024_sanitized", "ACTIVITY_2025_sanitized"]
-)
+@pytest.mark.parametrize("fixture_name", ["ACTIVITY_2024_sanitized", "ACTIVITY_2025_sanitized"])
 async def test_counts_match_fixture_metadata(
-    ephemeral_session_factory, fixture_name,
+    ephemeral_session_factory,
+    fixture_name,
 ):
     """Counts per entity match EXPECTED_COUNTS (locked from real fixture data).
 
@@ -151,12 +163,16 @@ async def test_counts_match_fixture_metadata(
     async with ephemeral_session_factory() as session:
         parsed = parse(xml)
         await persist(
-            session, parsed=parsed, user_id=user_id,
-            xml_bytes=xml, source="web_service",
+            session,
+            parsed=parsed,
+            user_id=user_id,
+            xml_bytes=xml,
+            source="web_service",
         )
         await session.commit()
 
     async with ephemeral_session_factory() as session:
+
         async def _count(model) -> int:
             return await session.scalar(select(func.count()).select_from(model))
 
@@ -172,8 +188,7 @@ async def test_counts_match_fixture_metadata(
             if entity_name in expected:
                 actual = await _count(model)
                 assert actual == expected[entity_name], (
-                    f"{fixture_name}.{entity_name}: "
-                    f"expected {expected[entity_name]}, got {actual}"
+                    f"{fixture_name}.{entity_name}: expected {expected[entity_name]}, got {actual}"
                 )
 
 
@@ -198,16 +213,17 @@ async def test_closed_lots_sum_matches_pool_2025(ephemeral_session_factory):
     async with ephemeral_session_factory() as session:
         parsed = parse(xml)
         await persist(
-            session, parsed=parsed, user_id=user_id,
-            xml_bytes=xml, source="web_service",
+            session,
+            parsed=parsed,
+            user_id=user_id,
+            xml_bytes=xml,
+            source="web_service",
         )
         await session.commit()
 
     # Sum from DB (Decimal)
     async with ephemeral_session_factory() as session:
-        db_sum = await session.scalar(
-            select(func.coalesce(func.sum(ClosedLot.fifo_pnl_usd), 0))
-        )
+        db_sum = await session.scalar(select(func.coalesce(func.sum(ClosedLot.fifo_pnl_usd), 0)))
     db_sum = Decimal(str(db_sum))  # session.scalar may return Decimal or numeric str
 
     # Sum from raw XML: <Lot levelOfDetail="CLOSED_LOT" fifoPnlRealized="...">
@@ -232,9 +248,7 @@ async def test_closed_lots_sum_matches_pool_2025(ephemeral_session_factory):
     assert xml_sum != Decimal("0"), (
         "no CLOSED_LOT rows parsed from XML — fixture truncated or tag filter broke"
     )
-    assert db_sum == xml_sum, (
-        f"DB sum {db_sum} != XML sum {xml_sum} (delta: {db_sum - xml_sum})"
-    )
+    assert db_sum == xml_sum, f"DB sum {db_sum} != XML sum {xml_sum} (delta: {db_sum - xml_sum})"
 
 
 @pytest.mark.asyncio
@@ -258,6 +272,7 @@ async def test_cross_schema_replay_with_downgrade_upgrade(ephemeral_postgres, mo
     monkeypatch.setenv("DATABASE_URL", async_url)
     monkeypatch.setenv("JWT_SECRET", "test-secret-32-chars-minimum-please-ok")
     from ibkr_control.config import get_settings
+
     get_settings.cache_clear()
 
     backend_root = Path(__file__).resolve().parent.parent
@@ -323,8 +338,11 @@ async def test_cross_schema_replay_with_downgrade_upgrade(ephemeral_postgres, mo
         async with factory2() as session:
             parsed = parse(xml)
             _, counters_2 = await persist(
-                session, parsed=parsed, user_id=user_id,
-                xml_bytes=xml, source="web_service",
+                session,
+                parsed=parsed,
+                user_id=user_id,
+                xml_bytes=xml,
+                source="web_service",
             )
             await session.commit()
         # Expect fast-path: pre-phase26 row found via (user_id, xml_hash) — post-upgrade

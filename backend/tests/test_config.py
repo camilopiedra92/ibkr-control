@@ -49,6 +49,7 @@ def test_database_url_sync_swaps_asyncpg_for_psycopg(monkeypatch):
     monkeypatch.setenv("JWT_SECRET", "test-secret-32-chars-minimum-please-ok")
 
     from ibkr_control.config import Settings, get_settings
+
     get_settings.cache_clear()
 
     s = Settings()  # type: ignore[call-arg]
@@ -61,6 +62,7 @@ def test_database_url_sync_idempotent_if_already_sync(monkeypatch):
     monkeypatch.setenv("JWT_SECRET", "test-secret-32-chars-minimum-please-ok")
 
     from ibkr_control.config import Settings, get_settings
+
     get_settings.cache_clear()
 
     s = Settings()  # type: ignore[call-arg]

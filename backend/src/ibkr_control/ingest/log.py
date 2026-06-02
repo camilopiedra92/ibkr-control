@@ -1,4 +1,5 @@
 """Context manager para crear + actualizar rows en ingest_log."""
+
 import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -30,18 +31,16 @@ async def ingest_log_entry(
     """
     from ibkr_control.db.models.ingest_log import IngestLog
 
-    row = IngestLog(
-        job_kind=job_kind, user_id=user_id, trigger=trigger, status='running'
-    )
+    row = IngestLog(job_kind=job_kind, user_id=user_id, trigger=trigger, status="running")
     session.add(row)
     await session.flush()
     log_id = row.id
     try:
         yield log_id
-        row.status = 'ok'
+        row.status = "ok"
         row.finished_at = _utcnow()
     except Exception as exc:
-        row.status = 'failed'
+        row.status = "failed"
         tb_text = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
         row.error_message = tb_text[:8000]
         row.finished_at = _utcnow()

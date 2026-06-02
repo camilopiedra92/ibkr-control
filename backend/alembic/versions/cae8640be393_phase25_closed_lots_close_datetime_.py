@@ -22,30 +22,27 @@ flex_imports — no user re-upload required thanks to A0).
 Revision 7 then promotes close_datetime NOT NULL + adds the new composite
 UNIQUE (transaction_id, close_datetime, qty).
 """
+
 from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = 'cae8640be393'
-down_revision: Union[str, Sequence[str], None] = 'b47ebffe065b'
+revision: str = "cae8640be393"
+down_revision: Union[str, Sequence[str], None] = "b47ebffe065b"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.drop_constraint(
-        'closed_lots_transaction_id_key', 'closed_lots', type_='unique'
-    )
+    op.drop_constraint("closed_lots_transaction_id_key", "closed_lots", type_="unique")
     op.add_column(
-        'closed_lots',
-        sa.Column('close_datetime', sa.DateTime(timezone=False), nullable=True),
+        "closed_lots",
+        sa.Column("close_datetime", sa.DateTime(timezone=False), nullable=True),
     )
 
 
 def downgrade() -> None:
-    op.drop_column('closed_lots', 'close_datetime')
-    op.create_unique_constraint(
-        'closed_lots_transaction_id_key', 'closed_lots', ['transaction_id']
-    )
+    op.drop_column("closed_lots", "close_datetime")
+    op.create_unique_constraint("closed_lots_transaction_id_key", "closed_lots", ["transaction_id"])

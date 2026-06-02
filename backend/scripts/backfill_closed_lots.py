@@ -14,6 +14,7 @@ Idempotente: corre N veces, siempre deja el estado correcto. Conta rows
 recovered (los closed_lots que estaban perdidos por collapse del transaction_id
 solo).
 """
+
 import asyncio
 
 from sqlalchemy import delete, select, text
@@ -35,9 +36,7 @@ async def main() -> None:
     print()
 
     async with SessionLocal() as session:
-        imports = (
-            await session.scalars(select(FlexImport).order_by(FlexImport.id))
-        ).all()
+        imports = (await session.scalars(select(FlexImport).order_by(FlexImport.id))).all()
         print(f"Encontrados {len(imports)} flex_imports para procesar.")
         print()
 
@@ -47,15 +46,15 @@ async def main() -> None:
         for fi in imports:
             # Map ibkr_account_id -> accounts.id (necesario para FK)
             from ibkr_control.db.models.accounts import Account
+
             acc_rows = (await session.scalars(select(Account))).all()
             acc_map = {a.ibkr_account_id: a.id for a in acc_rows}
 
             # Trade transaction_id -> trade.id map for source_trade_id linking
             from ibkr_control.db.models.flex_raw import Trade
+
             trades = (
-                await session.scalars(
-                    select(Trade).where(Trade.flex_import_id == fi.id)
-                )
+                await session.scalars(select(Trade).where(Trade.flex_import_id == fi.id))
             ).all()
             trade_id_map = {t.transaction_id: t.id for t in trades}
 
@@ -73,25 +72,26 @@ async def main() -> None:
                         f"{cl.ibkr_account_id} que no existe — skip"
                     )
                     continue
-                new_rows.append({
-                    "flex_import_id": fi.id,
-                    "transaction_id": (
-                        cl.transaction_id
-                        or f"NO-TX-{cl.symbol}-{cl.close_date}-{i}"
-                    ),
-                    "account_id": acc_map[cl.ibkr_account_id],
-                    "symbol": cl.symbol,
-                    "open_date": cl.open_date,
-                    "close_date": cl.close_date,
-                    "close_datetime": cl.close_datetime,
-                    "qty": cl.qty,
-                    "cost_basis_usd": cl.cost_basis_usd,
-                    "proceeds_usd": cl.proceeds_usd,
-                    "fifo_pnl_usd": cl.fifo_pnl_usd,
-                    "source_trade_id": (
-                        trade_id_map.get(cl.transaction_id) if cl.transaction_id else None
-                    ),
-                })
+                new_rows.append(
+                    {
+                        "flex_import_id": fi.id,
+                        "transaction_id": (
+                            cl.transaction_id or f"NO-TX-{cl.symbol}-{cl.close_date}-{i}"
+                        ),
+                        "account_id": acc_map[cl.ibkr_account_id],
+                        "symbol": cl.symbol,
+                        "open_date": cl.open_date,
+                        "close_date": cl.close_date,
+                        "close_datetime": cl.close_datetime,
+                        "qty": cl.qty,
+                        "cost_basis_usd": cl.cost_basis_usd,
+                        "proceeds_usd": cl.proceeds_usd,
+                        "fifo_pnl_usd": cl.fifo_pnl_usd,
+                        "source_trade_id": (
+                            trade_id_map.get(cl.transaction_id) if cl.transaction_id else None
+                        ),
+                    }
+                )
 
             # Count current rows + delete + re-insert
             before = await session.scalar(
@@ -99,13 +99,12 @@ async def main() -> None:
                 .select_from(ClosedLot)
                 .where(ClosedLot.flex_import_id == fi.id)
             )
-            await session.execute(
-                delete(ClosedLot).where(ClosedLot.flex_import_id == fi.id)
-            )
+            await session.execute(delete(ClosedLot).where(ClosedLot.flex_import_id == fi.id))
 
             # Plain INSERT (no UPSERT — UNIQUE will exist only post-Rev7)
             if new_rows:
                 from sqlalchemy.dialects.postgresql import insert as pg_insert
+
                 stmt = pg_insert(ClosedLot.__table__).values(new_rows)
                 await session.execute(stmt)
 
@@ -121,8 +120,10 @@ async def main() -> None:
             )
 
         print()
-        print(f"TOTAL: {total_before} -> {total_after} "
-              f"(recovered {total_after - total_before:+d} closed_lots)")
+        print(
+            f"TOTAL: {total_before} -> {total_after} "
+            f"(recovered {total_after - total_before:+d} closed_lots)"
+        )
         print()
         print("Backfill completado. Ahora ejecutar Revision 7 para promote NOT NULL + UNIQUE:")
         print("  docker compose exec backend uv run alembic upgrade head")

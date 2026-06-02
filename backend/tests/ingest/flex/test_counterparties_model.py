@@ -1,4 +1,5 @@
 """Tests del modelo Counterparty + exclusive arc en transfers (spec 2026-06-02)."""
+
 from datetime import date
 from decimal import Decimal
 
@@ -17,6 +18,7 @@ async def test_counterparties_table_exists(db_session: AsyncSession):
 @pytest.mark.asyncio
 async def test_counterparty_external_id_unique(db_session: AsyncSession):
     from ibkr_control.db.models.counterparties import Counterparty
+
     db_session.add(Counterparty(external_id="CS-999999-99"))
     await db_session.commit()
     db_session.add(Counterparty(external_id="CS-999999-99"))
@@ -28,6 +30,7 @@ async def test_counterparty_external_id_unique(db_session: AsyncSession):
 async def _seed_account_and_cp(db_session):
     from ibkr_control.db.models.accounts import Account
     from ibkr_control.db.models.counterparties import Counterparty
+
     a = Account(ibkr_account_id="U99999001", currency="USD")
     cp = Counterparty(external_id="CS-999999-99")
     db_session.add_all([a, cp])
@@ -51,13 +54,16 @@ async def _insert_transfer(db_session, **overrides):
         "transfer_type": "FOP",
     }
     cols.update(overrides)
-    await db_session.execute(text(
-        """INSERT INTO transfers
+    await db_session.execute(
+        text(
+            """INSERT INTO transfers
            (transaction_id, transfer_date, direction, src_account_id,
             src_counterparty_id, dst_account_id, dst_counterparty_id, symbol, qty, transfer_type)
            VALUES (:transaction_id, :transfer_date, :direction, :src_account_id,
             :src_counterparty_id, :dst_account_id, :dst_counterparty_id, :symbol, :qty, :transfer_type)"""
-    ), cols)
+        ),
+        cols,
+    )
 
 
 @pytest.mark.asyncio
@@ -73,8 +79,9 @@ async def test_exclusive_arc_rejects_both_null(db_session: AsyncSession):
     a, cp = await _seed_account_and_cp(db_session)
     # src vacio (both null) -> rebota; asyncpg fires CHECK at execute time, not commit
     with pytest.raises(IntegrityError):
-        await _insert_transfer(db_session, src_account_id=None, src_counterparty_id=None,
-                               dst_account_id=a.id)
+        await _insert_transfer(
+            db_session, src_account_id=None, src_counterparty_id=None, dst_account_id=a.id
+        )
         await db_session.commit()
     await db_session.rollback()
 
@@ -84,7 +91,8 @@ async def test_exclusive_arc_rejects_both_set(db_session: AsyncSession):
     a, cp = await _seed_account_and_cp(db_session)
     # src = account Y counterparty a la vez -> rebota; asyncpg fires CHECK at execute time
     with pytest.raises(IntegrityError):
-        await _insert_transfer(db_session, src_account_id=a.id, src_counterparty_id=cp.id,
-                               dst_account_id=a.id)
+        await _insert_transfer(
+            db_session, src_account_id=a.id, src_counterparty_id=cp.id, dst_account_id=a.id
+        )
         await db_session.commit()
     await db_session.rollback()

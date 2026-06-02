@@ -1,4 +1,5 @@
 """Smoke test que verifica que los fixtures XML existen y son parseables."""
+
 from pathlib import Path
 from lxml import etree
 

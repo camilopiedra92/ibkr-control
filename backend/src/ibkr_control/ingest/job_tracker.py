@@ -2,6 +2,7 @@
 
 V1: in-process, single backend replica. V2: Redis pub/sub.
 """
+
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from itertools import count
@@ -19,9 +20,7 @@ class _JobState:
     events: list[TrackerEvent] = field(default_factory=list)
     done: bool = False
     next_event_id: int = 0
-    created_at: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class JobTracker:
@@ -80,10 +79,7 @@ class JobTracker:
         regardless of age.
         """
         cutoff = datetime.now(timezone.utc) - older_than
-        to_remove = [
-            jid for jid, s in self._jobs.items()
-            if s.done and s.created_at < cutoff
-        ]
+        to_remove = [jid for jid, s in self._jobs.items() if s.done and s.created_at < cutoff]
         for jid in to_remove:
             del self._jobs[jid]
         return len(to_remove)

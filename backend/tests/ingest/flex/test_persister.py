@@ -1,4 +1,5 @@
 """Tests del persister Flex: parsed → DB con dedup + TX."""
+
 from datetime import date
 from decimal import Decimal
 import pytest
@@ -7,7 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ibkr_control.ingest.flex.persister import persist
 from ibkr_control.ingest.flex._models import (
-    ParsedAccount, ParsedTrade, ParsedTransfer, ParsedXML,
+    ParsedAccount,
+    ParsedTrade,
+    ParsedTransfer,
+    ParsedXML,
 )
 
 FIXTURE_DIR = __import__("pathlib").Path(__file__).parent.parent.parent / "fixtures" / "xml"
@@ -126,13 +130,19 @@ async def test_persist_duplicate_hash_returns_existing_id(
     xml_bytes = b"<xml>identical</xml>"
 
     fi_id_1, counters_1 = await persist(
-        db_session, parsed=parsed, user_id=sample_user.id,
-        xml_bytes=xml_bytes, source="manual_upload",
+        db_session,
+        parsed=parsed,
+        user_id=sample_user.id,
+        xml_bytes=xml_bytes,
+        source="manual_upload",
     )
     assert counters_1["hash_dedup"] is False
     fi_id_2, counters_2 = await persist(
-        db_session, parsed=parsed, user_id=sample_user.id,
-        xml_bytes=xml_bytes, source="manual_upload",
+        db_session,
+        parsed=parsed,
+        user_id=sample_user.id,
+        xml_bytes=xml_bytes,
+        source="manual_upload",
     )
     assert fi_id_1 == fi_id_2
     assert counters_2["hash_dedup"] is True
@@ -140,16 +150,12 @@ async def test_persist_duplicate_hash_returns_existing_id(
 
     from ibkr_control.db.models.flex_raw import Trade
 
-    n = await db_session.scalar(
-        select(func.count(Trade.id)).where(Trade.flex_import_id == fi_id_1)
-    )
+    n = await db_session.scalar(select(func.count(Trade.id)).where(Trade.flex_import_id == fi_id_1))
     assert n == 2  # NO duplicó los trades
 
 
 @pytest.mark.asyncio
-async def test_persist_creates_missing_accounts_on_the_fly(
-    db_session: AsyncSession, sample_user
-):
+async def test_persist_creates_missing_accounts_on_the_fly(db_session: AsyncSession, sample_user):
     """Si el XML referencia un account que no existe en DB, se crea automaticamente."""
     parsed = _make_parsed(account_id="U99999777", n_trades=1)
     fi_id, _ = await persist(
@@ -163,9 +169,7 @@ async def test_persist_creates_missing_accounts_on_the_fly(
 
     from ibkr_control.db.models.accounts import Account
 
-    acc = await db_session.scalar(
-        select(Account).where(Account.ibkr_account_id == "U99999777")
-    )
+    acc = await db_session.scalar(select(Account).where(Account.ibkr_account_id == "U99999777"))
     assert acc is not None
 
 
@@ -214,9 +218,7 @@ async def test_persist_intra_batch_dup_is_absorbed_by_upsert(
 
 
 @pytest.mark.asyncio
-async def test_persist_links_closed_lots_to_source_trades(
-    db_session: AsyncSession, sample_user
-):
+async def test_persist_links_closed_lots_to_source_trades(db_session: AsyncSession, sample_user):
     """ClosedLot.source_trade_id is populated from matching Trade.transaction_id."""
     xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
     from ibkr_control.ingest.flex.parser import parse
@@ -254,9 +256,7 @@ async def test_persist_links_closed_lots_to_source_trades(
 
 
 @pytest.mark.asyncio
-async def test_persist_dividend_accruals_from_2025_fixture(
-    db_session: AsyncSession, sample_user
-):
+async def test_persist_dividend_accruals_from_2025_fixture(db_session: AsyncSession, sample_user):
     """After persisting the 2025 fixture:
     - change_in_dividend_accruals: 51 rows (DETAIL-level rows; 46 SUMMARY rows skipped)
     - open_dividend_accruals: 1 row (NKE Q4 2025, account U99999001)
@@ -268,10 +268,12 @@ async def test_persist_dividend_accruals_from_2025_fixture(
     from ibkr_control.ingest.flex.parser import parse
 
     parsed = parse(xml)
-    assert len(parsed.change_in_dividend_accruals) == 51, \
+    assert len(parsed.change_in_dividend_accruals) == 51, (
         f"Expected 51 DETAIL ChangeInDividendAccrual rows, got {len(parsed.change_in_dividend_accruals)}"
-    assert len(parsed.open_dividend_accruals) == 1, \
+    )
+    assert len(parsed.open_dividend_accruals) == 1, (
         "Expected exactly 1 OpenDividendAccrual row in 2025 fixture"
+    )
 
     fi_id, _ = await persist(
         db_session,
@@ -313,7 +315,8 @@ async def test_persist_dividend_accruals_from_2025_fixture(
 
 @pytest.mark.asyncio
 async def test_persist_deletes_previous_rolling_for_same_user_anyo_source(
-    db_session, sample_user,
+    db_session,
+    sample_user,
 ):
     """R1 latest-1 retention: previous rolling row for same key gets deleted."""
     from pathlib import Path
@@ -324,7 +327,9 @@ async def test_persist_deletes_previous_rolling_for_same_user_anyo_source(
     from ibkr_control.ingest.flex.parser import parse
     from ibkr_control.ingest.flex.persister import persist
 
-    fixture = Path(__file__).parent.parent.parent / "fixtures" / "xml" / "ACTIVITY_2025_sanitized.xml"
+    fixture = (
+        Path(__file__).parent.parent.parent / "fixtures" / "xml" / "ACTIVITY_2025_sanitized.xml"
+    )
     base = fixture.read_bytes()
     tree = etree.fromstring(base)
     xml_v1 = etree.tostring(tree, pretty_print=False)
@@ -334,8 +339,11 @@ async def test_persist_deletes_previous_rolling_for_same_user_anyo_source(
     parsed_v1 = parse(xml_v1)
     parsed_v1.period_to = date(2025, 5, 24)  # not Dec 31 → 'rolling'
     id_v1, _ = await persist(
-        db_session, parsed=parsed_v1, user_id=sample_user.id,
-        xml_bytes=xml_v1, source="web_service",
+        db_session,
+        parsed=parsed_v1,
+        user_id=sample_user.id,
+        xml_bytes=xml_v1,
+        source="web_service",
     )
     await db_session.commit()
 
@@ -343,19 +351,24 @@ async def test_persist_deletes_previous_rolling_for_same_user_anyo_source(
     parsed_v2 = parse(xml_v2)
     parsed_v2.period_to = date(2025, 5, 24)
     id_v2, _ = await persist(
-        db_session, parsed=parsed_v2, user_id=sample_user.id,
-        xml_bytes=xml_v2, source="web_service",
+        db_session,
+        parsed=parsed_v2,
+        user_id=sample_user.id,
+        xml_bytes=xml_v2,
+        source="web_service",
     )
     await db_session.commit()
 
-    rows = (await db_session.scalars(
-        select(FlexImport).where(
-            FlexImport.user_id == sample_user.id,
-            FlexImport.anyo == 2025,
-            FlexImport.source == "web_service",
-            FlexImport.year_status == "rolling",
+    rows = (
+        await db_session.scalars(
+            select(FlexImport).where(
+                FlexImport.user_id == sample_user.id,
+                FlexImport.anyo == 2025,
+                FlexImport.source == "web_service",
+                FlexImport.year_status == "rolling",
+            )
         )
-    )).all()
+    ).all()
     assert len(rows) == 1
     assert rows[0].id == id_v2
 
@@ -371,7 +384,9 @@ async def test_persist_does_not_delete_sealed_years(db_session, sample_user):
     from ibkr_control.ingest.flex.parser import parse
     from ibkr_control.ingest.flex.persister import persist
 
-    fixture = Path(__file__).parent.parent.parent / "fixtures" / "xml" / "ACTIVITY_2025_sanitized.xml"
+    fixture = (
+        Path(__file__).parent.parent.parent / "fixtures" / "xml" / "ACTIVITY_2025_sanitized.xml"
+    )
     base = fixture.read_bytes()
     tree = etree.fromstring(base)
     xml_sealed = etree.tostring(tree, pretty_print=False)
@@ -381,8 +396,11 @@ async def test_persist_does_not_delete_sealed_years(db_session, sample_user):
     parsed_sealed = parse(xml_sealed)
     parsed_sealed.period_to = date(2025, 12, 31)
     id_sealed, _ = await persist(
-        db_session, parsed=parsed_sealed, user_id=sample_user.id,
-        xml_bytes=xml_sealed, source="web_service",
+        db_session,
+        parsed=parsed_sealed,
+        user_id=sample_user.id,
+        xml_bytes=xml_sealed,
+        source="web_service",
     )
     await db_session.commit()
 
@@ -390,21 +408,20 @@ async def test_persist_does_not_delete_sealed_years(db_session, sample_user):
     parsed_rolling = parse(xml_rolling)
     parsed_rolling.period_to = date(2025, 5, 24)
     id_rolling, _ = await persist(
-        db_session, parsed=parsed_rolling, user_id=sample_user.id,
-        xml_bytes=xml_rolling, source="web_service",
+        db_session,
+        parsed=parsed_rolling,
+        user_id=sample_user.id,
+        xml_bytes=xml_rolling,
+        source="web_service",
     )
     await db_session.commit()
 
     # Sealed row must still exist
-    sealed_row = await db_session.scalar(
-        select(FlexImport).where(FlexImport.id == id_sealed)
-    )
+    sealed_row = await db_session.scalar(select(FlexImport).where(FlexImport.id == id_sealed))
     assert sealed_row is not None
     assert sealed_row.year_status == "sealed"
     # Rolling row also exists
-    rolling_row = await db_session.scalar(
-        select(FlexImport).where(FlexImport.id == id_rolling)
-    )
+    rolling_row = await db_session.scalar(select(FlexImport).where(FlexImport.id == id_rolling))
     assert rolling_row is not None
     assert rolling_row.year_status == "rolling"
 
@@ -420,23 +437,36 @@ async def test_persist_does_not_delete_poison_rows(db_session, sample_user):
     from ibkr_control.ingest.flex.persister import persist
 
     # Seed a poison row first
-    db_session.add(FlexImport(
-        user_id=sample_user.id, xml_hash="poison-row-hash", xml_bytes=b"x",
-        xml_size_bytes=1, anyo=2025, source="web_service",
-        year_status="rolling", status="poison", poison_reason="test",
-        period_covered_from=date(2025, 1, 1),
-        period_covered_to=date(2025, 12, 31),
-    ))
+    db_session.add(
+        FlexImport(
+            user_id=sample_user.id,
+            xml_hash="poison-row-hash",
+            xml_bytes=b"x",
+            xml_size_bytes=1,
+            anyo=2025,
+            source="web_service",
+            year_status="rolling",
+            status="poison",
+            poison_reason="test",
+            period_covered_from=date(2025, 1, 1),
+            period_covered_to=date(2025, 12, 31),
+        )
+    )
     await db_session.commit()
 
     # Now persist a fresh rolling row
-    fixture = Path(__file__).parent.parent.parent / "fixtures" / "xml" / "ACTIVITY_2025_sanitized.xml"
+    fixture = (
+        Path(__file__).parent.parent.parent / "fixtures" / "xml" / "ACTIVITY_2025_sanitized.xml"
+    )
     base = fixture.read_bytes()
     parsed = parse(base)
     parsed.period_to = date(2025, 5, 24)
     await persist(
-        db_session, parsed=parsed, user_id=sample_user.id,
-        xml_bytes=base, source="web_service",
+        db_session,
+        parsed=parsed,
+        user_id=sample_user.id,
+        xml_bytes=base,
+        source="web_service",
     )
     await db_session.commit()
 
@@ -506,8 +536,8 @@ async def test_external_transfer_peer_becomes_counterparty_not_account(
         transaction_id="XFER-FOP-1",
         transfer_date=date(2026, 4, 30),
         direction="IN",
-        src_ibkr_account_id=EXT, # peer externo
-        dst_ibkr_account_id=OWN, # cuenta propia
+        src_ibkr_account_id=EXT,  # peer externo
+        dst_ibkr_account_id=OWN,  # cuenta propia
         symbol="GLOB",
         qty=Decimal("94"),
         transfer_type="FOP",
@@ -515,8 +545,11 @@ async def test_external_transfer_peer_becomes_counterparty_not_account(
     p = _minimal_parsed(n_trades=0, account_id=OWN)  # OWN in <AccountInformation>
     p.transfers = [transfer]
     await persist(
-        db_session, parsed=p, user_id=sample_user.id,
-        xml_bytes=b"<fop/>", source="web_service",
+        db_session,
+        parsed=p,
+        user_id=sample_user.id,
+        xml_bytes=b"<fop/>",
+        source="web_service",
     )
     await db_session.commit()
 
@@ -526,17 +559,19 @@ async def test_external_transfer_peer_becomes_counterparty_not_account(
     )
     assert n_ext_acct == 0
     # EXT IS in counterparties
-    cp = await db_session.scalar(
-        select(Counterparty).where(Counterparty.external_id == EXT)
-    )
+    cp = await db_session.scalar(select(Counterparty).where(Counterparty.external_id == EXT))
     assert cp is not None
     # transfer points src->counterparty, dst->own account
-    row = (await db_session.execute(text(
-        "SELECT src_account_id, src_counterparty_id, dst_account_id, dst_counterparty_id "
-        "FROM transfers WHERE transaction_id='XFER-FOP-1'"
-    ))).first()
-    assert row[0] is None and row[1] == cp.id        # src = counterparty
-    assert row[2] is not None and row[3] is None     # dst = own account
+    row = (
+        await db_session.execute(
+            text(
+                "SELECT src_account_id, src_counterparty_id, dst_account_id, dst_counterparty_id "
+                "FROM transfers WHERE transaction_id='XFER-FOP-1'"
+            )
+        )
+    ).first()
+    assert row[0] is None and row[1] == cp.id  # src = counterparty
+    assert row[2] is not None and row[3] is None  # dst = own account
 
 
 @pytest.mark.asyncio
@@ -577,34 +612,44 @@ async def test_fop_fixture_creates_counterparty_no_orphan_account(
     assert fop.dst_ibkr_account_id == "U99999001"
 
     await persist(
-        db_session, parsed=parsed, user_id=sample_user.id,
-        xml_bytes=xml, source="manual_upload",
+        db_session,
+        parsed=parsed,
+        user_id=sample_user.id,
+        xml_bytes=xml,
+        source="manual_upload",
     )
     await db_session.commit()
 
     # CS-999999-99 must be in counterparties
     cp = await db_session.scalar(
-        select(Counterparty).where(Counterparty.external_id == "CS-999999-99"))
+        select(Counterparty).where(Counterparty.external_id == "CS-999999-99")
+    )
     assert cp is not None
 
     # CS-999999-99 must NOT appear in accounts (no orphan account)
     n_cp_in_accounts = await db_session.scalar(
-        select(func.count()).select_from(Account)
-        .where(Account.ibkr_account_id == "CS-999999-99"))
+        select(func.count()).select_from(Account).where(Account.ibkr_account_id == "CS-999999-99")
+    )
     assert n_cp_in_accounts == 0
 
     # Both own accounts must be in accounts
     own = await db_session.scalar(
-        select(func.count()).select_from(Account)
-        .where(Account.ibkr_account_id.in_(["U99999001", "U99999002"])))
+        select(func.count())
+        .select_from(Account)
+        .where(Account.ibkr_account_id.in_(["U99999001", "U99999002"]))
+    )
     assert own == 2
 
     # INTERNAL transfer (own -> own) must resolve to account FKs on both sides,
     # NOT counterparties (exclusive arc the other way).
-    internal_row = (await db_session.execute(text(
-        "SELECT src_account_id, src_counterparty_id, dst_account_id, dst_counterparty_id "
-        "FROM transfers WHERE transaction_id='39601540411'"
-    ))).first()
+    internal_row = (
+        await db_session.execute(
+            text(
+                "SELECT src_account_id, src_counterparty_id, dst_account_id, dst_counterparty_id "
+                "FROM transfers WHERE transaction_id='39601540411'"
+            )
+        )
+    ).first()
     assert internal_row is not None
     assert internal_row[0] is not None and internal_row[1] is None  # src = own account
     assert internal_row[2] is not None and internal_row[3] is None  # dst = own account

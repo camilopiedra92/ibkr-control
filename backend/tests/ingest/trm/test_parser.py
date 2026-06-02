@@ -1,4 +1,5 @@
 """Tests de la expansión vigencia_desde..vigencia_hasta."""
+
 from datetime import date
 from decimal import Decimal
 
@@ -6,11 +7,13 @@ from ibkr_control.ingest.trm.parser import expand_vigencias
 
 
 def test_expand_single_day():
-    rows = [{
-        "vigenciadesde": "2026-01-15T00:00:00.000",
-        "vigenciahasta": "2026-01-15T00:00:00.000",
-        "valor": "4123.4567",
-    }]
+    rows = [
+        {
+            "vigenciadesde": "2026-01-15T00:00:00.000",
+            "vigenciahasta": "2026-01-15T00:00:00.000",
+            "valor": "4123.4567",
+        }
+    ]
     out = list(expand_vigencias(rows))
     assert len(out) == 1
     d = out[0]
@@ -22,11 +25,13 @@ def test_expand_single_day():
 
 def test_expand_weekend_friday_to_monday():
     """Viernes 2026-01-16 vigente hasta domingo 2026-01-18 → 3 días."""
-    rows = [{
-        "vigenciadesde": "2026-01-16T00:00:00.000",
-        "vigenciahasta": "2026-01-18T00:00:00.000",
-        "valor": "4150.00",
-    }]
+    rows = [
+        {
+            "vigenciadesde": "2026-01-16T00:00:00.000",
+            "vigenciahasta": "2026-01-18T00:00:00.000",
+            "valor": "4150.00",
+        }
+    ]
     out = list(expand_vigencias(rows))
     assert len(out) == 3
     dates = [d["date"] for d in out]
@@ -36,8 +41,16 @@ def test_expand_weekend_friday_to_monday():
 
 def test_expand_multiple_rows_no_overlap():
     rows = [
-        {"vigenciadesde": "2026-01-01T00:00:00.000", "vigenciahasta": "2026-01-02T00:00:00.000", "valor": "4100"},
-        {"vigenciadesde": "2026-01-03T00:00:00.000", "vigenciahasta": "2026-01-05T00:00:00.000", "valor": "4120"},
+        {
+            "vigenciadesde": "2026-01-01T00:00:00.000",
+            "vigenciahasta": "2026-01-02T00:00:00.000",
+            "valor": "4100",
+        },
+        {
+            "vigenciadesde": "2026-01-03T00:00:00.000",
+            "vigenciahasta": "2026-01-05T00:00:00.000",
+            "valor": "4120",
+        },
     ]
     out = list(expand_vigencias(rows))
     assert len(out) == 5
@@ -48,9 +61,17 @@ def test_expand_multiple_rows_no_overlap():
 def test_expand_ignores_invalid_row():
     """Si una row no tiene los 3 campos requeridos, se saltea (con warn)."""
     rows = [
-        {"vigenciadesde": "2026-01-01T00:00:00.000", "vigenciahasta": "2026-01-01T00:00:00.000", "valor": "4100"},
+        {
+            "vigenciadesde": "2026-01-01T00:00:00.000",
+            "vigenciahasta": "2026-01-01T00:00:00.000",
+            "valor": "4100",
+        },
         {"vigenciadesde": "2026-01-02T00:00:00.000"},  # incompleta
-        {"vigenciadesde": "2026-01-03T00:00:00.000", "vigenciahasta": "2026-01-03T00:00:00.000", "valor": "4110"},
+        {
+            "vigenciadesde": "2026-01-03T00:00:00.000",
+            "vigenciahasta": "2026-01-03T00:00:00.000",
+            "valor": "4110",
+        },
     ]
     out = list(expand_vigencias(rows))
     assert len(out) == 2
@@ -58,10 +79,12 @@ def test_expand_ignores_invalid_row():
 
 def test_expand_handles_date_only_format():
     """Algunos endpoints de Socrata devuelven '2026-01-15' sin time."""
-    rows = [{
-        "vigenciadesde": "2026-01-15",
-        "vigenciahasta": "2026-01-15",
-        "valor": "4100",
-    }]
+    rows = [
+        {
+            "vigenciadesde": "2026-01-15",
+            "vigenciahasta": "2026-01-15",
+            "valor": "4100",
+        }
+    ]
     out = list(expand_vigencias(rows))
     assert out[0]["date"] == date(2026, 1, 15)

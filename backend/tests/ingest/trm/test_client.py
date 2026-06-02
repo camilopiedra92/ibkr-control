@@ -1,4 +1,5 @@
 """Tests del cliente Socrata DIAN para TRM."""
+
 from datetime import date
 import pytest
 

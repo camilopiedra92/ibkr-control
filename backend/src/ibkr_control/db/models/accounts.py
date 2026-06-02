@@ -1,4 +1,5 @@
 """Cuenta IBKR (Uxxxxxxxx). Una sola fila por broker account."""
+
 from datetime import datetime
 from sqlalchemy import BigInteger, String, DateTime, text
 from sqlalchemy.orm import Mapped, mapped_column

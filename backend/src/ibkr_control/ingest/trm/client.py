@@ -7,6 +7,7 @@ Filtro: ?$where=vigenciadesde > 'YYYY-MM-DDT00:00:00.000'
 
 Si since=None → backfill total (sin filtro $where, devuelve todo desde 1991).
 """
+
 from datetime import date
 from typing import Final
 

@@ -1,4 +1,5 @@
 """Tests de registro de cron jobs."""
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from ibkr_control.scheduler.jobs import register_jobs
@@ -59,6 +60,7 @@ def test_create_scheduler_uses_sqlalchemy_jobstore(monkeypatch):
     monkeypatch.setenv("JWT_SECRET", "test-secret-32-chars-minimum-please-ok")
 
     from ibkr_control.config import get_settings
+
     get_settings.cache_clear()
 
     from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore

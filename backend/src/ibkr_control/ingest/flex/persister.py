@@ -23,6 +23,7 @@ determinístico `NO-TX-{symbol}-{close_date}-{i}` (i = enumerate index).
 Esto preserva idempotencia: mismo XML → mismos placeholders → ON CONFLICT
 DO NOTHING absorbe colisiones cross-XML sin error.
 """
+
 from datetime import date
 
 from sqlalchemy import select, text
@@ -228,9 +229,7 @@ async def _upsert_all_children(
         for t in parsed.trades
         if not _is_shadow_account(t.ibkr_account_id)
     ]
-    n_new_trades = await _upsert_immutable(
-        session, Trade.__table__, trade_rows, ["transaction_id"]
-    )
+    n_new_trades = await _upsert_immutable(session, Trade.__table__, trade_rows, ["transaction_id"])
 
     # === ClosedLots (immutable) ===
     # Necesitamos un mapa transaction_id → trades.id para linkar source_trade_id.
@@ -238,9 +237,7 @@ async def _upsert_all_children(
     # SELECT por transaction_id sobre toda la tabla.
     trade_id_map: dict[str, int] = {}
     if parsed.closed_lots:
-        tx_ids_needed = [
-            cl.transaction_id for cl in parsed.closed_lots if cl.transaction_id
-        ]
+        tx_ids_needed = [cl.transaction_id for cl in parsed.closed_lots if cl.transaction_id]
         if tx_ids_needed:
             result = await session.execute(
                 select(Trade.transaction_id, Trade.id).where(
@@ -252,10 +249,7 @@ async def _upsert_all_children(
     closed_rows = [
         {
             "flex_import_id": fi.id,
-            "transaction_id": (
-                cl.transaction_id
-                or f"NO-TX-{cl.symbol}-{cl.close_date}-{i}"
-            ),
+            "transaction_id": (cl.transaction_id or f"NO-TX-{cl.symbol}-{cl.close_date}-{i}"),
             "account_id": accounts_map[cl.ibkr_account_id],
             "symbol": cl.symbol,
             "open_date": cl.open_date,
@@ -265,9 +259,7 @@ async def _upsert_all_children(
             "cost_basis_usd": cl.cost_basis_usd,
             "proceeds_usd": cl.proceeds_usd,
             "fifo_pnl_usd": cl.fifo_pnl_usd,
-            "source_trade_id": (
-                trade_id_map.get(cl.transaction_id) if cl.transaction_id else None
-            ),
+            "source_trade_id": (trade_id_map.get(cl.transaction_id) if cl.transaction_id else None),
         }
         for i, cl in enumerate(parsed.closed_lots)
         if not _is_shadow_account(cl.ibkr_account_id)
@@ -278,7 +270,9 @@ async def _upsert_all_children(
     # - Same close timestamp + qty but different realized PnL (wash-sale or
     #   accounting adjustments — seen on IBIT 2024-10-02 in fixture 2024).
     n_new_closed = await _upsert_immutable(
-        session, ClosedLot.__table__, closed_rows,
+        session,
+        ClosedLot.__table__,
+        closed_rows,
         ["transaction_id", "close_datetime", "qty", "fifo_pnl_usd"],
     )
 
@@ -435,8 +429,14 @@ async def _upsert_all_children(
         ChangeInDividendAccrual.__table__,
         change_div_rows,
         [
-            "account_id", "conid", "ex_date", "pay_date", "accrual_date",
-            "report_date", "action_id", "code",
+            "account_id",
+            "conid",
+            "ex_date",
+            "pay_date",
+            "accrual_date",
+            "report_date",
+            "action_id",
+            "code",
         ],
         [
             "flex_import_id",
@@ -493,8 +493,13 @@ async def _upsert_all_children(
         OpenDividendAccrual.__table__,
         open_div_rows,
         [
-            "account_id", "conid", "ex_date", "pay_date", "report_date",
-            "action_id", "code",
+            "account_id",
+            "conid",
+            "ex_date",
+            "pay_date",
+            "report_date",
+            "action_id",
+            "code",
         ],
         [
             "flex_import_id",
@@ -575,9 +580,7 @@ async def _ensure_accounts(
     if not ibkr_ids:
         return {}
 
-    result = await session.scalars(
-        select(Account).where(Account.ibkr_account_id.in_(ibkr_ids))
-    )
+    result = await session.scalars(select(Account).where(Account.ibkr_account_id.in_(ibkr_ids)))
     existing: dict[str, int] = {a.ibkr_account_id: a.id for a in result.all()}
 
     missing = set(ibkr_ids) - set(existing.keys())
@@ -587,9 +590,7 @@ async def _ensure_accounts(
 
     if missing:
         await session.flush()
-        result2 = await session.scalars(
-            select(Account).where(Account.ibkr_account_id.in_(missing))
-        )
+        result2 = await session.scalars(select(Account).where(Account.ibkr_account_id.in_(missing)))
         for a in result2.all():
             existing[a.ibkr_account_id] = a.id
 

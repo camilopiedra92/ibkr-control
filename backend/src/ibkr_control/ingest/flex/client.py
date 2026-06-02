@@ -23,6 +23,7 @@ Notas sobre _is_pending:
   - Cualquier otra estructura → ready (conservador: deja que el parser falle
     con un mensaje informativo en vez de ciclar para siempre).
 """
+
 import logging
 import time
 from typing import Final
@@ -70,9 +71,7 @@ class FlexPollTimeoutError(RuntimeError):
     def __init__(self, reference_code: str, waited: int) -> None:
         self.reference_code = reference_code
         self.waited = waited
-        super().__init__(
-            f"Flex poll timeout: reference={reference_code} after {waited}s"
-        )
+        super().__init__(f"Flex poll timeout: reference={reference_code} after {waited}s")
 
 
 class FlexClientError(RuntimeError):
@@ -99,7 +98,9 @@ class FlexBusyError(FlexClientError):
     Throttling transient — el caller deberia hacer retry con backoff.
     """
 
-    def __init__(self, error_message: str = "Statement could not be generated at this time") -> None:
+    def __init__(
+        self, error_message: str = "Statement could not be generated at this time"
+    ) -> None:
         super().__init__(f"Flex busy (1001): {error_message}", code=ERR_BUSY)
         self.error_message = error_message
 
@@ -127,7 +128,10 @@ def _log_retry(exc: Exception, attempt: int, delay: float) -> None:
     """Logging helper passed to execute_with_retry. Renders attempt count and delay."""
     logger.warning(
         "flex: retry %d after %.1fs due to %s: %s",
-        attempt, delay, type(exc).__name__, exc,
+        attempt,
+        delay,
+        type(exc).__name__,
+        exc,
     )
 
 
@@ -151,10 +155,7 @@ SEND_REQUEST_POLICY = RetryPolicy(
     retryable_predicate=lambda e: (
         isinstance(e, FlexBusyError)
         or isinstance(e, httpx.NetworkError)
-        or (
-            isinstance(e, httpx.HTTPStatusError)
-            and e.response.status_code >= 500
-        )
+        or (isinstance(e, httpx.HTTPStatusError) and e.response.status_code >= 500)
     ),
 )
 

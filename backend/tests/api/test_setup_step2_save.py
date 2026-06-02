@@ -9,6 +9,7 @@ The endpoint runs after step2/detect has populated `flex_imports` and
 
 The `set_token_key` autouse fixture is inherited from tests/api/conftest.py.
 """
+
 from decimal import Decimal
 from unittest.mock import AsyncMock
 
@@ -43,9 +44,7 @@ async def _seed_detect(client: AsyncClient, auth_headers: dict, monkeypatch) -> 
         json={"token": "tok_12345_seed", "query_id": "999"},
     )
     assert r.status_code == 200, r.text
-    monkeypatch.setattr(
-        flex_client_mod.FlexClient, "send_request", AsyncMock(return_value="ref")
-    )
+    monkeypatch.setattr(flex_client_mod.FlexClient, "send_request", AsyncMock(return_value="ref"))
     monkeypatch.setattr(
         flex_client_mod.FlexClient,
         "get_statement",
@@ -60,19 +59,13 @@ async def test_step2_save_persists_accounts_and_participations(
 ):
     """Happy path: U99999999 is detected, alias overrides, Participation row created."""
     # Avoid kicking off the real TRM backfill background task.
-    monkeypatch.setattr(
-        "ibkr_control.api.setup._trm_backfill_background", AsyncMock()
-    )
+    monkeypatch.setattr("ibkr_control.api.setup._trm_backfill_background", AsyncMock())
     await _seed_detect(client, auth_headers, monkeypatch)
 
     r = await client.post(
         "/api/setup/step2/save",
         headers=auth_headers,
-        json={
-            "accounts": [
-                {"ibkr_account_id": "U99999999", "alias": "Joint", "pct": "0.5000"}
-            ]
-        },
+        json={"accounts": [{"ibkr_account_id": "U99999999", "alias": "Joint", "pct": "0.5000"}]},
     )
     assert r.status_code == 200, r.text
 
@@ -97,46 +90,32 @@ async def test_step2_save_400_when_account_not_detected(
     client: AsyncClient, auth_headers: dict, monkeypatch
 ):
     """Account ID well-formed but never detected → 400 ACCOUNT_NOT_DETECTED."""
-    monkeypatch.setattr(
-        "ibkr_control.api.setup._trm_backfill_background", AsyncMock()
-    )
+    monkeypatch.setattr("ibkr_control.api.setup._trm_backfill_background", AsyncMock())
     await _seed_detect(client, auth_headers, monkeypatch)
 
     r = await client.post(
         "/api/setup/step2/save",
         headers=auth_headers,
-        json={
-            "accounts": [
-                {"ibkr_account_id": "U88888888", "alias": None, "pct": "1.0000"}
-            ]
-        },
+        json={"accounts": [{"ibkr_account_id": "U88888888", "alias": None, "pct": "1.0000"}]},
     )
     assert r.status_code == 400
     assert r.json()["detail"]["code"] == "ACCOUNT_NOT_DETECTED"
 
 
-async def test_step2_save_rejects_shadow_id(
-    client: AsyncClient, auth_headers: dict, monkeypatch
-):
+async def test_step2_save_rejects_shadow_id(client: AsyncClient, auth_headers: dict, monkeypatch):
     """Shadow IDs (F-suffix) are rejected at Pydantic validation level → 422.
 
     The schema regex `^U\\d{8,11}$` forbids non-digit characters after `U`,
     so "U99999999F" never reaches the endpoint body. Either way the contract
     is "no shadow IDs accepted"; this asserts the actual status code returned.
     """
-    monkeypatch.setattr(
-        "ibkr_control.api.setup._trm_backfill_background", AsyncMock()
-    )
+    monkeypatch.setattr("ibkr_control.api.setup._trm_backfill_background", AsyncMock())
     await _seed_detect(client, auth_headers, monkeypatch)
 
     r = await client.post(
         "/api/setup/step2/save",
         headers=auth_headers,
-        json={
-            "accounts": [
-                {"ibkr_account_id": "U99999999F", "alias": None, "pct": "1.0000"}
-            ]
-        },
+        json={"accounts": [{"ibkr_account_id": "U99999999F", "alias": None, "pct": "1.0000"}]},
     )
     # Pydantic regex rejects the F-suffix at validation; the spec-text-suggested
     # 400 path is unreachable through the public API. Both reject — the contract
@@ -155,18 +134,12 @@ async def test_step2_save_dispatches_trm_background(
     async def fake_trm(user_id: int, job_id: int) -> None:
         dispatched.append((user_id, job_id))
 
-    monkeypatch.setattr(
-        "ibkr_control.api.setup._trm_backfill_background", fake_trm
-    )
+    monkeypatch.setattr("ibkr_control.api.setup._trm_backfill_background", fake_trm)
 
     r = await client.post(
         "/api/setup/step2/save",
         headers=auth_headers,
-        json={
-            "accounts": [
-                {"ibkr_account_id": "U99999999", "alias": "A", "pct": "1.0000"}
-            ]
-        },
+        json={"accounts": [{"ibkr_account_id": "U99999999", "alias": "A", "pct": "1.0000"}]},
     )
     assert r.status_code == 200, r.text
     # FastAPI BackgroundTasks run after the response is sent. httpx's ASGI
@@ -189,19 +162,13 @@ async def test_step2_save_response_includes_trm_backfill_job_id(
     consumes /api/ingest/stream/{job_id} to render progress; without the id,
     a Socrata or persister failure stays invisible (D12 root cause).
     """
-    monkeypatch.setattr(
-        "ibkr_control.api.setup._trm_backfill_background", AsyncMock()
-    )
+    monkeypatch.setattr("ibkr_control.api.setup._trm_backfill_background", AsyncMock())
     await _seed_detect(client, auth_headers, monkeypatch)
 
     r = await client.post(
         "/api/setup/step2/save",
         headers=auth_headers,
-        json={
-            "accounts": [
-                {"ibkr_account_id": "U99999999", "alias": "A", "pct": "1.0000"}
-            ]
-        },
+        json={"accounts": [{"ibkr_account_id": "U99999999", "alias": "A", "pct": "1.0000"}]},
     )
     assert r.status_code == 200, r.text
     body = r.json()
@@ -212,6 +179,7 @@ async def test_step2_save_response_includes_trm_backfill_job_id(
     # returns, otherwise the frontend can race the SSE subscribe before
     # create_job runs and get a 404 on /api/ingest/stream/{job_id}.
     from ibkr_control.ingest.job_tracker import get_tracker
+
     assert get_tracker().has_job(body["trm_backfill_job_id"])
 
 
@@ -240,9 +208,7 @@ async def test_trm_backfill_background_emits_progress_events(monkeypatch):
         ("trm_backfill", "ok"),
         ("done", None),
     ]
-    trm_ok = next(
-        e for e in events if e["step"] == "trm_backfill" and e.get("status") == "ok"
-    )
+    trm_ok = next(e for e in events if e["step"] == "trm_backfill" and e.get("status") == "ok")
     assert trm_ok["n_days"] == 12
     assert tracker.is_done(job_id)
 

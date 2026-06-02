@@ -10,6 +10,7 @@ short-circuit with already_completed=True.
 
 The `set_token_key` autouse fixture is inherited from tests/api/conftest.py.
 """
+
 from unittest.mock import AsyncMock
 
 from httpx import AsyncClient
@@ -29,26 +30,20 @@ _FAKE_XML = b"""<?xml version="1.0"?>
 """
 
 
-async def _run_through_to_step3(
-    client: AsyncClient, auth_headers: dict, monkeypatch
-) -> None:
+async def _run_through_to_step3(client: AsyncClient, auth_headers: dict, monkeypatch) -> None:
     """Walk through step1/save -> step2/detect -> step2/save -> step3/commit(empty).
 
     After this helper returns, the user has creds + an Account + a
     Participation + the step3_xmls flag set, so /finish should succeed.
     """
-    monkeypatch.setattr(
-        "ibkr_control.api.setup._trm_backfill_background", AsyncMock()
-    )
+    monkeypatch.setattr("ibkr_control.api.setup._trm_backfill_background", AsyncMock())
     r = await client.post(
         "/api/setup/step1/save",
         headers=auth_headers,
         json={"token": "tok_value_x_12345", "query_id": "999"},
     )
     assert r.status_code == 200, r.text
-    monkeypatch.setattr(
-        flex_client_mod.FlexClient, "send_request", AsyncMock(return_value="ref")
-    )
+    monkeypatch.setattr(flex_client_mod.FlexClient, "send_request", AsyncMock(return_value="ref"))
     monkeypatch.setattr(
         flex_client_mod.FlexClient,
         "get_statement",
@@ -59,11 +54,7 @@ async def _run_through_to_step3(
     r = await client.post(
         "/api/setup/step2/save",
         headers=auth_headers,
-        json={
-            "accounts": [
-                {"ibkr_account_id": "U99999999", "alias": "A", "pct": "1.0000"}
-            ]
-        },
+        json={"accounts": [{"ibkr_account_id": "U99999999", "alias": "A", "pct": "1.0000"}]},
     )
     assert r.status_code == 200, r.text
     r = await client.post(
@@ -74,18 +65,14 @@ async def _run_through_to_step3(
     assert r.status_code == 200, r.text
 
 
-async def test_finish_400_when_no_participations(
-    client: AsyncClient, auth_headers: dict
-):
+async def test_finish_400_when_no_participations(client: AsyncClient, auth_headers: dict):
     """Pristine user, no participations yet → 400 INCOMPLETE_SETUP."""
     r = await client.post("/api/setup/finish", headers=auth_headers)
     assert r.status_code == 400
     assert r.json()["detail"] == "INCOMPLETE_SETUP"
 
 
-async def test_finish_happy_path(
-    client: AsyncClient, auth_headers: dict, monkeypatch
-):
+async def test_finish_happy_path(client: AsyncClient, auth_headers: dict, monkeypatch):
     """Full wizard walk-through then /finish → setup_completed_at populated."""
     await _run_through_to_step3(client, auth_headers, monkeypatch)
     r = await client.post("/api/setup/finish", headers=auth_headers)
@@ -95,9 +82,7 @@ async def test_finish_happy_path(
     assert state.json()["setup_completed_at"] is not None
 
 
-async def test_finish_idempotent(
-    client: AsyncClient, auth_headers: dict, monkeypatch
-):
+async def test_finish_idempotent(client: AsyncClient, auth_headers: dict, monkeypatch):
     """Calling /finish a second time short-circuits with already_completed=True."""
     await _run_through_to_step3(client, auth_headers, monkeypatch)
     r1 = await client.post("/api/setup/finish", headers=auth_headers)

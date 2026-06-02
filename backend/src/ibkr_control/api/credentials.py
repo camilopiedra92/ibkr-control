@@ -1,4 +1,5 @@
 """Router /api/credentials/flex -- GET (metadata) y PUT (rotate)."""
+
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -21,9 +22,7 @@ async def get_flex_credentials(
     user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> FlexCredentialsRead:
-    creds = await session.scalar(
-        select(FlexCredentials).where(FlexCredentials.user_id == user.id)
-    )
+    creds = await session.scalar(select(FlexCredentials).where(FlexCredentials.user_id == user.id))
     if creds is None:
         raise HTTPException(status_code=404, detail="No Flex credentials configured")
     return FlexCredentialsRead(
@@ -40,9 +39,7 @@ async def update_flex_credentials(
     session: AsyncSession = Depends(get_async_session),
 ) -> dict:
     """Si pasa token, lo valida contra IBKR antes de guardar."""
-    creds = await session.scalar(
-        select(FlexCredentials).where(FlexCredentials.user_id == user.id)
-    )
+    creds = await session.scalar(select(FlexCredentials).where(FlexCredentials.user_id == user.id))
 
     new_token = payload.token
     new_query_id = payload.query_id
@@ -63,9 +60,7 @@ async def update_flex_credentials(
     # Persistir
     if creds is None:
         if not new_token or not new_query_id:
-            raise HTTPException(
-                status_code=400, detail="Primera vez requiere token + query_id"
-            )
+            raise HTTPException(status_code=400, detail="Primera vez requiere token + query_id")
         creds = FlexCredentials(
             user_id=user.id,
             token_encrypted=flex_crypto_mod.encrypt_token(new_token),

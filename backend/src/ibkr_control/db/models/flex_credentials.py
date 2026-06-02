@@ -1,4 +1,5 @@
 """Token Flex encriptado + query_id por user."""
+
 from datetime import datetime
 from sqlalchemy import BigInteger, LargeBinary, String, DateTime, ForeignKey, text
 from sqlalchemy.orm import Mapped, mapped_column

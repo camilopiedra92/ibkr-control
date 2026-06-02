@@ -12,6 +12,7 @@ Patron de transaccion en ingest_xml:
     Si el SAVEPOINT falla, sus writes se revierten pero el log_row sigue vivo
     en la sesion para que ingest_log_entry lo marque como 'failed' y lo commitee.
 """
+
 import logging
 from datetime import date, datetime, timezone
 
@@ -79,8 +80,8 @@ async def ingest_xml(
     *,
     user_id: int,
     xml_bytes: bytes,
-    source: str,    # 'manual_upload' | 'web_service'
-    trigger: str,   # 'cron' | 'manual' | 'wizard'
+    source: str,  # 'manual_upload' | 'web_service'
+    trigger: str,  # 'cron' | 'manual' | 'wizard'
 ) -> int:
     """Ingiere bytes XML pre-descargados. Usa el log + dedup + persister.
 
@@ -103,9 +104,7 @@ async def ingest_xml(
         status = await check_hash_status(session, user_id, h)
         if status == "ok":
             logger.info("flex: duplicate hash %s..., skipped", h[:12])
-            log_row = await session.scalar(
-                select(IngestLog).where(IngestLog.id == log_id)
-            )
+            log_row = await session.scalar(select(IngestLog).where(IngestLog.id == log_id))
             log_row.items_processed = 0
             existing_id = await session.scalar(
                 select(FlexImport.id).where(
@@ -118,11 +117,11 @@ async def ingest_xml(
             logger.warning(
                 "flex: previously poisoned hash %s..., skipped. "
                 "Run scripts/poison_reset.py --user-id %d --xml-hash %s to retry.",
-                h[:12], user_id, h,
+                h[:12],
+                user_id,
+                h,
             )
-            log_row = await session.scalar(
-                select(IngestLog).where(IngestLog.id == log_id)
-            )
+            log_row = await session.scalar(select(IngestLog).where(IngestLog.id == log_id))
             log_row.items_processed = 0
             existing_id = await session.scalar(
                 select(FlexImport.id).where(
@@ -155,8 +154,12 @@ async def ingest_xml(
             # Insert poison row OUTSIDE the rolled-back savepoint so it survives
             # the rollback and gets commited by ingest_log_entry's finally.
             await _insert_poison_row(
-                session, user_id=user_id, xml_hash=h, xml_bytes=xml_bytes,
-                source=source, exc=exc,
+                session,
+                user_id=user_id,
+                xml_hash=h,
+                xml_bytes=xml_bytes,
+                source=source,
+                exc=exc,
             )
             raise
 
@@ -184,7 +187,7 @@ async def run(
     session_factory: async_sessionmaker,
     *,
     user_id: int,
-    trigger: str,   # 'cron' | 'manual' | 'wizard'
+    trigger: str,  # 'cron' | 'manual' | 'wizard'
 ) -> int | None:
     """Hace fetch al Flex WS + ingiere. Devuelve flex_import_id o None si no hubo cambios.
 
@@ -208,23 +211,19 @@ async def run(
                 h = xml_hash(xml_bytes)
                 status = await check_hash_status(session, user_id, h)
                 if status == "ok":
-                    logger.info(
-                        "flex: duplicate hash %s..., skipped (items_processed=0)", h[:12]
-                    )
-                    log_row = await session.scalar(
-                        select(IngestLog).where(IngestLog.id == log_id)
-                    )
+                    logger.info("flex: duplicate hash %s..., skipped (items_processed=0)", h[:12])
+                    log_row = await session.scalar(select(IngestLog).where(IngestLog.id == log_id))
                     log_row.items_processed = 0
                     return None
                 if status == "poison":
                     logger.warning(
                         "flex: previously poisoned hash %s..., skipped. "
                         "Run scripts/poison_reset.py --user-id %d --xml-hash %s to retry.",
-                        h[:12], user_id, h,
+                        h[:12],
+                        user_id,
+                        h,
                     )
-                    log_row = await session.scalar(
-                        select(IngestLog).where(IngestLog.id == log_id)
-                    )
+                    log_row = await session.scalar(select(IngestLog).where(IngestLog.id == log_id))
                     log_row.items_processed = 0
                     return None
                 # status == "absent": proceed with normal flow
@@ -250,14 +249,16 @@ async def run(
                     # survives the rollback and gets commited by ingest_log_entry's
                     # finally.
                     await _insert_poison_row(
-                        session, user_id=user_id, xml_hash=h, xml_bytes=xml_bytes,
-                        source="web_service", exc=exc,
+                        session,
+                        user_id=user_id,
+                        xml_hash=h,
+                        xml_bytes=xml_bytes,
+                        source="web_service",
+                        exc=exc,
                     )
                     raise
 
-                log_row = await session.scalar(
-                    select(IngestLog).where(IngestLog.id == log_id)
-                )
+                log_row = await session.scalar(select(IngestLog).where(IngestLog.id == log_id))
                 if _counters.get("hash_dedup"):
                     log_row.items_processed = 0
                 else:

@@ -3,6 +3,7 @@
 Ej. Shareworks/Solium/Morgan Stanley StockPlan (external_id 'CS-YYMMDD-NN').
 Espeja a Account: global single-user, sin user_id. El particionado per-user
 multi-user aplica a accounts + counterparties juntas (item futuro)."""
+
 from datetime import datetime
 
 from sqlalchemy import BigInteger, DateTime, String, text

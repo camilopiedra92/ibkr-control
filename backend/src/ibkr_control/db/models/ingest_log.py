@@ -1,13 +1,14 @@
 """Observability log — tracks every cron/manual/wizard ingest run."""
+
 from datetime import datetime
 from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, Integer, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ibkr_control.db.base import Base
 
-_JOB_KIND_VALUES = ('flex', 'trm', 'manual_refresh', 'manual_upload', 'setup_initial')
-_STATUS_VALUES = ('running', 'ok', 'failed')
-_TRIGGER_VALUES = ('cron', 'manual', 'wizard')
+_JOB_KIND_VALUES = ("flex", "trm", "manual_refresh", "manual_upload", "setup_initial")
+_STATUS_VALUES = ("running", "ok", "failed")
+_TRIGGER_VALUES = ("cron", "manual", "wizard")
 
 
 class IngestLog(Base):

@@ -1,4 +1,5 @@
 """Tests del parser de Flex XML."""
+
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -121,8 +122,7 @@ def test_cash_transactions_drop_summary_rows():
     xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
     parsed = parse(xml)
     for tx in parsed.cash_transactions:
-        assert tx.ibkr_account_id != "-", \
-            f"SUMMARY row leaked into output (accountId='-'): {tx}"
+        assert tx.ibkr_account_id != "-", f"SUMMARY row leaked into output (accountId='-'): {tx}"
 
 
 def test_closed_lots_capture_transaction_id():
@@ -132,8 +132,9 @@ def test_closed_lots_capture_transaction_id():
     if parsed.closed_lots:
         # At least some closed lots should have transaction_id populated from real XML
         with_id = [c for c in parsed.closed_lots if c.transaction_id is not None]
-        assert len(with_id) > 0, \
+        assert len(with_id) > 0, (
             "Expected transaction_id to be populated from real Activity XML Lot elements"
+        )
 
 
 def test_parses_change_in_dividend_accruals_skips_summary_rows():
@@ -152,8 +153,7 @@ def test_parses_change_in_dividend_accruals_skips_summary_rows():
     assert len(parsed.change_in_dividend_accruals) == 51
     # All kept rows must have real account IDs
     for row in parsed.change_in_dividend_accruals:
-        assert row.ibkr_account_id != "-", \
-            f"SUMMARY row leaked into output (accountId='-'): {row}"
+        assert row.ibkr_account_id != "-", f"SUMMARY row leaked into output (accountId='-'): {row}"
         assert row.level_of_detail == "DETAIL"
 
 
@@ -174,7 +174,7 @@ def test_parses_open_dividend_accruals():
 
 def test_parse_account_info_extracts_alias_type_and_name():
     """AccountInformation tag attrs accountAlias/accountType/name carried into ParsedAccount."""
-    xml = b'''<?xml version="1.0"?>
+    xml = b"""<?xml version="1.0"?>
     <FlexQueryResponse>
       <FlexStatements>
         <FlexStatement accountId="U99999999" fromDate="20260101" toDate="20261231">
@@ -182,7 +182,7 @@ def test_parse_account_info_extracts_alias_type_and_name():
         </FlexStatement>
       </FlexStatements>
     </FlexQueryResponse>
-    '''
+    """
     parsed = parse(xml)
     assert len(parsed.accounts) == 1
     ai = parsed.accounts[0]
@@ -194,7 +194,7 @@ def test_parse_account_info_extracts_alias_type_and_name():
 
 def test_parse_account_info_handles_missing_optional_attrs():
     """If accountAlias/name/accountType absent, fields are None (not empty string)."""
-    xml = b'''<?xml version="1.0"?>
+    xml = b"""<?xml version="1.0"?>
     <FlexQueryResponse>
       <FlexStatements>
         <FlexStatement accountId="U99999999" fromDate="20260101" toDate="20261231">
@@ -202,7 +202,7 @@ def test_parse_account_info_handles_missing_optional_attrs():
         </FlexStatement>
       </FlexStatements>
     </FlexQueryResponse>
-    '''
+    """
     parsed = parse(xml)
     ai = parsed.accounts[0]
     assert ai.account_alias is None
@@ -214,6 +214,7 @@ def test_parse_cash_transaction_captures_transaction_id():
     """Parser must extract transactionID attribute from <CashTransaction> elements
     so the persister can UPSERT by natural key without spurious duplicates."""
     from ibkr_control.ingest.flex.parser import parse
+
     xml = b"""<?xml version="1.0" encoding="UTF-8"?>
 <FlexQueryResponse>
   <FlexStatements>
@@ -239,6 +240,7 @@ def test_parse_cash_transaction_captures_transaction_id():
 def test_parse_transfer_captures_transaction_id():
     """Parser must extract transactionID attribute from <Transfer> elements."""
     from ibkr_control.ingest.flex.parser import parse
+
     xml = b"""<?xml version="1.0" encoding="UTF-8"?>
 <FlexQueryResponse>
   <FlexStatements>

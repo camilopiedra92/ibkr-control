@@ -6,6 +6,7 @@ Uso:
 Sanitiza el cuerpo de los responses (donde esta el XML del Flex con account IDs reales).
 NO toca headers (ya filtrados por vcr_config).
 """
+
 import sys
 from pathlib import Path
 

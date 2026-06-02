@@ -5,6 +5,7 @@ the retry loop on 1001 busy responses, retry exhaustion, auth errors and
 the no-creds short-circuit. The `set_token_key` autouse fixture is
 inherited from tests/api/conftest.py.
 """
+
 from unittest.mock import AsyncMock
 
 from httpx import AsyncClient
@@ -79,9 +80,7 @@ async def test_step2_detect_retries_on_1001_then_succeeds(
         AsyncMock(return_value=_FAKE_XML),
     )
     # Zero out the retry delays so this test doesn't actually sleep [5,15,30]s.
-    monkeypatch.setattr(
-        "ibkr_control.api.setup._DETECT_RETRY_DELAYS", [0, 0, 0]
-    )
+    monkeypatch.setattr("ibkr_control.api.setup._DETECT_RETRY_DELAYS", [0, 0, 0])
 
     r = await client.post("/api/setup/step2/detect", headers=auth_headers)
     assert r.status_code == 200, r.text
@@ -99,9 +98,7 @@ async def test_step2_detect_503_after_max_retries(
         "send_request",
         AsyncMock(side_effect=busy),
     )
-    monkeypatch.setattr(
-        "ibkr_control.api.setup._DETECT_RETRY_DELAYS", [0, 0, 0]
-    )
+    monkeypatch.setattr("ibkr_control.api.setup._DETECT_RETRY_DELAYS", [0, 0, 0])
 
     r = await client.post("/api/setup/step2/detect", headers=auth_headers)
     assert r.status_code == 503
@@ -125,9 +122,7 @@ async def test_step2_detect_401_on_invalid_token(
     assert r.json()["detail"] == "INVALID_TOKEN"
 
 
-async def test_step2_detect_400_when_no_creds(
-    client: AsyncClient, auth_headers: dict
-):
+async def test_step2_detect_400_when_no_creds(client: AsyncClient, auth_headers: dict):
     """No FlexCredentials row → 400 MISSING_CREDENTIALS (short-circuit before IBKR)."""
     r = await client.post("/api/setup/step2/detect", headers=auth_headers)
     assert r.status_code == 400

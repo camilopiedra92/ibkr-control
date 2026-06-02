@@ -13,6 +13,7 @@ Notas sobre el formato Activity XML de IBKR:
   (timestamp con separador punto y coma).
 - Transfers usan "account" (no "transferAccount") como peer account ID.
 """
+
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -20,9 +21,15 @@ from lxml import etree
 
 from ibkr_control.ingest.flex._known_tags import KNOWN_TOP_LEVEL_TAGS, EXPLICITLY_IGNORED
 from ibkr_control.ingest.flex._models import (
-    ParsedAccount, ParsedTrade, ParsedClosedLot, ParsedOpenPositionLot,
-    ParsedCashTransaction, ParsedTransfer, ParsedXML,
-    ParsedDividendAccrual, ParsedOpenDividendAccrual,
+    ParsedAccount,
+    ParsedTrade,
+    ParsedClosedLot,
+    ParsedOpenPositionLot,
+    ParsedCashTransaction,
+    ParsedTransfer,
+    ParsedXML,
+    ParsedDividendAccrual,
+    ParsedOpenDividendAccrual,
     UnknownFlexTagError,
 )
 
@@ -62,10 +69,19 @@ def _parse_datetime(s: str | None) -> datetime | None:
     s = s.strip()
     if ";" in s:
         date_part, time_part = s.split(";", 1)
-        if len(date_part) == 8 and date_part.isdigit() and len(time_part) == 6 and time_part.isdigit():
+        if (
+            len(date_part) == 8
+            and date_part.isdigit()
+            and len(time_part) == 6
+            and time_part.isdigit()
+        ):
             return datetime(
-                int(date_part[:4]), int(date_part[4:6]), int(date_part[6:8]),
-                int(time_part[:2]), int(time_part[2:4]), int(time_part[4:6]),
+                int(date_part[:4]),
+                int(date_part[4:6]),
+                int(date_part[6:8]),
+                int(time_part[:2]),
+                int(time_part[2:4]),
+                int(time_part[4:6]),
             )
     if len(s) == 8 and s.isdigit():
         return datetime(int(s[:4]), int(s[4:6]), int(s[6:8]))
@@ -101,9 +117,7 @@ def parse(xml_bytes: bytes) -> ParsedXML:
     root = etree.fromstring(xml_bytes)
 
     if root.tag != "FlexQueryResponse":
-        raise ValueError(
-            f"Expected root element <FlexQueryResponse>, got <{root.tag}>"
-        )
+        raise ValueError(f"Expected root element <FlexQueryResponse>, got <{root.tag}>")
 
     statements = root.findall(".//FlexStatement")
     if not statements:
@@ -188,22 +202,35 @@ def _dedupe_accounts(accs: list[ParsedAccount]) -> list[ParsedAccount]:
 
 
 def _parse_account_information(elem, accounts: list[ParsedAccount]) -> None:
-    accounts.append(ParsedAccount(
-        ibkr_account_id=elem.get("accountId", ""),
-        currency=elem.get("currency") or "USD",
-        account_alias=elem.get("accountAlias") or None,
-        account_type=elem.get("accountType") or None,
-        name=elem.get("name") or None,
-    ))
+    accounts.append(
+        ParsedAccount(
+            ibkr_account_id=elem.get("accountId", ""),
+            currency=elem.get("currency") or "USD",
+            account_alias=elem.get("accountAlias") or None,
+            account_type=elem.get("accountType") or None,
+            name=elem.get("name") or None,
+        )
+    )
 
 
 # Schema fijo de Trade (atributos que mapean a columnas tipadas).
 # Cualquier otro atributo va a raw_attrs.
-_TRADE_TYPED_ATTRS: frozenset[str] = frozenset({
-    "transactionID", "accountId", "symbol", "assetCategory",
-    "tradeDate", "settleDateTarget", "quantity", "tradePrice",
-    "proceeds", "ibCommission", "openCloseIndicator", "buySell",
-})
+_TRADE_TYPED_ATTRS: frozenset[str] = frozenset(
+    {
+        "transactionID",
+        "accountId",
+        "symbol",
+        "assetCategory",
+        "tradeDate",
+        "settleDateTarget",
+        "quantity",
+        "tradePrice",
+        "proceeds",
+        "ibCommission",
+        "openCloseIndicator",
+        "buySell",
+    }
+)
 
 
 def _parse_trades_wrapper(
@@ -237,21 +264,23 @@ def _parse_trade(elem, trades: list[ParsedTrade]) -> None:
     settle_raw = elem.get("settleDateTarget")
     settle_date = _parse_date(settle_raw) if settle_raw else None
 
-    trades.append(ParsedTrade(
-        transaction_id=elem.get("transactionID") or "",
-        ibkr_account_id=elem.get("accountId") or "",
-        symbol=elem.get("symbol") or "",
-        asset_class=elem.get("assetCategory") or "",
-        trade_date=trade_date,
-        settle_date=settle_date,
-        qty=_dec(elem.get("quantity")),
-        price_usd=_dec(elem.get("tradePrice")),
-        proceeds_usd=_dec(elem.get("proceeds")),
-        commission_usd=_dec(elem.get("ibCommission")),
-        open_close=elem.get("openCloseIndicator") or None,
-        buy_sell=elem.get("buySell") or "BUY",
-        raw_attrs=raw_attrs,
-    ))
+    trades.append(
+        ParsedTrade(
+            transaction_id=elem.get("transactionID") or "",
+            ibkr_account_id=elem.get("accountId") or "",
+            symbol=elem.get("symbol") or "",
+            asset_class=elem.get("assetCategory") or "",
+            trade_date=trade_date,
+            settle_date=settle_date,
+            qty=_dec(elem.get("quantity")),
+            price_usd=_dec(elem.get("tradePrice")),
+            proceeds_usd=_dec(elem.get("proceeds")),
+            commission_usd=_dec(elem.get("ibCommission")),
+            open_close=elem.get("openCloseIndicator") or None,
+            buy_sell=elem.get("buySell") or "BUY",
+            raw_attrs=raw_attrs,
+        )
+    )
 
 
 def _parse_lot_as_closed_lot(elem) -> ParsedClosedLot | None:
@@ -307,9 +336,7 @@ def _parse_closed_lots_wrapper(elem) -> list[ParsedClosedLot]:
     """
     out: list[ParsedClosedLot] = []
     for lot in elem.iterchildren("ClosedLot"):
-        open_date = _parse_date(
-            lot.get("openDateTime") or lot.get("openDate")
-        )
+        open_date = _parse_date(lot.get("openDateTime") or lot.get("openDate"))
         close_dt_raw = lot.get("dateTime") or lot.get("closeDate") or lot.get("tradeDate")
         close_date = _parse_date(close_dt_raw)
         if open_date is None or close_date is None:
@@ -322,18 +349,20 @@ def _parse_closed_lots_wrapper(elem) -> list[ParsedClosedLot]:
         proceeds_raw = lot.get("proceeds")
         proceeds = _dec(proceeds_raw) if proceeds_raw else cost_basis + fifo_pnl
 
-        out.append(ParsedClosedLot(
-            ibkr_account_id=lot.get("accountId") or "",
-            symbol=lot.get("symbol") or "",
-            open_date=open_date,
-            close_date=close_date,
-            close_datetime=close_datetime,
-            qty=_dec(lot.get("quantity")),
-            cost_basis_usd=cost_basis,
-            proceeds_usd=proceeds,
-            fifo_pnl_usd=fifo_pnl,
-            transaction_id=lot.get("transactionID") or None,
-        ))
+        out.append(
+            ParsedClosedLot(
+                ibkr_account_id=lot.get("accountId") or "",
+                symbol=lot.get("symbol") or "",
+                open_date=open_date,
+                close_date=close_date,
+                close_datetime=close_datetime,
+                qty=_dec(lot.get("quantity")),
+                cost_basis_usd=cost_basis,
+                proceeds_usd=proceeds,
+                fifo_pnl_usd=fifo_pnl,
+                transaction_id=lot.get("transactionID") or None,
+            )
+        )
     return out
 
 
@@ -347,25 +376,23 @@ def _parse_open_positions(elem) -> list[ParsedOpenPositionLot]:
     for pos in elem.iterchildren("OpenPosition"):
         if pos.get("levelOfDetail") != "LOT":
             continue  # Skip SUMMARY-level; no individual lot open date
-        open_date = _parse_date(
-            pos.get("openDateTime") or pos.get("holdingPeriodDateTime")
-        )
+        open_date = _parse_date(pos.get("openDateTime") or pos.get("holdingPeriodDateTime"))
         if open_date is None:
             continue  # Can't store a lot without its open date
-        snapshot_date = _parse_date_required(
-            pos.get("reportDate"), "reportDate"
+        snapshot_date = _parse_date_required(pos.get("reportDate"), "reportDate")
+        out.append(
+            ParsedOpenPositionLot(
+                ibkr_account_id=pos.get("accountId") or "",
+                symbol=pos.get("symbol") or "",
+                open_date=open_date,
+                qty=_dec(pos.get("position")),
+                cost_basis_usd=_dec(pos.get("costBasisMoney") or pos.get("costBasisPrice")),
+                mark_price_usd=_dec(pos.get("markPrice")) if pos.get("markPrice") else None,
+                mark_value_usd=_dec(pos.get("positionValue")) if pos.get("positionValue") else None,
+                snapshot_date=snapshot_date,
+                originating_transaction_id=pos.get("originatingTransactionID") or "",
+            )
         )
-        out.append(ParsedOpenPositionLot(
-            ibkr_account_id=pos.get("accountId") or "",
-            symbol=pos.get("symbol") or "",
-            open_date=open_date,
-            qty=_dec(pos.get("position")),
-            cost_basis_usd=_dec(pos.get("costBasisMoney") or pos.get("costBasisPrice")),
-            mark_price_usd=_dec(pos.get("markPrice")) if pos.get("markPrice") else None,
-            mark_value_usd=_dec(pos.get("positionValue")) if pos.get("positionValue") else None,
-            snapshot_date=snapshot_date,
-            originating_transaction_id=pos.get("originatingTransactionID") or "",
-        ))
     return out
 
 
@@ -382,39 +409,75 @@ def _parse_cash_transactions(elem) -> list[ParsedCashTransaction]:
         tx_date = _parse_date(tx.get("dateTime") or tx.get("settleDate"))
         if tx_date is None:
             continue
-        out.append(ParsedCashTransaction(
-            transaction_id=tx.get("transactionID") or "",
-            ibkr_account_id=tx.get("accountId") or "",
-            type=tx.get("type") or "",
-            currency=tx.get("currency") or "USD",
-            amount_usd=_dec(tx.get("amount")),
-            description=tx.get("description") or None,
-            date=tx_date,
-            symbol=tx.get("symbol") or None,
-        ))
+        out.append(
+            ParsedCashTransaction(
+                transaction_id=tx.get("transactionID") or "",
+                ibkr_account_id=tx.get("accountId") or "",
+                type=tx.get("type") or "",
+                currency=tx.get("currency") or "USD",
+                amount_usd=_dec(tx.get("amount")),
+                description=tx.get("description") or None,
+                date=tx_date,
+                symbol=tx.get("symbol") or None,
+            )
+        )
     return out
 
 
 # Schema fijo de ChangeInDividendAccrual (atributos que mapean a columnas tipadas).
 # Cualquier otro atributo va a raw_attrs.
-_DIV_ACCRUAL_TYPED_ATTRS: frozenset[str] = frozenset({
-    "accountId", "symbol", "conid", "isin", "issuerCountryCode", "currency",
-    "exDate", "payDate", "reportDate", "date", "quantity", "grossRate",
-    "grossAmount", "tax", "fee", "netAmount", "actionID",
-    "assetCategory", "subCategory", "levelOfDetail",
-    # `code` (Po/Re) promoted to first-class column post A3 amendment #2
-    # (2026-05-25). Excluded from raw_attrs so it's not stored twice.
-    "code",
-})
+_DIV_ACCRUAL_TYPED_ATTRS: frozenset[str] = frozenset(
+    {
+        "accountId",
+        "symbol",
+        "conid",
+        "isin",
+        "issuerCountryCode",
+        "currency",
+        "exDate",
+        "payDate",
+        "reportDate",
+        "date",
+        "quantity",
+        "grossRate",
+        "grossAmount",
+        "tax",
+        "fee",
+        "netAmount",
+        "actionID",
+        "assetCategory",
+        "subCategory",
+        "levelOfDetail",
+        # `code` (Po/Re) promoted to first-class column post A3 amendment #2
+        # (2026-05-25). Excluded from raw_attrs so it's not stored twice.
+        "code",
+    }
+)
 
 # Schema fijo de OpenDividendAccrual.
-_OPEN_DIV_ACCRUAL_TYPED_ATTRS: frozenset[str] = frozenset({
-    "accountId", "symbol", "conid", "isin", "issuerCountryCode", "currency",
-    "exDate", "payDate", "reportDate", "quantity", "grossRate",
-    "grossAmount", "tax", "fee", "netAmount", "actionID",
-    "assetCategory", "subCategory",
-    "code",  # promoted post A3 amendment #2 (preemptive mirror)
-})
+_OPEN_DIV_ACCRUAL_TYPED_ATTRS: frozenset[str] = frozenset(
+    {
+        "accountId",
+        "symbol",
+        "conid",
+        "isin",
+        "issuerCountryCode",
+        "currency",
+        "exDate",
+        "payDate",
+        "reportDate",
+        "quantity",
+        "grossRate",
+        "grossAmount",
+        "tax",
+        "fee",
+        "netAmount",
+        "actionID",
+        "assetCategory",
+        "subCategory",
+        "code",  # promoted post A3 amendment #2 (preemptive mirror)
+    }
+)
 
 
 def _parse_change_in_dividend_accruals(
@@ -438,30 +501,32 @@ def _parse_change_in_dividend_accruals(
         raw_attrs = {k: v for k, v in row.attrib.items() if k not in _DIV_ACCRUAL_TYPED_ATTRS}
         fee_raw = row.get("fee")
         gross_rate_raw = row.get("grossRate")
-        out.append(ParsedDividendAccrual(
-            ibkr_account_id=acct,
-            symbol=row.get("symbol") or "",
-            conid=_attr(row, "conid"),
-            isin=_attr(row, "isin"),
-            issuer_country=_attr(row, "issuerCountryCode"),
-            currency=row.get("currency") or "USD",
-            ex_date=_parse_date(row.get("exDate")),
-            pay_date=_parse_date(row.get("payDate")),
-            report_date=rd,
-            accrual_date=_parse_date(row.get("date")),
-            quantity=_dec(row.get("quantity")),
-            gross_rate_per_share=_dec(gross_rate_raw) if gross_rate_raw else None,
-            gross_amount_usd=_dec(row.get("grossAmount")),
-            tax_usd=_dec(row.get("tax")),
-            fee_usd=_dec(fee_raw) if fee_raw else None,
-            net_amount_usd=_dec(row.get("netAmount")),
-            action_id=_attr(row, "actionID"),
-            asset_category=_attr(row, "assetCategory"),
-            sub_category=_attr(row, "subCategory"),
-            level_of_detail=_attr(row, "levelOfDetail"),
-            code=row.get("code") or "",
-            raw_attrs=raw_attrs,
-        ))
+        out.append(
+            ParsedDividendAccrual(
+                ibkr_account_id=acct,
+                symbol=row.get("symbol") or "",
+                conid=_attr(row, "conid"),
+                isin=_attr(row, "isin"),
+                issuer_country=_attr(row, "issuerCountryCode"),
+                currency=row.get("currency") or "USD",
+                ex_date=_parse_date(row.get("exDate")),
+                pay_date=_parse_date(row.get("payDate")),
+                report_date=rd,
+                accrual_date=_parse_date(row.get("date")),
+                quantity=_dec(row.get("quantity")),
+                gross_rate_per_share=_dec(gross_rate_raw) if gross_rate_raw else None,
+                gross_amount_usd=_dec(row.get("grossAmount")),
+                tax_usd=_dec(row.get("tax")),
+                fee_usd=_dec(fee_raw) if fee_raw else None,
+                net_amount_usd=_dec(row.get("netAmount")),
+                action_id=_attr(row, "actionID"),
+                asset_category=_attr(row, "assetCategory"),
+                sub_category=_attr(row, "subCategory"),
+                level_of_detail=_attr(row, "levelOfDetail"),
+                code=row.get("code") or "",
+                raw_attrs=raw_attrs,
+            )
+        )
 
 
 def _parse_open_dividend_accruals(
@@ -482,28 +547,30 @@ def _parse_open_dividend_accruals(
         raw_attrs = {k: v for k, v in row.attrib.items() if k not in _OPEN_DIV_ACCRUAL_TYPED_ATTRS}
         fee_raw = row.get("fee")
         gross_rate_raw = row.get("grossRate")
-        out.append(ParsedOpenDividendAccrual(
-            ibkr_account_id=acct,
-            symbol=row.get("symbol") or "",
-            conid=_attr(row, "conid"),
-            isin=_attr(row, "isin"),
-            issuer_country=_attr(row, "issuerCountryCode"),
-            currency=row.get("currency") or "USD",
-            ex_date=_parse_date(row.get("exDate")),
-            pay_date=_parse_date(row.get("payDate")),
-            report_date=rd,
-            quantity=_dec(row.get("quantity")),
-            gross_rate_per_share=_dec(gross_rate_raw) if gross_rate_raw else None,
-            gross_amount_usd=_dec(row.get("grossAmount")),
-            tax_usd=_dec(row.get("tax")),
-            fee_usd=_dec(fee_raw) if fee_raw else None,
-            net_amount_usd=_dec(row.get("netAmount")),
-            action_id=_attr(row, "actionID"),
-            asset_category=_attr(row, "assetCategory"),
-            sub_category=_attr(row, "subCategory"),
-            code=row.get("code") or "",
-            raw_attrs=raw_attrs,
-        ))
+        out.append(
+            ParsedOpenDividendAccrual(
+                ibkr_account_id=acct,
+                symbol=row.get("symbol") or "",
+                conid=_attr(row, "conid"),
+                isin=_attr(row, "isin"),
+                issuer_country=_attr(row, "issuerCountryCode"),
+                currency=row.get("currency") or "USD",
+                ex_date=_parse_date(row.get("exDate")),
+                pay_date=_parse_date(row.get("payDate")),
+                report_date=rd,
+                quantity=_dec(row.get("quantity")),
+                gross_rate_per_share=_dec(gross_rate_raw) if gross_rate_raw else None,
+                gross_amount_usd=_dec(row.get("grossAmount")),
+                tax_usd=_dec(row.get("tax")),
+                fee_usd=_dec(fee_raw) if fee_raw else None,
+                net_amount_usd=_dec(row.get("netAmount")),
+                action_id=_attr(row, "actionID"),
+                asset_category=_attr(row, "assetCategory"),
+                sub_category=_attr(row, "subCategory"),
+                code=row.get("code") or "",
+                raw_attrs=raw_attrs,
+            )
+        )
 
 
 def _parse_transfers(elem) -> list[ParsedTransfer]:

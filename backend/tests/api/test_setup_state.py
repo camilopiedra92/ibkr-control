@@ -6,6 +6,7 @@ table counts) with stored fields (setup_progress JSONB + setup_completed_at).
 
 The `set_token_key` autouse fixture is inherited from tests/api/conftest.py.
 """
+
 from httpx import AsyncClient
 
 
@@ -22,9 +23,7 @@ async def test_state_initial_all_false(client: AsyncClient, auth_headers: dict):
     assert body["pending_stash_temp_ids"] == []
 
 
-async def test_state_step1_credentials_derives_from_table(
-    client: AsyncClient, auth_headers: dict
-):
+async def test_state_step1_credentials_derives_from_table(client: AsyncClient, auth_headers: dict):
     """After step1/save, step1_credentials flips True — derived from flex_credentials row."""
     r = await client.post(
         "/api/setup/step1/save",
