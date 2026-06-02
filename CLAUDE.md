@@ -2,13 +2,15 @@
 
 ## ⏯ Cómo continuar (próxima sesión)
 
-**Phase 2 + wizard redesign + persister idempotente + flex hardening TODOS completos, mergeados y tageados (tags `v0.2.0-ingest`, `v0.2.1-persistent-state`, `v0.2.2-wizard-redesign`, `v0.2.3-persister-idempotent`, `v0.2.4-flex-hardening` — los 5 pusheados a `origin`). `main` limpio y up-to-date con remote. Próximo: Phase 3.**
+**Phase 2.x + Phase 2.7 (persister cleanup) + lint/format cleanup TODOS completos y mergeados a `main` (HEAD `e363d3f`). Tags `v0.2.0`→`v0.2.5`. Próximo: Phase 3.**
 
-> Verificado contra git/tests el 2026-06-02: `main` clean + up-to-date con `origin/main`, los 5 tags `v0.2*` en remote (SHAs locales == remotos), `uv run pytest -q` → 290 passed, `pnpm build` → exit 0. El pre-Phase-3 checklist de abajo quedó todo en verde.
+> Verificado contra git/tests el 2026-06-02 (cierre de sesión): `main` en `e363d3f`, working tree limpio. `cd backend && uv run pytest -q` → **299 passed**. `ruff check .` → clean, `ruff format --check .` → 0 drift. `cd frontend && pnpm lint` → 0 errores, `pnpm build` → exit 0, vitest 7 passed. El pre-Phase-3 checklist de abajo quedó todo en verde.
+
+> ⚠️ **PENDIENTE DE PUSH (acción del usuario):** `main` está **19 commits ahead de `origin/main`** y el tag `v0.2.5-persister-cleanup` es **local** (sin push). Todo está commiteado local (nada se pierde), pero para respaldar en remote: `git push origin main && git push origin v0.2.5-persister-cleanup`. Tags `v0.2.0`→`v0.2.4` ya están en `origin`.
 
 Todas las branches de Phase 2.x ya mergeadas a `main`: `phase2/ingestion` + `feat/wizard-redesign` + `phase25/flex-persister-idempotent` + `phase26/flex-hardening` (esta última via PR #2, merge `0e576f3`). Smoke tests en dev completados (wizard 2026-05-24; persister idempotente 2026-05-25).
 
-Tag `v0.2.0-ingest` apunta al cierre original de polish (`a606be2`). Tag `v0.2.1-persistent-state` apunta a `172cc12` — incluye SQLAlchemyJobStore + DB-backed rate limit. Tag `v0.2.2-wizard-redesign` apunta al cierre del rewrite del wizard (detect-first, F-filter en persister, Migration H wipea legacy). Tag `v0.2.3-persister-idempotent` apunta al fix del bug del 2026-05-25 (D13 [BUG-FIXED]): rewrite del Flex persister a UPSERT por natural key — cron + manual refresh ahora idempotentes fila por fila + smoke test end-to-end validado (segundo Flex refresh real-conditions devuelve `items_processed=0` sin failures). Tag `v0.2.4-flex-hardening` apunta a `0e576f3` (merge de Phase 2.6). **290/0 backend tests pasan, frontend builds clean.**
+Tag `v0.2.0-ingest` apunta al cierre original de polish (`a606be2`). Tag `v0.2.1-persistent-state` apunta a `172cc12` — incluye SQLAlchemyJobStore + DB-backed rate limit. Tag `v0.2.2-wizard-redesign` apunta al cierre del rewrite del wizard (detect-first, F-filter en persister, Migration H wipea legacy). Tag `v0.2.3-persister-idempotent` apunta al fix del bug del 2026-05-25 (D13 [BUG-FIXED]): rewrite del Flex persister a UPSERT por natural key — cron + manual refresh ahora idempotentes fila por fila + smoke test end-to-end validado (segundo Flex refresh real-conditions devuelve `items_processed=0` sin failures). Tag `v0.2.4-flex-hardening` apunta a `0e576f3` (merge de Phase 2.6). Tag `v0.2.5-persister-cleanup` apunta al cierre de Phase 2.7 (counterparties + exclusive arc; drop transfer_lots — ver Retrospectiva §"Phase 2.7"). Post-Phase-2.7 se agregó lint/format cleanup en la misma sesión: ruff (backend, 41 errores → 0 + `ruff format` en toda la base) + ESLint flat config nuevo en frontend (no existía linter — ver §"Phase 2.7" lecciones). **299/0 backend tests pasan, frontend lint/build/vitest clean.**
 
 Fixes post-deploy del wizard ya en `main` + pusheados: `8bd578f` infra DNS fix para container backend (resolver local AdGuard/NextDNS SERVFAILa `gdcdyn.interactivebrokers.com` → pinned a `1.1.1.1`/`8.8.8.8`), `24aa5f9` fix gap del fallback "subir XML manual" (ahora persiste igual que `step2/detect` para que `step2/save` valide contra `accounts`), `4eb4f80` migración a endpoints V3 oficiales (`ndcdyn` + `/AccountManagement/FlexWebService/`) + User-Agent header requerido. Ver §"Wizard redesign post-deploy" abajo para detalle completo.
 
@@ -65,10 +67,11 @@ Smoke test en dev + push a remote YA están hechos (2026-05-24/25, ver §"Wizard
 
 ### Pre-Phase-3 checklist (TODO verificado verde el 2026-06-02)
 
-- [x] `git status` limpio en `main` (up-to-date con `origin/main`)
-- [x] `git tag -l "v0.2*"` muestra `v0.2.0-ingest` + `v0.2.1-persistent-state` + `v0.2.2-wizard-redesign` + `v0.2.3-persister-idempotent` + `v0.2.4-flex-hardening` (los 5 pusheados a remote)
-- [x] `cd backend && uv run pytest -q` → 290 passed (era 245 al cierre de Phase 2.5; +45 por Phase 2.6 — RetryPolicy + poison + retention + replay + health + isolation tests)
-- [x] `cd frontend && pnpm build` → exit 0 (17 rutas)
+- [x] `git status` limpio en `main` (HEAD `e363d3f`; ⚠️ 19 commits ahead de `origin/main` — push pendiente, ver arriba)
+- [x] `git tag -l "v0.2*"` muestra `v0.2.0`→`v0.2.5` (6 tags). `v0.2.0`→`v0.2.4` en remote; `v0.2.5-persister-cleanup` local sin push
+- [x] `cd backend && uv run pytest -q` → 299 passed (era 290 al cierre de Phase 2.6; +9 por Phase 2.7 — counterparties model + migración + persister + integración)
+- [x] `cd backend && uv run ruff check .` → clean · `ruff format --check .` → 0 drift (lint/format adoptados en toda la base esta sesión)
+- [x] `cd frontend && pnpm lint` → 0 errores (ESLint flat config nuevo) · `pnpm build` → exit 0 · vitest 7 passed
 - [ ] Leer `docs/plans/2026-05-24-phase2-polish-backlog.md` § "Deuda conocida" (D1-D13; D13 [BUG-FIXED] documenta el incidente del persister + lecciones)
 - [ ] (Opcional) `docker compose ps` para confirmar postgres + backend healthy si vas a smoke test
 
