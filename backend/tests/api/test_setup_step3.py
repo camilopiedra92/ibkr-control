@@ -12,7 +12,6 @@ the DB.
 
 The `set_token_key` autouse fixture is inherited from tests/api/conftest.py.
 """
-import pytest
 from httpx import AsyncClient
 
 

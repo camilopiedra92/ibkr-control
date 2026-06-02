@@ -1,7 +1,6 @@
 """Tests de /api/ingest/* (trigger + stream + logs)."""
 import asyncio
 
-import pytest
 from httpx import AsyncClient
 
 

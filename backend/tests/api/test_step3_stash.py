@@ -1,8 +1,7 @@
 """In-memory stash for Step 3 XML uploads (per spec section 2 + D11)."""
 import time
-import pytest
 
-from ibkr_control.api._step3_stash import Step3Stash, StashEntry
+from ibkr_control.api._step3_stash import Step3Stash
 
 
 def test_stash_put_and_get():

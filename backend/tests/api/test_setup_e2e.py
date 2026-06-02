@@ -1,7 +1,6 @@
 """E2E: full wizard flow from credentials to finish, asserting invariants."""
 from unittest.mock import AsyncMock
 
-import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine

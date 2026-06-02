@@ -7,7 +7,6 @@ filtered at the persister boundary.
 
 The `set_token_key` autouse fixture is inherited from tests/api/conftest.py.
 """
-import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine

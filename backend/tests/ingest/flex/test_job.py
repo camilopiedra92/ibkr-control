@@ -1,5 +1,9 @@
 """Tests del orchestrator flex_job (lock + log + parser + persister)."""
+import logging
+from datetime import date as _date
 from pathlib import Path
+from unittest.mock import AsyncMock
+
 import pytest
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -460,10 +464,6 @@ async def test_run_returns_none_if_hash_already_known(
 # Task 6: per-user fast-path with distinct logging (ok vs poison)
 # ---------------------------------------------------------------------------
 
-import logging
-from datetime import date as _date
-from unittest.mock import AsyncMock
-
 
 @pytest.mark.asyncio
 async def test_run_logs_info_on_ok_hash_skip(
@@ -473,7 +473,6 @@ async def test_run_logs_info_on_ok_hash_skip(
     from sqlalchemy.ext.asyncio import async_sessionmaker
     from ibkr_control.db.models.flex_credentials import FlexCredentials
     from ibkr_control.db.models.flex_raw import FlexImport as FI
-    from ibkr_control.ingest.flex import client as flex_client_mod
     from ibkr_control.ingest.flex import crypto as flex_crypto_mod
     from ibkr_control.ingest.hash_dedup import xml_hash
 

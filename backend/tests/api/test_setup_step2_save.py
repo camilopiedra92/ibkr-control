@@ -12,7 +12,6 @@ The `set_token_key` autouse fixture is inherited from tests/api/conftest.py.
 from decimal import Decimal
 from unittest.mock import AsyncMock
 
-import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine

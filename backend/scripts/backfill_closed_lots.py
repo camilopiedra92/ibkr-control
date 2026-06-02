@@ -15,7 +15,6 @@ recovered (los closed_lots que estaban perdidos por collapse del transaction_id
 solo).
 """
 import asyncio
-import sys
 
 from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker

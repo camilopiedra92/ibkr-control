@@ -11,7 +11,6 @@ composite UNIQUE (transaction_id, close_datetime, qty).
 from typing import Sequence, Union
 
 from alembic import op
-import sqlalchemy as sa
 
 
 revision: str = 'a5199ec783c6'

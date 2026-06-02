@@ -1,6 +1,5 @@
 """Tests del TRM job orchestrator."""
 from datetime import date
-from decimal import Decimal
 import pytest
 import respx
 from httpx import HTTPStatusError, Response

@@ -364,8 +364,6 @@ async def test_update_flex_credentials_handler_token_ping_succeeds(
     async def fake_send_request(query_id):
         return "REF-CODE"
 
-    original_init = flex_client_mod.FlexClient.__init__
-
     class FakeFlexClient:
         def __init__(self, token):
             self.token = token
@@ -443,7 +441,6 @@ async def test_update_flex_credentials_handler_updates_existing(
 
     from ibkr_control.api.credentials import update_flex_credentials
     from ibkr_control.api._schemas import FlexCredentialsUpdate
-    from ibkr_control.ingest.flex import client as flex_client_mod
     from ibkr_control.db.models.flex_credentials import FlexCredentials
     from ibkr_control.ingest.flex import crypto as crypto_mod
 
@@ -463,7 +460,6 @@ async def test_update_flex_credentials_handler_updates_existing(
     assert result == {"ok": True}
 
     # Verify query_id was updated
-    from sqlalchemy import select
     await db_session.refresh(creds)
     assert creds.ytd_query_id == "NEW-QID-DIRECT"
 

@@ -52,7 +52,6 @@ async def ephemeral_session_factory(ephemeral_postgres, ephemeral_db_url, monkey
     cfg.set_main_option("script_location", str(backend_root / "alembic"))
 
     # alembic command.upgrade is sync — run in thread to not block event loop
-    sync_url = ephemeral_postgres.get_connection_url()
     await asyncio.to_thread(command.upgrade, cfg, "head")
 
     engine = create_async_engine(ephemeral_db_url, echo=False)

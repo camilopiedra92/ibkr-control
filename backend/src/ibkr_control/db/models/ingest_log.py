@@ -1,6 +1,6 @@
 """Observability log — tracks every cron/manual/wizard ingest run."""
 from datetime import datetime
-from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, Text, text
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, Integer, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ibkr_control.db.base import Base

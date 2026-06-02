@@ -1,7 +1,6 @@
 """Tests del endpoint /api/health/ingest (R4 backend + R6 API)."""
 from datetime import datetime, timedelta, timezone
 
-import pytest
 from httpx import AsyncClient
 from sqlalchemy import insert
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine

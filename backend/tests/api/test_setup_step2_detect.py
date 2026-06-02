@@ -7,7 +7,6 @@ inherited from tests/api/conftest.py.
 """
 from unittest.mock import AsyncMock
 
-import pytest
 from httpx import AsyncClient
 
 from ibkr_control.ingest.flex import client as flex_client_mod

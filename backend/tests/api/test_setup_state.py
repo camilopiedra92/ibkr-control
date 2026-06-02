@@ -6,7 +6,6 @@ table counts) with stored fields (setup_progress JSONB + setup_completed_at).
 
 The `set_token_key` autouse fixture is inherited from tests/api/conftest.py.
 """
-import pytest
 from httpx import AsyncClient
 
 

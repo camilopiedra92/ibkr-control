@@ -23,7 +23,6 @@ Notas sobre _is_pending:
   - Cualquier otra estructura → ready (conservador: deja que el parser falle
     con un mensaje informativo en vez de ciclar para siempre).
 """
-import asyncio
 import logging
 import time
 from typing import Final

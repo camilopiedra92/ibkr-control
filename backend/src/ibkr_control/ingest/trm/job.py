@@ -11,7 +11,7 @@ Patron de transaccion:
 TRM es global (no per-user): advisory_lock con user_id=None.
 """
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from ibkr_control.db.models.ingest_log import IngestLog
 from ibkr_control.db.models.trm import TrmDay

@@ -16,17 +16,24 @@ Nota: el plan original pedía 3 fixtures (2024 + 2025 + 2026_ytd), pero solo hay
 2 sanitizados en el repo. La intención del spec R3 (idempotency + count parity
 × múltiples fixtures reales) está cubierta con los 2 disponibles.
 """
+import asyncio as _asyncio
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
 import pytest
+from alembic import command as _alembic_cmd
+from alembic.config import Config as _AlembicConfig
 from lxml import etree
 from sqlalchemy import func, select, insert
+from sqlalchemy.ext.asyncio import (
+    async_sessionmaker as _async_sessionmaker,
+    create_async_engine as _create_async_engine,
+)
 
 from ibkr_control.auth.models import User
 from ibkr_control.db.models.flex_raw import (
-    FlexImport, Trade, ClosedLot, OpenPositionLot, CashTransaction,
+    Trade, ClosedLot, OpenPositionLot, CashTransaction,
     Transfer, ChangeInDividendAccrual, OpenDividendAccrual,
 )
 from ibkr_control.ingest.flex.parser import parse
@@ -228,13 +235,6 @@ async def test_closed_lots_sum_matches_pool_2025(ephemeral_session_factory):
     assert db_sum == xml_sum, (
         f"DB sum {db_sum} != XML sum {xml_sum} (delta: {db_sum - xml_sum})"
     )
-
-
-import asyncio as _asyncio
-
-from alembic import command as _alembic_cmd
-from alembic.config import Config as _AlembicConfig
-from sqlalchemy.ext.asyncio import async_sessionmaker as _async_sessionmaker, create_async_engine as _create_async_engine
 
 
 @pytest.mark.asyncio

@@ -4,7 +4,7 @@ from datetime import date
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ibkr_control.db.models.flex_raw import FlexImport, Trade, OpenPositionLot, Transfer
+from ibkr_control.db.models.flex_raw import Trade, OpenPositionLot, Transfer
 from ibkr_control.ingest.flex._upsert_helpers import (
     _upsert_immutable, _upsert_snapshot,
     _upsert_immutable_returning_inserted, _chunks,

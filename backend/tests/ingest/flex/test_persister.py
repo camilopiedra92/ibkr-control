@@ -298,7 +298,6 @@ async def test_persist_dividend_accruals_from_2025_fixture(
     assert n_open == 1, f"Expected 1 open_dividend_accruals, got {n_open}"
 
     # Verify the NKE row's data
-    from sqlalchemy.orm import selectinload
     row = await db_session.scalar(
         select(OpenDividendAccrual).where(OpenDividendAccrual.flex_import_id == fi_id)
     )
@@ -415,7 +414,6 @@ async def test_persist_does_not_delete_poison_rows(db_session, sample_user):
     """R1: poison rows are forensic evidence — never auto-deleted."""
     from pathlib import Path
     from datetime import date
-    from lxml import etree
     from sqlalchemy import select
     from ibkr_control.db.models.flex_raw import FlexImport
     from ibkr_control.ingest.flex.parser import parse
