@@ -79,6 +79,13 @@ class Trade(Base):
         CheckConstraint("buy_sell IN ('BUY', 'SELL')", name="buy_sell"),
         Index(None, "account_id", "symbol"),
         Index(None, "trade_date"),
+        {
+            "comment": (
+                "Account-scoped. Visibilidad vía participations; sin user_id. "
+                "transaction_id UNIQUE global correcto — un hecho pertenece a la "
+                "cuenta, no al usuario."
+            )
+        },
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -113,6 +120,14 @@ class ClosedLot(Base):
             "fifo_pnl_usd",
             name="uq_closed_lots_natural_key",
         ),
+        {
+            "comment": (
+                "Account-scoped. Visibilidad vía participations; sin user_id. "
+                "Identidad por natural key compuesto (uq_closed_lots_natural_key); "
+                "transaction_id NO es único global — múltiples ejecuciones de "
+                "cierre lo comparten (amendment A3)."
+            )
+        },
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -154,6 +169,14 @@ class OpenPositionLot(Base):
             "originating_transaction_id",
             name="uq_open_position_lots_natural_key",
         ),
+        {
+            "comment": (
+                "Account-scoped. Visibilidad vía participations; sin user_id. "
+                "Identidad por natural key compuesto "
+                "(uq_open_position_lots_natural_key); no hay transaction_id "
+                "global, sí originating_transaction_id como discriminador."
+            )
+        },
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -183,6 +206,13 @@ class Transfer(Base):
             "(dst_account_id IS NOT NULL) <> (dst_counterparty_id IS NOT NULL)",
             name="dst_arc",
         ),
+        {
+            "comment": (
+                "Account-scoped. Visibilidad vía participations; sin user_id. "
+                "transaction_id UNIQUE global correcto — un hecho pertenece a la "
+                "cuenta, no al usuario."
+            )
+        },
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -211,7 +241,16 @@ class Transfer(Base):
 
 class CashTransaction(Base):
     __tablename__ = "cash_transactions"
-    __table_args__ = (Index(None, "date"),)
+    __table_args__ = (
+        Index(None, "date"),
+        {
+            "comment": (
+                "Account-scoped. Visibilidad vía participations; sin user_id. "
+                "transaction_id UNIQUE global correcto — un hecho pertenece a la "
+                "cuenta, no al usuario."
+            )
+        },
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     flex_import_id: Mapped[int | None] = mapped_column(
@@ -249,6 +288,13 @@ class ChangeInDividendAccrual(Base):
             "code",
             name="uq_change_in_dividend_accruals_natural_key",
         ),
+        {
+            "comment": (
+                "Account-scoped. Visibilidad vía participations; sin user_id. "
+                "Identidad por natural key compuesto "
+                "(uq_change_in_dividend_accruals_natural_key); sin transaction_id."
+            )
+        },
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -300,6 +346,13 @@ class OpenDividendAccrual(Base):
             "code",
             name="uq_open_dividend_accruals_natural_key",
         ),
+        {
+            "comment": (
+                "Account-scoped. Visibilidad vía participations; sin user_id. "
+                "Identidad por natural key compuesto "
+                "(uq_open_dividend_accruals_natural_key); sin transaction_id."
+            )
+        },
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

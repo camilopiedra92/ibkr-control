@@ -14,6 +14,7 @@ from ibkr_control.db.base import Base
 
 class Counterparty(Base):
     __tablename__ = "counterparties"
+    __table_args__ = {"comment": "Identidad compartida externa (espeja accounts). Sin user_id."}
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     external_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
