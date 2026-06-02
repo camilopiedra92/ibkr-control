@@ -1,6 +1,6 @@
 """Pydantic schemas para los endpoints Phase 2."""
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from pydantic import BaseModel, Field
 
@@ -163,3 +163,27 @@ class WizardStateResponse(BaseModel):
     setup_completed_at: datetime | None
     detected_accounts: list[DetectedAccount] | None = None
     pending_stash_temp_ids: list[str] = Field(default_factory=list)
+
+
+# -- Grants -----------------------------------------------------------------
+
+
+class GrantCreate(BaseModel):
+    grantee_email: str
+    valid_from: date
+    valid_to: date | None = None
+
+
+class GrantRead(BaseModel):
+    grantor_user_id: int
+    grantee_user_id: int
+    grantor_email: str
+    grantee_email: str
+    role: str
+    valid_from: date
+    valid_to: date | None
+
+
+class GrantListResponse(BaseModel):
+    granted: list[GrantRead]
+    received: list[GrantRead]
