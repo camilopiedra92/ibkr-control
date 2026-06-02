@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine
 from testcontainers.postgres import PostgresContainer
 
 import ibkr_control.db  # noqa: F401  (carga modelos en Base.metadata)
@@ -39,18 +39,29 @@ def test_migrations_apply_cleanly_and_match_metadata(fresh_postgres, monkeypatch
 
     command.upgrade(cfg, "head")
 
-    # Inspect via sync driver — mas simple que async run_sync para esta verificacion.
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+
     engine = create_engine(sync_url)
-    inspector = inspect(engine)
-    existing = set(inspector.get_table_names())
+    with engine.connect() as conn:
+        ctx = MigrationContext.configure(
+            conn,
+            opts={
+                "compare_type": True,
+                "compare_server_default": True,
+                "target_metadata": Base.metadata,
+            },
+        )
+        diffs = compare_metadata(ctx, Base.metadata)
     engine.dispose()
 
-    expected = set(Base.metadata.tables.keys())
-    extra_alembic_tables = existing - expected - {"alembic_version"}
-    missing = expected - existing
+    def _is_ignorable(diff):
+        flat = diff if isinstance(diff, tuple) else (diff,)
+        text = repr(flat)
+        return "apscheduler_jobs" in text or "alembic_version" in text
 
-    assert not missing, f"tablas en Base.metadata faltantes tras upgrade head: {missing}"
-    assert not extra_alembic_tables, (
-        f"tablas creadas por migrations pero NO declaradas en Base.metadata "
-        f"(drift): {extra_alembic_tables}"
+    real = [d for d in diffs if not _is_ignorable(d)]
+    assert not real, (
+        "DRIFT entre migraciones y Base.metadata (columnas/tipos/índices/uniques/"
+        "FKs/server_defaults):\n" + "\n".join(repr(d) for d in real)
     )
