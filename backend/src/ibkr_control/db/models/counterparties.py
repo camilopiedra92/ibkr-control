@@ -16,7 +16,7 @@ class Counterparty(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     external_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
-    source_label: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_label: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("NOW()")
     )
