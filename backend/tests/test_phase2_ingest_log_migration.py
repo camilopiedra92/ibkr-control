@@ -59,15 +59,15 @@ async def test_ingest_log_user_deleted_sets_null(db_session: AsyncSession, sampl
 
 
 @pytest.mark.asyncio
-async def test_ingest_log_user_started_idx(db_session: AsyncSession):
+async def test_ix_ingest_log_user_id_started_at(db_session: AsyncSession):
     result = await db_session.execute(
         text("""
         SELECT indexname FROM pg_indexes
         WHERE tablename = 'ingest_log'
-          AND indexname = 'ingest_log_user_started_idx'
+          AND indexname = 'ix_ingest_log_user_id_started_at'
     """)
     )
-    assert result.scalar() == "ingest_log_user_started_idx"
+    assert result.scalar() == "ix_ingest_log_user_id_started_at"
 
 
 @pytest.mark.asyncio
@@ -75,7 +75,7 @@ async def test_ingest_log_index_is_desc_on_started_at(db_session: AsyncSession):
     result = await db_session.execute(
         text("""
         SELECT indexdef FROM pg_indexes
-        WHERE indexname = 'ingest_log_user_started_idx'
+        WHERE indexname = 'ix_ingest_log_user_id_started_at'
     """)
     )
     indexdef = result.scalar()

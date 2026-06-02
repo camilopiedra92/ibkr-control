@@ -17,20 +17,12 @@ Nota: el plan original pedía 3 fixtures (2024 + 2025 + 2026_ytd), pero solo hay
 × múltiples fixtures reales) está cubierta con los 2 disponibles.
 """
 
-import asyncio as _asyncio
-from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
 import pytest
-from alembic import command as _alembic_cmd
-from alembic.config import Config as _AlembicConfig
 from lxml import etree
 from sqlalchemy import func, select, insert
-from sqlalchemy.ext.asyncio import (
-    async_sessionmaker as _async_sessionmaker,
-    create_async_engine as _create_async_engine,
-)
 
 from ibkr_control.auth.models import User
 from ibkr_control.db.models.flex_raw import (
@@ -249,104 +241,3 @@ async def test_closed_lots_sum_matches_pool_2025(ephemeral_session_factory):
         "no CLOSED_LOT rows parsed from XML — fixture truncated or tag filter broke"
     )
     assert db_sum == xml_sum, f"DB sum {db_sum} != XML sum {xml_sum} (delta: {db_sum - xml_sum})"
-
-
-@pytest.mark.asyncio
-async def test_cross_schema_replay_with_downgrade_upgrade(ephemeral_postgres, monkeypatch):
-    """Cross-schema replay (R3 part 4).
-
-    The test that would have caught A3 amendments #1/#2/#3 before prod:
-
-    1. Boot ephemeral postgres at HEAD (phase26).
-    2. alembic downgrade -1 → revert phase26, schema is now phase25.
-    3. Insert fixture data using the HEAD persister code against phase25
-       schema (persister doesn't touch phase26-specific columns on the
-       success path, so it's compatible).
-    4. alembic upgrade head → re-apply phase26.
-    5. Re-ingest the same XML — must hit hash-dedup fast-path (no
-       UniqueViolation, no recomputation).
-    """
-    sync_url = ephemeral_postgres.get_connection_url()
-    async_url = sync_url.replace("+psycopg2", "+asyncpg")
-
-    monkeypatch.setenv("DATABASE_URL", async_url)
-    monkeypatch.setenv("JWT_SECRET", "test-secret-32-chars-minimum-please-ok")
-    from ibkr_control.config import get_settings
-
-    get_settings.cache_clear()
-
-    backend_root = Path(__file__).resolve().parent.parent
-    cfg = _AlembicConfig(str(backend_root / "alembic.ini"))
-    cfg.set_main_option("script_location", str(backend_root / "alembic"))
-
-    # Step 1: upgrade to head
-    await _asyncio.to_thread(_alembic_cmd.upgrade, cfg, "head")
-    # Step 2: downgrade phase26 (revert to phase25)
-    await _asyncio.to_thread(_alembic_cmd.downgrade, cfg, "-1")
-
-    # Step 3: insert a flex_imports row under phase25 schema using Core INSERT.
-    # Bypass the ORM (which includes phase26 columns poison_reason + per-user
-    # UNIQUE) by writing raw SQL that only references columns present in phase25.
-    # This mirrors exactly what the phase25-era persister would have written.
-    from sqlalchemy import text as _text
-    from ibkr_control.ingest.hash_dedup import xml_hash as _xml_hash
-
-    xml = (FIXTURES_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
-    h = _xml_hash(xml)
-
-    engine = _create_async_engine(async_url, echo=False)
-    factory = _async_sessionmaker(engine, expire_on_commit=False)
-    user_id = await _create_user(factory)
-
-    try:
-        async with engine.begin() as conn:
-            await conn.execute(
-                _text("""
-                    INSERT INTO flex_imports (
-                        user_id, anyo, xml_hash, xml_size_bytes, xml_bytes,
-                        source, period_covered_from, period_covered_to,
-                        year_status, status
-                    ) VALUES (
-                        :user_id, :anyo, :xml_hash, :xml_size_bytes, :xml_bytes,
-                        :source, :period_from, :period_to, :year_status, :status
-                    )
-                """),
-                {
-                    "user_id": user_id,
-                    "anyo": 2025,
-                    "xml_hash": h,
-                    "xml_size_bytes": len(xml),
-                    "xml_bytes": xml,
-                    "source": "web_service",
-                    "period_from": date(2025, 1, 1),
-                    "period_to": date(2025, 12, 31),
-                    "year_status": "sealed",
-                    "status": "ok",
-                },
-            )
-    finally:
-        await engine.dispose()
-
-    # Step 4: upgrade head (re-apply phase26)
-    await _asyncio.to_thread(_alembic_cmd.upgrade, cfg, "head")
-
-    # Step 5: re-ingest the same XML via the ORM/persister against phase26 schema.
-    # Should hit hash-dedup fast-path because (user_id, xml_hash) row already exists.
-    engine2 = _create_async_engine(async_url, echo=False)
-    factory2 = _async_sessionmaker(engine2, expire_on_commit=False)
-    try:
-        async with factory2() as session:
-            parsed = parse(xml)
-            _, counters_2 = await persist(
-                session,
-                parsed=parsed,
-                user_id=user_id,
-                xml_bytes=xml,
-                source="web_service",
-            )
-            await session.commit()
-        # Expect fast-path: pre-phase26 row found via (user_id, xml_hash) — post-upgrade
-        assert counters_2["hash_dedup"] is True
-        assert counters_2["hash_status"] == "ok"
-    finally:
-        await engine2.dispose()

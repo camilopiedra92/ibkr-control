@@ -18,8 +18,8 @@ async def test_dividend_accrual_tables_exist(db_session: AsyncSession):
 @pytest.mark.asyncio
 async def test_change_in_dividend_accruals_indexes_exist(db_session: AsyncSession):
     for idx in (
-        "change_in_dividend_accruals_report_date_idx",
-        "change_in_dividend_accruals_account_symbol_idx",
+        "ix_change_in_dividend_accruals_report_date",
+        "ix_change_in_dividend_accruals_account_id_symbol",
     ):
         result = await db_session.execute(text(f"SELECT to_regclass('{idx}')"))
         assert result.scalar() == idx, f"Index {idx} missing"
@@ -28,8 +28,8 @@ async def test_change_in_dividend_accruals_indexes_exist(db_session: AsyncSessio
 @pytest.mark.asyncio
 async def test_open_dividend_accruals_indexes_exist(db_session: AsyncSession):
     for idx in (
-        "open_dividend_accruals_report_date_idx",
-        "open_dividend_accruals_account_symbol_idx",
+        "ix_open_dividend_accruals_report_date",
+        "ix_open_dividend_accruals_account_id_symbol",
     ):
         result = await db_session.execute(text(f"SELECT to_regclass('{idx}')"))
         assert result.scalar() == idx, f"Index {idx} missing"

@@ -39,10 +39,10 @@ async def test_trm_days_index_on_date(db_session: AsyncSession):
     result = await db_session.execute(
         text("""
         SELECT indexname FROM pg_indexes
-        WHERE tablename = 'trm_days' AND indexname = 'trm_days_date_idx'
+        WHERE tablename = 'trm_days' AND indexname = 'ix_trm_days_date'
     """)
     )
-    assert result.scalar() == "trm_days_date_idx"
+    assert result.scalar() == "ix_trm_days_date"
 
 
 @pytest.mark.asyncio

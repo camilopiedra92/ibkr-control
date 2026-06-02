@@ -25,7 +25,7 @@ async def test_ephemeral_db_has_per_user_unique_constraint(ephemeral_session_fac
             text("""
             SELECT constraint_name FROM information_schema.table_constraints
             WHERE table_name='flex_imports'
-              AND constraint_name='flex_imports_user_xml_hash_key'
+              AND constraint_name='uq_flex_imports_user_id_xml_hash'
               AND constraint_type='UNIQUE'
         """)
         )
