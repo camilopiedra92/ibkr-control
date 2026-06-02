@@ -2,23 +2,25 @@
 
 ## ⏯ Cómo continuar (próxima sesión)
 
-**Phase 2 + wizard redesign + persister idempotente + flex hardening completos (tags `v0.2.0-ingest`, `v0.2.1-persistent-state`, `v0.2.2-wizard-redesign`, `v0.2.3-persister-idempotent`, `v0.2.4-flex-hardening` pending merge). Próximo: Phase 3.**
+**Phase 2 + wizard redesign + persister idempotente + flex hardening TODOS completos, mergeados y tageados (tags `v0.2.0-ingest`, `v0.2.1-persistent-state`, `v0.2.2-wizard-redesign`, `v0.2.3-persister-idempotent`, `v0.2.4-flex-hardening` — los 5 pusheados a `origin`). `main` limpio y up-to-date con remote. Próximo: Phase 3.**
 
-Branches `phase2/ingestion` + `feat/wizard-redesign` + `phase25/flex-persister-idempotent` ya mergeadas a `main` (merge SHAs `b458ac6` + pending merge SHA del v0.2.3). Smoke tests en dev completados (wizard 2026-05-24; persister idempotente 2026-05-25).
+> Verificado contra git/tests el 2026-06-02: `main` clean + up-to-date con `origin/main`, los 5 tags `v0.2*` en remote (SHAs locales == remotos), `uv run pytest -q` → 290 passed, `pnpm build` → exit 0. El pre-Phase-3 checklist de abajo quedó todo en verde.
 
-Branch `phase26/flex-hardening` (28 commits, e229b03→8be81b5) está local, listo para review + merge a `main`. 290 backend tests + 7 vitest unit tests + 3 nuevos Playwright specs. Tag `v0.2.4-flex-hardening` debe crearse SOLO post-merge per convención Phase 2.5.
-Tag `v0.2.0-ingest` apunta al cierre original de polish (`a606be2`). Tag `v0.2.1-persistent-state` apunta a `172cc12` — incluye SQLAlchemyJobStore + DB-backed rate limit. Tag `v0.2.2-wizard-redesign` apunta al cierre del rewrite del wizard (detect-first, F-filter en persister, Migration H wipea legacy). Tag `v0.2.3-persister-idempotent` apunta al fix del bug del 2026-05-25 (D13 [BUG-FIXED]): rewrite del Flex persister a UPSERT por natural key — cron + manual refresh ahora idempotentes fila por fila + smoke test end-to-end validado (segundo Flex refresh real-conditions devuelve `items_processed=0` sin failures). **245/0 backend tests pasan, frontend builds clean.**
+Todas las branches de Phase 2.x ya mergeadas a `main`: `phase2/ingestion` + `feat/wizard-redesign` + `phase25/flex-persister-idempotent` + `phase26/flex-hardening` (esta última via PR #2, merge `0e576f3`). Smoke tests en dev completados (wizard 2026-05-24; persister idempotente 2026-05-25).
 
-Post-merge sobre `main` (4 commits sin push aún): `8bd578f` infra DNS fix para container backend (resolver local AdGuard/NextDNS SERVFAILa `gdcdyn.interactivebrokers.com` → pinned a `1.1.1.1`/`8.8.8.8`), `24aa5f9` fix gap del fallback "subir XML manual" (ahora persiste igual que `step2/detect` para que `step2/save` valide contra `accounts`), `4eb4f80` migración a endpoints V3 oficiales (`ndcdyn` + `/AccountManagement/FlexWebService/`) + User-Agent header requerido. Ver §"Wizard redesign post-deploy" abajo para detalle completo.
+Tag `v0.2.0-ingest` apunta al cierre original de polish (`a606be2`). Tag `v0.2.1-persistent-state` apunta a `172cc12` — incluye SQLAlchemyJobStore + DB-backed rate limit. Tag `v0.2.2-wizard-redesign` apunta al cierre del rewrite del wizard (detect-first, F-filter en persister, Migration H wipea legacy). Tag `v0.2.3-persister-idempotent` apunta al fix del bug del 2026-05-25 (D13 [BUG-FIXED]): rewrite del Flex persister a UPSERT por natural key — cron + manual refresh ahora idempotentes fila por fila + smoke test end-to-end validado (segundo Flex refresh real-conditions devuelve `items_processed=0` sin failures). Tag `v0.2.4-flex-hardening` apunta a `0e576f3` (merge de Phase 2.6). **290/0 backend tests pasan, frontend builds clean.**
+
+Fixes post-deploy del wizard ya en `main` + pusheados: `8bd578f` infra DNS fix para container backend (resolver local AdGuard/NextDNS SERVFAILa `gdcdyn.interactivebrokers.com` → pinned a `1.1.1.1`/`8.8.8.8`), `24aa5f9` fix gap del fallback "subir XML manual" (ahora persiste igual que `step2/detect` para que `step2/save` valide contra `accounts`), `4eb4f80` migración a endpoints V3 oficiales (`ndcdyn` + `/AccountManagement/FlexWebService/`) + User-Agent header requerido. Ver §"Wizard redesign post-deploy" abajo para detalle completo.
 
 ### Camino A — Planificar Phase 3 (recomendado)
 
 Phase 3 = domain layer + 3 pantallas (Lotes Abiertos/Cerrados/Alertas 730d). Spec maestro §6 + §4.2. Phase 3 NO requiere prod deploy ni datos reales — desarrolla 100% contra testcontainer + fixtures sanitizadas.
 
 ```
-1. Verificar Phase 2 + wizard redesign + persister idempotente cerradas:
+1. Verificar Phase 2.x cerrada (ya confirmado 2026-06-02):
    git tag -l "v0.2*" → debe mostrar v0.2.0-ingest + v0.2.1-persistent-state +
-                       v0.2.2-wizard-redesign + v0.2.3-persister-idempotent
+                       v0.2.2-wizard-redesign + v0.2.3-persister-idempotent +
+                       v0.2.4-flex-hardening
 2. Leer este CLAUDE.md (lo cargás automáticamente)
 3. Leer docs/plans/2026-05-24-phase2-polish-backlog.md (entender deuda conocida D1-D13
    + apendice "Post-Phase-2: Wizard redesign"; D13 = persister idempotente RESOLVED)
@@ -61,17 +63,20 @@ Smoke test en dev + push a remote YA están hechos (2026-05-24/25, ver §"Wizard
    # usar "Subir XML manualmente" — funciona end-to-end.
 ```
 
-### Pre-Phase-3 checklist (verificar al arrancar la próxima sesión)
+### Pre-Phase-3 checklist (TODO verificado verde el 2026-06-02)
 
-- [ ] `git status` limpio en `main`
-- [ ] `git tag -l "v0.2*"` muestra `v0.2.0-ingest` + `v0.2.1-persistent-state` + `v0.2.2-wizard-redesign` + `v0.2.3-persister-idempotent` + `v0.2.4-flex-hardening`
-- [ ] `cd backend && uv run pytest -q` → 290 passed (era 245 al cierre de Phase 2.5; +45 por Phase 2.6 — RetryPolicy + poison + retention + replay + health + isolation tests)
-- [ ] `cd frontend && pnpm build` → exit 0
+- [x] `git status` limpio en `main` (up-to-date con `origin/main`)
+- [x] `git tag -l "v0.2*"` muestra `v0.2.0-ingest` + `v0.2.1-persistent-state` + `v0.2.2-wizard-redesign` + `v0.2.3-persister-idempotent` + `v0.2.4-flex-hardening` (los 5 pusheados a remote)
+- [x] `cd backend && uv run pytest -q` → 290 passed (era 245 al cierre de Phase 2.5; +45 por Phase 2.6 — RetryPolicy + poison + retention + replay + health + isolation tests)
+- [x] `cd frontend && pnpm build` → exit 0 (17 rutas)
 - [ ] Leer `docs/plans/2026-05-24-phase2-polish-backlog.md` § "Deuda conocida" (D1-D13; D13 [BUG-FIXED] documenta el incidente del persister + lecciones)
 - [ ] (Opcional) `docker compose ps` para confirmar postgres + backend healthy si vas a smoke test
 
+**Nada bloquea el desarrollo de Phase 3.** Lo único pendiente es del usuario y NO bloquea dev local: deploy a Coolify + `TOKEN_ENCRYPTION_KEY` + verificar DNS + smoke test en prod (Camino B). El siguiente paso para avanzar es Camino A (brainstorming → spec → plan).
+
 ### Convenciones (heredadas)
 
+- **La sección "⏯ Cómo continuar" puede quedar stale** — se redacta durante la sesión anterior, a veces ANTES del merge/tag/push final. Verificá el estado real contra git/tests antes de confiar en ella: `git status`, `git log --oneline -5`, `git ls-remote --tags origin` (no solo `git tag -l`, que es local), `uv run pytest -q`, `pnpm build`. Caso 2026-06-02: el doc decía "phase26 local, pending merge" cuando ya estaba mergeada (PR #2), tageada y pusheada.
 - TDD: failing test → minimal impl → passing test → commit
 - Frequent commits: cada step del plan termina en commit
 - **No commitear shortcuts sin canonicalizar** — atajos en exploración/debugging OK; antes de `git commit` reemplazar por el flujo canónico documentado **O** pedir aprobación explícita al usuario surface-eando el trade-off (ver §Convenciones de código → "Shortcuts y flujos canónicos")
@@ -86,7 +91,7 @@ Smoke test en dev + push a remote YA están hechos (2026-05-24/25, ver §"Wizard
 
 | Item | Quién | Bloquea? |
 |---|---|---|
-| **Push main + tags a remote** ✅ completado 2026-05-25 — repo privado `owner/ibkr-control` creado via `gh repo create`, main + 4 tags pushed (NOTA: el tag v0.2.3 todavía no está pushed a remote — branch `phase25/flex-persister-idempotent` está local; merge a main + push pendientes del usuario) | Usuario | No bloquea Phase 3 dev local |
+| **Push main + tags a remote** ✅ completado — repo privado `owner/ibkr-control`, `main` up-to-date con `origin/main` + los **5 tags `v0.2*` pusheados** (verificado 2026-06-02: `git ls-remote --tags origin` lista los 5, SHAs locales == remotos). v0.2.3 y v0.2.4 ya en remote | — | — |
 | **Deploy a Coolify + setear `TOKEN_ENCRYPTION_KEY` + verificar DNS público** | Usuario | No bloquea Phase 3 dev local |
 | **Smoke test end-to-end en dev — Phase 2 wizard original** ✅ completado 2026-05-24 | — | — |
 | **Smoke test end-to-end en dev — Phase 2.5 persister idempotente** ✅ completado 2026-05-25: 3 imports cargados, 154 closed_lots / 302 trades / 327 open_lots persistidos correctamente, segundo refresh `items_processed=0` confirma D13 fix | — | — |
@@ -158,7 +163,7 @@ Detalles útiles para evitar re-depurar en fases futuras:
   - **Hash dedup a nivel "documento entero" es engañoso para fuentes mutables.** Para YTD/rolling data, dedupear a nivel fila (natural key) es la única respuesta correcta. Hash queda como fast-path optimization (skip parsing), no como contract de idempotencia.
   - **Append-only ledger pattern es el default world-class para hechos immutables.** SET NULL en FK preserva data ante deletes accidentales del parent; CASCADE viola la semántica de first-seen porque puede matar hechos sanos que también aparecen en imports posteriores.
 
-- **Phase 2.6 — Flex Ingest Hardening (2026-05-25, branch `phase26/flex-hardening`, tag `v0.2.4-flex-hardening` pending merge)** — cierra los 6 riesgos identificados en el architecture review post Phase 2.5: **R1** latest-1 retention para `flex_imports.xml_bytes` (cleanup inline en `persist()`, sealed pinned, poison preserved as forensic); **R2** dead-letter via `status` + `poison_reason` columns + INSERT-outside-SAVEPOINT capture en `job._insert_poison_row()` + `scripts/poison_reset.py` recovery (deletes only `status='poison'`, never `'ok'`); **R3** replay test suite via `testcontainers-postgres` (idempotency × 2 fixtures + counts + FIFO parity via raw XML `<Lot levelOfDetail="CLOSED_LOT">` sum + cross-schema migration replay using Core INSERT under phase25 schema); **R4** `GET /api/health/ingest` endpoint + Dashboard `IngestHealthBanner` (3 severity states: ok/warning/error based on 24h/48h/consec_failures≥2) + Settings "Salud de ingesta" section con sparkline custom SVG (sin recharts dep — 50 LOC inline); **R5** `RetryPolicy` class + `execute_with_retry` HTTP-agnostic (validates `max_attempts >= 1` at construction) + `send_request` retries 1001/5xx/NetworkError + `poll_statement` refactor (split `_poll_once`/`poll_statement`, late-binds `asyncio.sleep` for monkeypatch propagation, `FlexPollTimeoutError.waited` now reflects actual `time.monotonic()` elapsed) + per-retry logging via `on_retry` callback; **R6** Migration atómica `UNIQUE(user_id, xml_hash)` (drop global, fix latent multi-user collision bug) + `check_hash_status(session, user_id, hash) -> Literal['absent','ok','poison']` + per-user fast-path en `job.run()` y `ingest_xml()` con logging diferenciado info/warning. Migration única `2b0b2863c6e9` (downgrade reversible). 22 tasks TDD, 28 commits, 290 backend tests (245 → +45 net), 7 vitest unit tests, 3 Playwright E2E specs. Coverage 86% (gap en `scheduler/jobs.py` 30% pre-existing — D11 acceptable per Phase 2 polish backlog). Spec: `docs/specs/2026-05-25-phase26-flex-hardening-design.md`. Plan: `docs/plans/2026-05-25-phase26-flex-hardening.md`.
+- **Phase 2.6 — Flex Ingest Hardening (2026-05-25, branch `phase26/flex-hardening` mergeada via PR #2 `0e576f3`, tag `v0.2.4-flex-hardening` creado + pusheado)** — cierra los 6 riesgos identificados en el architecture review post Phase 2.5: **R1** latest-1 retention para `flex_imports.xml_bytes` (cleanup inline en `persist()`, sealed pinned, poison preserved as forensic); **R2** dead-letter via `status` + `poison_reason` columns + INSERT-outside-SAVEPOINT capture en `job._insert_poison_row()` + `scripts/poison_reset.py` recovery (deletes only `status='poison'`, never `'ok'`); **R3** replay test suite via `testcontainers-postgres` (idempotency × 2 fixtures + counts + FIFO parity via raw XML `<Lot levelOfDetail="CLOSED_LOT">` sum + cross-schema migration replay using Core INSERT under phase25 schema); **R4** `GET /api/health/ingest` endpoint + Dashboard `IngestHealthBanner` (3 severity states: ok/warning/error based on 24h/48h/consec_failures≥2) + Settings "Salud de ingesta" section con sparkline custom SVG (sin recharts dep — 50 LOC inline); **R5** `RetryPolicy` class + `execute_with_retry` HTTP-agnostic (validates `max_attempts >= 1` at construction) + `send_request` retries 1001/5xx/NetworkError + `poll_statement` refactor (split `_poll_once`/`poll_statement`, late-binds `asyncio.sleep` for monkeypatch propagation, `FlexPollTimeoutError.waited` now reflects actual `time.monotonic()` elapsed) + per-retry logging via `on_retry` callback; **R6** Migration atómica `UNIQUE(user_id, xml_hash)` (drop global, fix latent multi-user collision bug) + `check_hash_status(session, user_id, hash) -> Literal['absent','ok','poison']` + per-user fast-path en `job.run()` y `ingest_xml()` con logging diferenciado info/warning. Migration única `2b0b2863c6e9` (downgrade reversible). 22 tasks TDD, 28 commits, 290 backend tests (245 → +45 net), 7 vitest unit tests, 3 Playwright E2E specs. Coverage 86% (gap en `scheduler/jobs.py` 30% pre-existing — D11 acceptable per Phase 2 polish backlog). Spec: `docs/specs/2026-05-25-phase26-flex-hardening-design.md`. Plan: `docs/plans/2026-05-25-phase26-flex-hardening.md`.
 
 - **Lecciones de Phase 2.6** (aprendizajes que valen para sesiones futuras):
   - **Plan-vs-reality drift en schema migrations:** el spec asumía que `flex_imports.status` no existía cuando ya existía con `CHECK IN ('ok','failed')`. Antes de escribir una migration, hacer `\d <tabla>` contra la DB real, no solo leer el modelo. La adaptación fue `alter_column` con `existing_type` en lugar de `add_column`, dejando los datos intactos.
@@ -196,7 +201,7 @@ Globant, AFC, leasing, etc. Esta app es el **centro de control IBKR-only**.
 |---|---|---|---|---|
 | 1. Foundation | ✅ código completo (Tasks 1-14) + polish backlog cerrado (6/6) + tag `v0.1.0-foundation` ✓ · Task 15 (deploy manual a Coolify) pendiente del usuario | `docs/plans/2026-05-24-ibkr-control-phase1-foundation.md` + `docs/plans/2026-05-24-phase1-polish-backlog.md` | spec maestro §3, §5.1 | `v0.1.0-foundation` ✓ |
 | 2. Data ingestion (Flex WS + TRM Socrata + scheduler + upload XML + setup wizard + persister idempotente) | ✅ completado + smoke test real validado · 20 tasks + polish backlog (10 items) + persistent state D5+D2 + wizard redesign (16 tasks) + Phase 2.5 persister rewrite (15 tasks + A3 amendments #1/#2/#3, D13 [BUG-FIXED]) · **245 tests** · tags `v0.2.0-ingest` + `v0.2.1-persistent-state` + `v0.2.2-wizard-redesign` + `v0.2.3-persister-idempotent` ✓ | `docs/plans/2026-05-24-ibkr-control-phase2-ingestion.md` + `docs/plans/2026-05-24-phase2-polish-backlog.md` + `docs/plans/2026-05-24-d5-d2-persistent-state.md` + `docs/plans/2026-05-24-wizard-redesign.md` + `docs/plans/2026-05-25-flex-persister-rewrite.md` | `docs/specs/2026-05-24-phase2-ingestion-design.md` (D1-D17 — D6 SUPERSEDED) + `docs/specs/2026-05-24-wizard-redesign-design.md` (D1-D12) + `docs/specs/2026-05-25-flex-persister-idempotent-design.md` (A0-A8 + 3 amendments) | `v0.2.3-persister-idempotent` ✓ |
-| 2.6. Flex hardening (RetryPolicy + poison-pill + retention + replay tests + health UI + multi-user isolation) | ✅ completado · 22 tasks · **290 tests** (245 → +45 net) · cierra R1-R6 del architecture review · tag `v0.2.4-flex-hardening` pending merge | `docs/plans/2026-05-25-phase26-flex-hardening.md` | `docs/specs/2026-05-25-phase26-flex-hardening-design.md` (R1-R6 + 12 locked decisions) | `v0.2.4-flex-hardening` (post-merge) |
+| 2.6. Flex hardening (RetryPolicy + poison-pill + retention + replay tests + health UI + multi-user isolation) | ✅ completado + mergeado (PR #2 `0e576f3`) + tag pusheado · 22 tasks · **290 tests** (245 → +45 net) · cierra R1-R6 del architecture review · tag `v0.2.4-flex-hardening` ✓ | `docs/plans/2026-05-25-phase26-flex-hardening.md` | `docs/specs/2026-05-25-phase26-flex-hardening-design.md` (R1-R6 + 12 locked decisions) | `v0.2.4-flex-hardening` ✓ |
 | 3. Domain layer + lotes (FIFO, classification, lotes abiertos/cerrados/alertas) | ⏳ por brainstormear + planificar — ver §Roadmap Phase 3 abajo | — | spec maestro §6 (domain) + §4.2 (Lotes Abiertos/Cerrados/Alertas) + `renta/docs/flex_fifo_loader_spec.md` | `v0.3.0-lotes` |
 | 4. Simulador (STK + FUT con neteo YTD) | ⏳ por planificar | — | spec maestro §4.2 (Simulador) + `renta2025.py` § A.5 régimen DUAL | `v0.4.0-simulator` |
 | 5. Dividendos + Patrimonio + Form 160 + Reporte Form 210 | ⏳ por planificar | — | spec maestro §4.2 (Dividendos/Patrimonio/Form 160/Reporte) + §6.1 reglas D-E | `v0.5.0-reports` |
@@ -393,6 +398,8 @@ Los 6 items detectados durante Phase 1 fueron resueltos en el plan de polish del
 - ✓ `UserSettingsUpdate.marginal_rate` con `max_digits=5, decimal_places=4` (devuelve 422 en vez de silent rounding a Numeric(5,4))
 
 ## Comandos comunes
+
+> **Quirk de entorno (shell no-interactivo):** `node`/`npm` son funciones lazy de nvm y `pnpm` NO está en PATH hasta cargar nvm. Comandos `pnpm`/`node` fuera de Docker fallan con `command not found: pnpm`. Prefijar con: `export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"` (node 24 + pnpm 11). Para validar el build sin este lío, usar `make prod-local` (corre dentro del container, sin depender del PATH del host).
 
 ```bash
 # Dev stack (HMR backend + frontend, bind mounts)
