@@ -7,9 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ibkr_control.ingest.flex.persister import persist
 from ibkr_control.ingest.flex._models import (
-    ParsedAccount, ParsedTrade, ParsedClosedLot, ParsedOpenPositionLot,
-    ParsedCashTransaction, ParsedTransfer, ParsedXML,
-    ParsedDividendAccrual, ParsedOpenDividendAccrual,
+    ParsedAccount, ParsedTrade, ParsedXML,
 )
 
 FIXTURE_DIR = __import__("pathlib").Path(__file__).parent.parent.parent / "fixtures" / "xml"

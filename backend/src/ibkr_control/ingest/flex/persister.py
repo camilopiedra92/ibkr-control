@@ -10,7 +10,6 @@ Estrategia (spec A4 + A8):
 - Snapshot entities (OpenPositionLot, ChangeInDividendAccrual,
   OpenDividendAccrual): ON CONFLICT (natural_key) DO UPDATE → la fila refleja
   el último XML que la observó (spec A1-bis, `flex_import_id` "last updated by")
-- Transfers: immutable por transaction_id (ON CONFLICT DO NOTHING).
 - Counters n_observed_* (rows que llegaron en el XML) + n_new_* (rows que
   efectivamente se insertaron o actualizaron) persistidos en flex_imports
   (spec A5) y devueltos al caller en el dict de retorno.

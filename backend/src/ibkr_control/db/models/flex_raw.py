@@ -187,7 +187,6 @@ class Transfer(Base):
     transfer_type: Mapped[str] = mapped_column(String, nullable=False)
 
 
-
 class CashTransaction(Base):
     __tablename__ = "cash_transactions"
     __table_args__ = (
