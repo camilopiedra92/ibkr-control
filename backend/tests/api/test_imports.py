@@ -14,10 +14,10 @@ def set_token_key(monkeypatch):
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", base64.b64encode(b"X" * 32).decode("ascii"))
 
 
-async def test_upload_valid_xml_returns_summary(client: AsyncClient, auth_headers: dict):
+async def test_upload_valid_xml_returns_summary(client: AsyncClient, auth_headers_with_org: dict):
     xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
     files = {"file": ("ACTIVITY_2025.xml", xml, "application/xml")}
-    resp = await client.post("/api/imports/upload", files=files, headers=auth_headers)
+    resp = await client.post("/api/imports/upload", files=files, headers=auth_headers_with_org)
     assert resp.status_code == 200
     body = resp.json()
     assert "flex_import_id" in body
@@ -29,28 +29,51 @@ async def test_upload_valid_xml_returns_summary(client: AsyncClient, auth_header
     assert body["n_new_trades"] > 0
 
 
-async def test_upload_duplicate_returns_409(client: AsyncClient, auth_headers: dict):
+async def test_upload_duplicate_returns_409(client: AsyncClient, auth_headers_with_org: dict):
+    """Re-uploading the SAME XML to the SAME org is a duplicate (per-org dedup)."""
     xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
     files = {"file": ("ACTIVITY_2025.xml", xml, "application/xml")}
-    r1 = await client.post("/api/imports/upload", files=files, headers=auth_headers)
+    r1 = await client.post("/api/imports/upload", files=files, headers=auth_headers_with_org)
     assert r1.status_code == 200
-    r2 = await client.post("/api/imports/upload", files=files, headers=auth_headers)
+    r2 = await client.post("/api/imports/upload", files=files, headers=auth_headers_with_org)
     assert r2.status_code == 409
     body = r2.json()
     assert "flex_import_id" in body.get("detail", {})
 
 
-async def test_upload_malformed_returns_400(client: AsyncClient, auth_headers: dict):
+async def test_upload_same_xml_different_org_is_not_duplicate(
+    client: AsyncClient,
+    auth_headers_with_org: dict,
+    second_auth_headers_with_org: dict,
+):
+    """Dedup is per-org: a second org uploading the same XML is NOT a duplicate."""
+    xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
+    files = {"file": ("ACTIVITY_2025.xml", xml, "application/xml")}
+
+    r_a = await client.post("/api/imports/upload", files=files, headers=auth_headers_with_org)
+    assert r_a.status_code == 200
+
+    # Same bytes, different org → fresh import (not 409).
+    r_b = await client.post(
+        "/api/imports/upload", files=files, headers=second_auth_headers_with_org
+    )
+    assert r_b.status_code == 200, r_b.text
+    assert r_b.json()["flex_import_id"] != r_a.json()["flex_import_id"]
+
+
+async def test_upload_malformed_returns_400(client: AsyncClient, auth_headers_with_org: dict):
     xml = (FIXTURE_DIR / "malformed_xml.xml").read_bytes()
     files = {"file": ("bad.xml", xml, "application/xml")}
-    resp = await client.post("/api/imports/upload", files=files, headers=auth_headers)
+    resp = await client.post("/api/imports/upload", files=files, headers=auth_headers_with_org)
     assert resp.status_code == 400
 
 
-async def test_upload_not_a_flex_response_returns_400(client: AsyncClient, auth_headers: dict):
+async def test_upload_not_a_flex_response_returns_400(
+    client: AsyncClient, auth_headers_with_org: dict
+):
     xml = (FIXTURE_DIR / "not_a_flex_response.xml").read_bytes()
     files = {"file": ("wrong.xml", xml, "application/xml")}
-    resp = await client.post("/api/imports/upload", files=files, headers=auth_headers)
+    resp = await client.post("/api/imports/upload", files=files, headers=auth_headers_with_org)
     assert resp.status_code == 400
 
 
@@ -69,11 +92,13 @@ def test_upload_size_limit_default_is_50mb():
     assert settings.max_xml_size_bytes == 50 * 1024 * 1024
 
 
-async def test_upload_rejects_oversize_via_content_length(client: AsyncClient, auth_headers: dict):
+async def test_upload_rejects_oversize_via_content_length(
+    client: AsyncClient, auth_headers_with_org: dict
+):
     """File declared at 51 MB via Content-Length is rejected with 413 before streaming."""
     # 51 MB > 50 MB default limit.
     # httpx sends Content-Length from the bytes size, so file.size will be set.
     large_content = b"X" * (51 * 1024 * 1024)
     files = {"file": ("big.xml", large_content, "application/xml")}
-    resp = await client.post("/api/imports/upload", files=files, headers=auth_headers)
+    resp = await client.post("/api/imports/upload", files=files, headers=auth_headers_with_org)
     assert resp.status_code == 413
