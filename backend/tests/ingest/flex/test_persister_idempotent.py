@@ -75,7 +75,7 @@ def _minimal_parsed(
 
 @pytest.mark.asyncio
 async def test_persist_modified_xml_same_trades_yields_zero_n_new(
-    db_session: AsyncSession, sample_user, sample_account
+    db_session: AsyncSession, sample_org, sample_account
 ):
     """XML modificado byte-a-byte pero trades identicos -> n_new_trades=0,
     no duplicates. Este es el caso central del cron diario YTD."""
@@ -83,7 +83,7 @@ async def test_persist_modified_xml_same_trades_yields_zero_n_new(
     _, c1 = await persist(
         db_session,
         parsed=parsed,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=b"<v1/>",
         source="web_service",
     )
@@ -94,7 +94,7 @@ async def test_persist_modified_xml_same_trades_yields_zero_n_new(
     _, c2 = await persist(
         db_session,
         parsed=parsed,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=b"<v2 changed/>",
         source="web_service",
     )
@@ -108,14 +108,14 @@ async def test_persist_modified_xml_same_trades_yields_zero_n_new(
 
 @pytest.mark.asyncio
 async def test_persist_modified_xml_plus_one_new_trade(
-    db_session: AsyncSession, sample_user, sample_account
+    db_session: AsyncSession, sample_org, sample_account
 ):
     """v2 trae 1 trade adicional -> n_new=1, total en DB = 3."""
     parsed_v1 = _minimal_parsed(n_trades=2, account_id=sample_account.ibkr_account_id)
     await persist(
         db_session,
         parsed=parsed_v1,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=b"<v1/>",
         source="web_service",
     )
@@ -125,7 +125,7 @@ async def test_persist_modified_xml_plus_one_new_trade(
     _, c2 = await persist(
         db_session,
         parsed=parsed_v2,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=b"<v2/>",
         source="web_service",
     )
@@ -136,7 +136,7 @@ async def test_persist_modified_xml_plus_one_new_trade(
 
 @pytest.mark.asyncio
 async def test_snapshot_lot_mark_price_updates_in_place(
-    db_session: AsyncSession, sample_user, sample_account
+    db_session: AsyncSession, sample_org, sample_account
 ):
     """Mismo (account, symbol, open_date, snapshot_date, otid) con mark_price
     distinto -> UPDATE en place, no duplicate row. A1-bis last-updated-by."""
@@ -161,7 +161,7 @@ async def test_snapshot_lot_mark_price_updates_in_place(
     await persist(
         db_session,
         parsed=p1,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=b"<lot v1/>",
         source="web_service",
     )
@@ -179,7 +179,7 @@ async def test_snapshot_lot_mark_price_updates_in_place(
     await persist(
         db_session,
         parsed=p2,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=b"<lot v2/>",
         source="web_service",
     )
@@ -195,7 +195,7 @@ async def test_snapshot_lot_mark_price_updates_in_place(
 
 @pytest.mark.asyncio
 async def test_snapshot_lot_different_snapshot_date_creates_new_row(
-    db_session: AsyncSession, sample_user, sample_account
+    db_session: AsyncSession, sample_org, sample_account
 ):
     """snapshot_date distinto -> fila nueva (serie temporal preservada).
     Permite Patrimonio Dec 31 + analitica historica de mark prices."""
@@ -217,7 +217,7 @@ async def test_snapshot_lot_different_snapshot_date_creates_new_row(
     await persist(
         db_session,
         parsed=p1,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=b"<day1/>",
         source="web_service",
     )
@@ -225,7 +225,7 @@ async def test_snapshot_lot_different_snapshot_date_creates_new_row(
     await persist(
         db_session,
         parsed=p2,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=b"<day2/>",
         source="web_service",
     )
@@ -236,7 +236,7 @@ async def test_snapshot_lot_different_snapshot_date_creates_new_row(
 
 @pytest.mark.asyncio
 async def test_transfer_not_duplicated_on_reingest(
-    db_session: AsyncSession, sample_user, sample_account
+    db_session: AsyncSession, sample_org, sample_account
 ):
     """Re-ingest del mismo transfer NO lo duplica (ON CONFLICT transaction_id
     DO NOTHING). transfer_lots fue eliminado (impoblable desde Activity Flex,
@@ -261,7 +261,7 @@ async def test_transfer_not_duplicated_on_reingest(
     await persist(
         db_session,
         parsed=p1,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=b"<xfer v1/>",
         source="web_service",
     )
@@ -272,7 +272,7 @@ async def test_transfer_not_duplicated_on_reingest(
     await persist(
         db_session,
         parsed=p2,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=b"<xfer v2/>",
         source="web_service",
     )
@@ -282,14 +282,14 @@ async def test_transfer_not_duplicated_on_reingest(
 
 
 @pytest.mark.asyncio
-async def test_xml_bytes_persisted(db_session: AsyncSession, sample_user):
+async def test_xml_bytes_persisted(db_session: AsyncSession, sample_org):
     """A0: xml_bytes guardado en DB y recuperable post-fetch."""
     parsed = _minimal_parsed(n_trades=1)
     test_bytes = b"<replayable_xml>...payload...</replayable_xml>"
     fi_id, _ = await persist(
         db_session,
         parsed=parsed,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=test_bytes,
         source="manual_upload",
     )
