@@ -2,13 +2,15 @@
 
 ## ⏯ Cómo continuar (próxima sesión)
 
-**Phase 2.x + 2.7 + 2.8 + 2.9 (lot `asset_class` cleanup) TODOS completos, mergeados a `main` y pusheados a `origin` (2026-06-02). Tags `v0.2.0`→`v0.2.7` en remote; `main` == `origin/main`. Próximo: Phase 3.**
+**Phase 2.x + 2.7 + 2.8 + 2.9 (lot `asset_class` cleanup) TODOS completos, mergeados a `main` y pusheados a `origin` (2026-06-02). Tags `v0.2.0`→`v0.2.7` en remote; `main` == `origin/main` en `0b61a9b` (un commit de cleanup pre-Phase-3 por encima del tag `v0.2.7`). Próximo: Phase 3.**
 
 > Verificado contra git/tests el 2026-06-02 (cierre Phase 2.9): `main` en el tag `v0.2.7-lot-asset-class` (código mergeado ff en `8197c5d` + este doc), working tree limpio, branch `fix/lot-asset-class` mergeada (fast-forward) y borrada. `cd backend && uv run pytest -q` → **310 passed**. `ruff check .` → clean, `ruff format --check .` → 0 drift. DB dev wipeada + recargada sobre el schema nuevo (migración `eb5ef6d36e06`) + verificada con datos reales: lotes GLOB (bono RSU Globant, FOP) = `asset_class='STK'` con `source_trade_id` NULL, futuro MES = `asset_class='FUT'`, 0 nulos. Ver Retrospectiva §"Phase 2.9".
 
 > Verificado el 2026-06-02 (cierre Phase 2.8): `main` en `b83a9fa`, **304 passed**, ruff clean. Phase 2.8 cerró los 3 items de auditoría de schema + construyó la primitiva de autorización multi-user (`data_access_grants` + `visible_account_ids` + `require_account_scope` + CRUD `/api/grants`) que Phase 3 consumirá. Ver Retrospectiva §"Phase 2.8".
 
 > ✅ **Pusheado a `origin` (2026-06-02):** `main` sincronizado con `origin/main` y los **8 tags `v0.2.0`→`v0.2.7` en remote** (verificado con `git ls-remote --tags origin`: el código de Phase 2.9 cierra en `8197c5d`, tag `v0.2.7-lot-asset-class`). Repo `github.com/owner/ibkr-control`. No quedan acciones de respaldo pendientes.
+
+> 🧹 **Cleanup pre-Phase-3 (2026-06-02, commit `0b61a9b`, pusheado — sin tag, es housekeeping no hito de phase):** auditoría de 3 agentes (backend/frontend/schema, con lint/tests/drift reales) confirmó **base sin deuda oculta** — cero hacks, type-bypasses ni bugs enmascarados. Punch-list menor cerrado: borrados `card.tsx`+`field.tsx` (dead code; `field.tsx` materializaba una convención de forms que el código nunca adoptó — ver §"Notas frontend"), consolidada la key `auth_token` en el helper `storeToken`, root `/` redirige a `/dashboard`, import SSE muerto eliminado en `api/ingest.py`, comentarios stale. **310 passed, ruff/format/lint/build/vitest clean.** **Corrección importante:** la creencia de que `participations` vacía bloqueaba Phase 3 era **FALSA** — el wizard YA la puebla (`api/setup.py`, lógica SCD-2, test-cubierto); la DB de dev solo está vacía por el wipe. Phase 3 debe **CONSUMIRLA** (domain `apply_pct`, ya en scope), no poblarla. Ver memoria [[globant-rsu-cost-basis-phase3]]. **Decisión registrada:** la abstracción de forms validada (react-hook-form + zod) se adopta en Phase 3 con el Simulador (primer consumidor real), no antes.
 
 Todas las branches de Phase 2.x ya mergeadas a `main`: `phase2/ingestion` + `feat/wizard-redesign` + `phase25/flex-persister-idempotent` + `phase26/flex-hardening` (esta última via PR #2, merge `0e576f3`). Smoke tests en dev completados (wizard 2026-05-24; persister idempotente 2026-05-25).
 
