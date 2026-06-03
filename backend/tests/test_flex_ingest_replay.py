@@ -24,7 +24,7 @@ import pytest
 from lxml import etree
 from sqlalchemy import func, select, insert
 
-from ibkr_control.auth.models import User
+from ibkr_control.db.models.organizations import Organization
 from ibkr_control.db.models.flex_raw import (
     Trade,
     ClosedLot,
@@ -71,20 +71,18 @@ EXPECTED_COUNTS: dict[str, dict[str, int]] = {
 }
 
 
-async def _create_user(session_factory) -> int:
-    """Insert a minimal User row; return its id."""
+async def _create_org(session_factory) -> int:
+    """Insert a minimal Organization row; return its id.
+
+    The persister is org-scoped (SP1): persist() takes organization_id, and
+    flex_imports dedup is UNIQUE(organization_id, xml_hash). The replay suite
+    only needs a tenant anchor, so an Organization (no founding user) suffices.
+    """
     async with session_factory() as session:
         result = await session.execute(
-            insert(User)
-            .values(
-                email="replay@test.local",
-                hashed_password="x",
-                name="Replay Test User",
-                is_active=True,
-                is_verified=True,
-                is_superuser=False,
-            )
-            .returning(User.id)
+            insert(Organization)
+            .values(type="personal", name="Replay Test Org")
+            .returning(Organization.id)
         )
         await session.commit()
         return result.scalar_one()
@@ -102,14 +100,14 @@ async def test_persist_twice_yields_zero_new(
     and returns hash_status="ok" (the first import landed cleanly).
     """
     xml = (FIXTURES_DIR / f"{fixture_name}.xml").read_bytes()
-    user_id = await _create_user(ephemeral_session_factory)
+    organization_id = await _create_org(ephemeral_session_factory)
 
     async with ephemeral_session_factory() as session:
         parsed = parse(xml)
         _, counters_1 = await persist(
             session,
             parsed=parsed,
-            user_id=user_id,
+            organization_id=organization_id,
             xml_bytes=xml,
             source="web_service",
         )
@@ -121,7 +119,7 @@ async def test_persist_twice_yields_zero_new(
         _, counters_2 = await persist(
             session,
             parsed=parsed,
-            user_id=user_id,
+            organization_id=organization_id,
             xml_bytes=xml,
             source="web_service",
         )
@@ -150,14 +148,14 @@ async def test_counts_match_fixture_metadata(
         pytest.skip(f"EXPECTED_COUNTS[{fixture_name}] not filled yet")
 
     xml = (FIXTURES_DIR / f"{fixture_name}.xml").read_bytes()
-    user_id = await _create_user(ephemeral_session_factory)
+    organization_id = await _create_org(ephemeral_session_factory)
 
     async with ephemeral_session_factory() as session:
         parsed = parse(xml)
         await persist(
             session,
             parsed=parsed,
-            user_id=user_id,
+            organization_id=organization_id,
             xml_bytes=xml,
             source="web_service",
         )
@@ -199,7 +197,7 @@ async def test_closed_lots_sum_matches_pool_2025(ephemeral_session_factory):
     should not be summed.
     """
     xml = (FIXTURES_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
-    user_id = await _create_user(ephemeral_session_factory)
+    organization_id = await _create_org(ephemeral_session_factory)
 
     # Persist
     async with ephemeral_session_factory() as session:
@@ -207,7 +205,7 @@ async def test_closed_lots_sum_matches_pool_2025(ephemeral_session_factory):
         await persist(
             session,
             parsed=parsed,
-            user_id=user_id,
+            organization_id=organization_id,
             xml_bytes=xml,
             source="web_service",
         )

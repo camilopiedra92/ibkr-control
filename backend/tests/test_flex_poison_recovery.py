@@ -13,6 +13,7 @@ from ibkr_control.ingest.hash_dedup import xml_hash
 async def test_parser_failure_creates_poison_row(
     db_session,
     db_engine,
+    sample_org,
     sample_user,
     monkeypatch,
 ):
@@ -29,6 +30,7 @@ async def test_parser_failure_creates_poison_row(
     with pytest.raises(Exception):
         await flex_job.ingest_xml(
             db_session,
+            organization_id=sample_org.id,
             user_id=sample_user.id,
             xml_bytes=bad_xml,
             source="manual_upload",
@@ -52,6 +54,7 @@ async def test_parser_failure_creates_poison_row(
 async def test_second_attempt_of_poison_xml_short_circuits(
     db_session,
     db_engine,
+    sample_org,
     sample_user,
     monkeypatch,
 ):
@@ -67,6 +70,7 @@ async def test_second_attempt_of_poison_xml_short_circuits(
     with pytest.raises(Exception):
         await flex_job.ingest_xml(
             db_session,
+            organization_id=sample_org.id,
             user_id=sample_user.id,
             xml_bytes=bad_xml,
             source="manual_upload",
@@ -90,6 +94,7 @@ async def test_second_attempt_of_poison_xml_short_circuits(
     async with maker2() as s2:
         result_id = await flex_job.ingest_xml(
             s2,
+            organization_id=sample_org.id,
             user_id=sample_user.id,
             xml_bytes=bad_xml,
             source="manual_upload",
@@ -104,6 +109,7 @@ async def test_second_attempt_of_poison_xml_short_circuits(
 async def test_recovery_via_delete_allows_retry(
     db_session,
     db_engine,
+    sample_org,
     sample_user,
     monkeypatch,
 ):
@@ -120,6 +126,7 @@ async def test_recovery_via_delete_allows_retry(
     with pytest.raises(Exception):
         await flex_job.ingest_xml(
             db_session,
+            organization_id=sample_org.id,
             user_id=sample_user.id,
             xml_bytes=bad_xml,
             source="manual_upload",

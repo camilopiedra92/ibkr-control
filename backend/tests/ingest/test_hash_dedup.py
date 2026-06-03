@@ -28,21 +28,21 @@ def test_xml_hash_empty_bytes_pinned():
 
 
 # ---------------------------------------------------------------------------
-# check_hash_status — new per-user API (R2 fast-path + R6 isolation)
+# check_hash_status — per-ORG API (R2 fast-path + SP1 tenant isolation)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_check_hash_status_absent_when_hash_not_in_db(db_session: AsyncSession, sample_user):
+async def test_check_hash_status_absent_when_hash_not_in_db(db_session: AsyncSession, sample_org):
     from ibkr_control.ingest.hash_dedup import check_hash_status
 
-    status = await check_hash_status(db_session, sample_user.id, "abc123")
+    status = await check_hash_status(db_session, sample_org.id, "abc123")
     assert status == "absent"
 
 
 @pytest.mark.asyncio
-async def test_check_hash_status_ok_when_hash_exists_for_user(
-    db_session: AsyncSession, sample_user
+async def test_check_hash_status_ok_when_hash_exists_for_org(
+    db_session: AsyncSession, sample_org, sample_user
 ):
     from ibkr_control.db.models.flex_raw import FlexImport
     from ibkr_control.ingest.hash_dedup import check_hash_status, xml_hash
@@ -50,6 +50,7 @@ async def test_check_hash_status_ok_when_hash_exists_for_user(
     h = xml_hash(b"<xml/>")
     db_session.add(
         FlexImport(
+            organization_id=sample_org.id,
             user_id=sample_user.id,
             anyo=2026,
             xml_hash=h,
@@ -64,13 +65,13 @@ async def test_check_hash_status_ok_when_hash_exists_for_user(
     )
     await db_session.commit()
 
-    status = await check_hash_status(db_session, sample_user.id, h)
+    status = await check_hash_status(db_session, sample_org.id, h)
     assert status == "ok"
 
 
 @pytest.mark.asyncio
 async def test_check_hash_status_poison_when_hash_marked_poison(
-    db_session: AsyncSession, sample_user
+    db_session: AsyncSession, sample_org, sample_user
 ):
     from ibkr_control.db.models.flex_raw import FlexImport
     from ibkr_control.ingest.hash_dedup import check_hash_status, xml_hash
@@ -78,6 +79,7 @@ async def test_check_hash_status_poison_when_hash_marked_poison(
     h = xml_hash(b"<xml-poison/>")
     db_session.add(
         FlexImport(
+            organization_id=sample_org.id,
             user_id=sample_user.id,
             anyo=2026,
             xml_hash=h,
@@ -93,28 +95,41 @@ async def test_check_hash_status_poison_when_hash_marked_poison(
     )
     await db_session.commit()
 
-    status = await check_hash_status(db_session, sample_user.id, h)
+    status = await check_hash_status(db_session, sample_org.id, h)
     assert status == "poison"
 
 
 @pytest.mark.asyncio
-async def test_check_hash_status_absent_when_hash_exists_for_different_user(
+async def test_check_hash_status_absent_when_hash_exists_for_different_org(
     db_session: AsyncSession,
+    sample_org,
     sample_user,
     second_sample_user,
 ):
-    """R6: hash visible para user A no debe ser visible para user B."""
+    """SP1 tenant isolation: hash de org A no debe ser visible para org B.
+
+    second_sample_user founds its own org (Membership owner); we read its
+    organization_id from the membership to scope the cross-tenant check.
+    """
+    from sqlalchemy import select
+
     from ibkr_control.db.models.flex_raw import FlexImport
+    from ibkr_control.db.models.memberships import Membership
     from ibkr_control.ingest.hash_dedup import check_hash_status, xml_hash
 
-    h = xml_hash(b"<xml-user-a/>")
+    org_b_id = await db_session.scalar(
+        select(Membership.organization_id).where(Membership.user_id == second_sample_user.id)
+    )
+
+    h = xml_hash(b"<xml-org-a/>")
     db_session.add(
         FlexImport(
+            organization_id=sample_org.id,
             user_id=sample_user.id,
             anyo=2026,
             xml_hash=h,
             xml_size_bytes=13,
-            xml_bytes=b"<xml-user-a/>",
+            xml_bytes=b"<xml-org-a/>",
             source="web_service",
             year_status="rolling",
             period_covered_from=date(2026, 1, 1),
@@ -124,10 +139,10 @@ async def test_check_hash_status_absent_when_hash_exists_for_different_user(
     )
     await db_session.commit()
 
-    # User B no debe ver el hash de User A
-    status_b = await check_hash_status(db_session, second_sample_user.id, h)
+    # Org B no debe ver el hash de Org A
+    status_b = await check_hash_status(db_session, org_b_id, h)
     assert status_b == "absent"
 
-    # User A sí lo ve
-    status_a = await check_hash_status(db_session, sample_user.id, h)
+    # Org A sí lo ve
+    status_a = await check_hash_status(db_session, sample_org.id, h)
     assert status_a == "ok"
