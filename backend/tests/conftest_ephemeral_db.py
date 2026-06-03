@@ -19,6 +19,33 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
 
 
+def swap_dsn_credentials(async_dsn: str, user: str, password: str) -> str:
+    """Return ``async_dsn`` with its user:password swapped for ``user:password``.
+
+    Splits on ``://`` to keep the scheme, then on ``@`` to drop the existing
+    creds and re-attach the host+db part. Shared by ``rls_session_factory`` and
+    (Task 14) ``app_with_db`` to connect as the non-bypass ``app_rls`` role.
+
+    Caveat: assumes the credentials contain no ``@`` (it splits on the FIRST
+    ``@``). Current callers (``test:test``, ``app_rls:app_rls_pw``) are fine.
+    """
+    scheme, after_scheme = async_dsn.split("://", 1)
+    _creds, hostpart = after_scheme.split("@", 1)
+    return f"{scheme}://{user}:{password}@{hostpart}"
+
+
+def build_alembic_config() -> Config:
+    """Build an Alembic ``Config`` pointing at this backend's alembic dir.
+
+    Shared by ``ephemeral_session_factory`` and (Task 14) ``app_with_db`` so the
+    ``alembic upgrade head`` path is defined in one place.
+    """
+    backend_root = Path(__file__).resolve().parent.parent
+    cfg = Config(str(backend_root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(backend_root / "alembic"))
+    return cfg
+
+
 @pytest_asyncio.fixture(scope="function")
 async def ephemeral_postgres():
     """Boot a fresh postgres container for one test."""
@@ -49,10 +76,7 @@ async def ephemeral_session_factory(ephemeral_postgres, ephemeral_db_url, monkey
 
     get_settings.cache_clear()
 
-    backend_root = Path(__file__).resolve().parent.parent
-    alembic_ini = backend_root / "alembic.ini"
-    cfg = Config(str(alembic_ini))
-    cfg.set_main_option("script_location", str(backend_root / "alembic"))
+    cfg = build_alembic_config()
 
     # alembic command.upgrade is sync — run in thread to not block event loop
     await asyncio.to_thread(command.upgrade, cfg, "head")
@@ -109,9 +133,7 @@ async def rls_session_factory(ephemeral_session_factory, ephemeral_db_url):
             return org.id
 
     # Connect as app_rls by swapping the creds in the asyncpg DSN.
-    after_scheme = ephemeral_db_url.split("://", 1)[1]
-    _creds, hostpart = after_scheme.split("@", 1)
-    app_dsn = f"postgresql+asyncpg://app_rls:app_rls_pw@{hostpart}"
+    app_dsn = swap_dsn_credentials(ephemeral_db_url, "app_rls", "app_rls_pw")
     app_engine = create_async_engine(app_dsn, echo=False)
     app_factory = async_sessionmaker(app_engine, expire_on_commit=False)
     try:

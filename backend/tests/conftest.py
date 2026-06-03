@@ -130,21 +130,83 @@ async def db_engine(postgres_container):
 
 
 @pytest.fixture
-async def sample_user(db_session: AsyncSession):
+async def sample_org(db_session: AsyncSession):
+    """Organización (tenant) base para tests de modelos/persister.
+
+    Es el ancla de identidad: sample_user, sample_party, sample_account y
+    sample_flex_import cuelgan de este mismo org para que el contexto sea
+    coherente (un solo tenant). Tests que necesitan el organization_id lo
+    obtienen de aquí.
+    """
+    from ibkr_control.db.models.organizations import Organization
+
+    org = Organization(type="personal", name="Fixture Org")
+    db_session.add(org)
+    await db_session.commit()
+    await db_session.refresh(org)
+    return org
+
+
+@pytest.fixture
+async def sample_user(db_session: AsyncSession, sample_org):
+    """Usuario fundador de sample_org: crea User + UserSettings + Membership(owner)
+    + Party.
+
+    Espeja provision_org() (y on_after_register) pero sobre el sample_org ya
+    existente (no crea un org nuevo). Incluye la fila UserSettings que en prod
+    SIEMPRE existe (on_after_register la crea), para que tests que lleguen a
+    settings vía sample_user no diverjan de prod. Devuelve el User; el org es
+    sample_org y el party fundador queda asociado (party.user_id == user.id).
+    """
     from ibkr_control.auth.models import User
+    from ibkr_control.db.models.memberships import Membership
+    from ibkr_control.db.models.parties import Party
+    from ibkr_control.settings.models import UserSettings
 
     u = User(email="fixture@t.com", hashed_password="x", is_active=True, name="Fixture User")
     db_session.add(u)
+    await db_session.flush()
+    db_session.add(UserSettings(user_id=u.id))
+    db_session.add(Membership(user_id=u.id, organization_id=sample_org.id, role="owner"))
+    db_session.add(Party(organization_id=sample_org.id, display_name="Fixture User", user_id=u.id))
     await db_session.commit()
     await db_session.refresh(u)
     return u
 
 
 @pytest.fixture
-async def second_sample_user(db_session: AsyncSession):
-    """A second User for multi-user isolation tests."""
-    from ibkr_control.auth.models import User
+async def sample_party(db_session: AsyncSession, sample_org):
+    """Party (persona fiscal) sin login en sample_org.
 
+    Para tests que necesitan un party explícito (p.ej. participations
+    party-anchored) distinto del party fundador de sample_user.
+    """
+    from ibkr_control.db.models.parties import Party
+
+    p = Party(organization_id=sample_org.id, display_name="Fixture Party", user_id=None)
+    db_session.add(p)
+    await db_session.commit()
+    await db_session.refresh(p)
+    return p
+
+
+@pytest.fixture
+async def second_sample_user(db_session: AsyncSession):
+    """A second User for multi-user isolation tests.
+
+    Crea su PROPIO org + UserSettings + membership + party (tenant separado de
+    sample_org) para escenarios de aislamiento cross-tenant. Incluye UserSettings
+    (que en prod siempre existe vía on_after_register) para ser una identidad fiel.
+    """
+    from ibkr_control.auth.models import User
+    from ibkr_control.db.models.memberships import Membership
+    from ibkr_control.db.models.organizations import Organization
+    from ibkr_control.db.models.parties import Party
+    from ibkr_control.settings.models import UserSettings
+
+    org = Organization(type="personal", name="Second Fixture Org")
+    db_session.add(org)
+    await db_session.flush()
     u = User(
         email="second_fixture@t.com",
         hashed_password="x",
@@ -152,6 +214,10 @@ async def second_sample_user(db_session: AsyncSession):
         name="Second Fixture User",
     )
     db_session.add(u)
+    await db_session.flush()
+    db_session.add(UserSettings(user_id=u.id))
+    db_session.add(Membership(user_id=u.id, organization_id=org.id, role="owner"))
+    db_session.add(Party(organization_id=org.id, display_name="Second Fixture User", user_id=u.id))
     await db_session.commit()
     await db_session.refresh(u)
     return u
@@ -192,10 +258,60 @@ async def second_auth_headers(client: AsyncClient) -> dict:
 
 
 @pytest.fixture
-async def sample_account(db_session: AsyncSession):
+async def auth_headers_with_org(client: AsyncClient, db_engine) -> dict:
+    """Registra un usuario via API, le provisiona un org + membership(owner) +
+    party, y devuelve headers JWT.
+
+    A diferencia de auth_headers (que solo registra), este deja al usuario con
+    una membership única para que org_context resuelva su contexto. NO usa
+    provision_org() (eso crearía un segundo usuario nuevo): registra primero
+    via la API (dispara on_after_register → UserSettings) y luego inserta el
+    org/membership/party PARA ese usuario ya registrado.
+
+    Comparte el testcontainer del app vía db_engine (mismo URL que app_with_db,
+    cuyo create_all ya corrió porque dependemos de `client`). No abre un segundo
+    lifecycle create_all/drop_all que choque con app_with_db.
+    """
+    from sqlalchemy import select
+    from ibkr_control.auth.models import User
+    from ibkr_control.db.models.memberships import Membership
+    from ibkr_control.db.models.organizations import Organization
+    from ibkr_control.db.models.parties import Party
+
+    email = "org_owner@test.com"
+    await client.post(
+        "/api/auth/register",
+        json={"email": email, "password": "supersecret123", "name": "Org Owner"},
+    )
+
+    session_maker = async_sessionmaker(db_engine, expire_on_commit=False, class_=AsyncSession)
+    async with session_maker() as session:
+        user = await session.scalar(select(User).where(User.email == email))
+        org = Organization(type="personal", name="Org Owner Household")
+        session.add(org)
+        await session.flush()
+        session.add(Membership(user_id=user.id, organization_id=org.id, role="owner"))
+        session.add(Party(organization_id=org.id, display_name="Org Owner", user_id=user.id))
+        await session.commit()
+
+    login = await client.post(
+        "/api/auth/jwt/login",
+        data={"username": email, "password": "supersecret123"},
+    )
+    token = login.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+async def sample_account(db_session: AsyncSession, sample_org):
     from ibkr_control.db.models.accounts import Account
 
-    a = Account(ibkr_account_id="U99999999", alias="fixture-acc", currency="USD")
+    a = Account(
+        ibkr_account_id="U99999999",
+        organization_id=sample_org.id,
+        alias="fixture-acc",
+        currency="USD",
+    )
     db_session.add(a)
     await db_session.commit()
     await db_session.refresh(a)
@@ -203,12 +319,12 @@ async def sample_account(db_session: AsyncSession):
 
 
 @pytest.fixture
-async def sample_flex_import(db_session: AsyncSession, sample_user):
+async def sample_flex_import(db_session: AsyncSession, sample_org):
     from datetime import date
     from ibkr_control.db.models.flex_raw import FlexImport
 
     fi = FlexImport(
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         anyo=2025,
         xml_hash="helper-test-hash",
         xml_size_bytes=100,
