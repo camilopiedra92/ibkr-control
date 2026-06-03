@@ -23,6 +23,7 @@ from tests.conftest_ephemeral_db import (  # noqa: F401
     ephemeral_postgres,
     ephemeral_db_url,
     ephemeral_session_factory,
+    rls_session_factory,
 )
 
 
