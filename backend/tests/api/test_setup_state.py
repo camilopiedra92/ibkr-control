@@ -10,9 +10,9 @@ The `set_token_key` autouse fixture is inherited from tests/api/conftest.py.
 from httpx import AsyncClient
 
 
-async def test_state_initial_all_false(client: AsyncClient, auth_headers: dict):
+async def test_state_initial_all_false(client: AsyncClient, auth_headers_with_org: dict):
     """Fresh user: no creds, no participations, no setup_progress flags."""
-    r = await client.get("/api/setup/state", headers=auth_headers)
+    r = await client.get("/api/setup/state", headers=auth_headers_with_org)
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["step1_credentials"] is False
@@ -23,15 +23,17 @@ async def test_state_initial_all_false(client: AsyncClient, auth_headers: dict):
     assert body["pending_stash_temp_ids"] == []
 
 
-async def test_state_step1_credentials_derives_from_table(client: AsyncClient, auth_headers: dict):
+async def test_state_step1_credentials_derives_from_table(
+    client: AsyncClient, auth_headers_with_org: dict
+):
     """After step1/save, step1_credentials flips True — derived from flex_credentials row."""
     r = await client.post(
         "/api/setup/step1/save",
-        headers=auth_headers,
+        headers=auth_headers_with_org,
         json={"token": "tok_12345_state", "query_id": "999"},
     )
     assert r.status_code == 200, r.text
 
-    r = await client.get("/api/setup/state", headers=auth_headers)
+    r = await client.get("/api/setup/state", headers=auth_headers_with_org)
     assert r.status_code == 200, r.text
     assert r.json()["step1_credentials"] is True

@@ -4,7 +4,7 @@ The endpoint runs after step2/detect has populated `flex_imports` and
 `accounts` tables. step2/save then:
   - validates every incoming ibkr_account_id was actually detected,
   - rejects F-shadow IDs (defense in depth on top of Pydantic regex),
-  - sets/updates Participation rows for the current user,
+  - sets/updates Participation rows anchored to the org's founding party,
   - schedules a TRM backfill as a FastAPI BackgroundTask (per D6).
 
 The `set_token_key` autouse fixture is inherited from tests/api/conftest.py.
@@ -89,32 +89,41 @@ _XML_ATTACKER = b"""<?xml version="1.0"?>
 """
 
 
-async def test_step2_save_idor_cannot_claim_other_users_account(
-    client: AsyncClient, auth_headers: dict, second_auth_headers: dict, monkeypatch
+async def test_step2_save_cross_org_cannot_claim_other_orgs_account(
+    client: AsyncClient,
+    auth_headers_with_org: dict,
+    second_auth_headers_with_org: dict,
+    monkeypatch,
 ):
-    """H1: an authenticated second user must NOT be able to grant themselves
-    participation on an account that only appears in ANOTHER user's import.
+    """Cross-tenant: an org must NOT be able to grant itself participation on
+    an account that only appears in ANOTHER org's import.
 
-    User A detects U99999001 (their own). User B detects U99999002 (their own),
+    Org A detects U99999001 (their own). Org B detects U99999002 (their own),
     then tries step2/save against U99999001 — guessable, exists in the shared
-    `accounts` table, but never imported by B. Must 400 ACCOUNT_NOT_DETECTED
-    and create NO participation for B.
+    `accounts` table, but never imported by B's org. Must 400
+    ACCOUNT_NOT_DETECTED and create NO participation for B. Isolation now comes
+    from org-scoping the provenance query (and RLS, Task 14) rather than the
+    old per-user H1 scope.
     """
     monkeypatch.setattr("ibkr_control.api.setup._trm_backfill_background", AsyncMock())
 
-    # User A imports the owner account.
+    # Org A imports the owner account.
     await _seed_detect_with_xml(
-        client, auth_headers, monkeypatch, token="tok_owner_aaaaa", xml=_XML_OWNER
+        client, auth_headers_with_org, monkeypatch, token="tok_owner_aaaaa", xml=_XML_OWNER
     )
-    # User B imports a different account of their own.
+    # Org B imports a different account of its own.
     await _seed_detect_with_xml(
-        client, second_auth_headers, monkeypatch, token="tok_attacker_bbb", xml=_XML_ATTACKER
+        client,
+        second_auth_headers_with_org,
+        monkeypatch,
+        token="tok_attacker_bbb",
+        xml=_XML_ATTACKER,
     )
 
     # B attacks: claim 100% of A's account.
     r = await client.post(
         "/api/setup/step2/save",
-        headers=second_auth_headers,
+        headers=second_auth_headers_with_org,
         json={"accounts": [{"ibkr_account_id": "U99999001", "alias": "pwn", "pct": "1.0000"}]},
     )
     assert r.status_code == 400, r.text
@@ -136,16 +145,16 @@ async def test_step2_save_idor_cannot_claim_other_users_account(
 
 
 async def test_step2_save_persists_accounts_and_participations(
-    client: AsyncClient, auth_headers: dict, monkeypatch
+    client: AsyncClient, auth_headers_with_org: dict, monkeypatch
 ):
     """Happy path: U99999999 is detected, alias overrides, Participation row created."""
     # Avoid kicking off the real TRM backfill background task.
     monkeypatch.setattr("ibkr_control.api.setup._trm_backfill_background", AsyncMock())
-    await _seed_detect(client, auth_headers, monkeypatch)
+    await _seed_detect(client, auth_headers_with_org, monkeypatch)
 
     r = await client.post(
         "/api/setup/step2/save",
-        headers=auth_headers,
+        headers=auth_headers_with_org,
         json={"accounts": [{"ibkr_account_id": "U99999999", "alias": "Joint", "pct": "0.5000"}]},
     )
     assert r.status_code == 200, r.text
@@ -168,22 +177,24 @@ async def test_step2_save_persists_accounts_and_participations(
 
 
 async def test_step2_save_400_when_account_not_detected(
-    client: AsyncClient, auth_headers: dict, monkeypatch
+    client: AsyncClient, auth_headers_with_org: dict, monkeypatch
 ):
     """Account ID well-formed but never detected → 400 ACCOUNT_NOT_DETECTED."""
     monkeypatch.setattr("ibkr_control.api.setup._trm_backfill_background", AsyncMock())
-    await _seed_detect(client, auth_headers, monkeypatch)
+    await _seed_detect(client, auth_headers_with_org, monkeypatch)
 
     r = await client.post(
         "/api/setup/step2/save",
-        headers=auth_headers,
+        headers=auth_headers_with_org,
         json={"accounts": [{"ibkr_account_id": "U88888888", "alias": None, "pct": "1.0000"}]},
     )
     assert r.status_code == 400
     assert r.json()["detail"]["code"] == "ACCOUNT_NOT_DETECTED"
 
 
-async def test_step2_save_rejects_shadow_id(client: AsyncClient, auth_headers: dict, monkeypatch):
+async def test_step2_save_rejects_shadow_id(
+    client: AsyncClient, auth_headers_with_org: dict, monkeypatch
+):
     """Shadow IDs (F-suffix) are rejected at Pydantic validation level → 422.
 
     The schema regex `^U\\d{8,11}$` forbids non-digit characters after `U`,
@@ -191,11 +202,11 @@ async def test_step2_save_rejects_shadow_id(client: AsyncClient, auth_headers: d
     is "no shadow IDs accepted"; this asserts the actual status code returned.
     """
     monkeypatch.setattr("ibkr_control.api.setup._trm_backfill_background", AsyncMock())
-    await _seed_detect(client, auth_headers, monkeypatch)
+    await _seed_detect(client, auth_headers_with_org, monkeypatch)
 
     r = await client.post(
         "/api/setup/step2/save",
-        headers=auth_headers,
+        headers=auth_headers_with_org,
         json={"accounts": [{"ibkr_account_id": "U99999999F", "alias": None, "pct": "1.0000"}]},
     )
     # Pydantic regex rejects the F-suffix at validation; the spec-text-suggested
@@ -205,10 +216,10 @@ async def test_step2_save_rejects_shadow_id(client: AsyncClient, auth_headers: d
 
 
 async def test_step2_save_dispatches_trm_background(
-    client: AsyncClient, auth_headers: dict, monkeypatch
+    client: AsyncClient, auth_headers_with_org: dict, monkeypatch
 ):
     """BackgroundTasks must enqueue _trm_backfill_background after a successful save."""
-    await _seed_detect(client, auth_headers, monkeypatch)
+    await _seed_detect(client, auth_headers_with_org, monkeypatch)
 
     dispatched: list[tuple[int, int]] = []
 
@@ -219,7 +230,7 @@ async def test_step2_save_dispatches_trm_background(
 
     r = await client.post(
         "/api/setup/step2/save",
-        headers=auth_headers,
+        headers=auth_headers_with_org,
         json={"accounts": [{"ibkr_account_id": "U99999999", "alias": "A", "pct": "1.0000"}]},
     )
     assert r.status_code == 200, r.text
@@ -236,7 +247,7 @@ async def test_step2_save_dispatches_trm_background(
 
 
 async def test_step2_save_response_includes_trm_backfill_job_id(
-    client: AsyncClient, auth_headers: dict, monkeypatch
+    client: AsyncClient, auth_headers_with_org: dict, monkeypatch
 ):
     """step2/save must register a JobTracker job for the TRM backfill BEFORE
     scheduling the BackgroundTask and return its id. The frontend wizard
@@ -244,11 +255,11 @@ async def test_step2_save_response_includes_trm_backfill_job_id(
     a Socrata or persister failure stays invisible (D12 root cause).
     """
     monkeypatch.setattr("ibkr_control.api.setup._trm_backfill_background", AsyncMock())
-    await _seed_detect(client, auth_headers, monkeypatch)
+    await _seed_detect(client, auth_headers_with_org, monkeypatch)
 
     r = await client.post(
         "/api/setup/step2/save",
-        headers=auth_headers,
+        headers=auth_headers_with_org,
         json={"accounts": [{"ibkr_account_id": "U99999999", "alias": "A", "pct": "1.0000"}]},
     )
     assert r.status_code == 200, r.text
@@ -262,6 +273,49 @@ async def test_step2_save_response_includes_trm_backfill_job_id(
     from ibkr_control.ingest.job_tracker import get_tracker
 
     assert get_tracker().has_job(body["trm_backfill_job_id"])
+
+
+async def test_step2_save_creates_party_anchored_participation(
+    client: AsyncClient, auth_headers_with_org: dict, db_engine, monkeypatch
+):
+    """SP1: the participation step2/save writes must be anchored to the org's
+    founding party (Party.user_id == the saving user, in this org) and carry
+    organization_id. There is NO user_id column on participations anymore.
+    """
+    monkeypatch.setattr("ibkr_control.api.setup._trm_backfill_background", AsyncMock())
+    await _seed_detect(client, auth_headers_with_org, monkeypatch)
+
+    r = await client.post(
+        "/api/setup/step2/save",
+        headers=auth_headers_with_org,
+        json={"accounts": [{"ibkr_account_id": "U99999999", "alias": "Joint", "pct": "0.5000"}]},
+    )
+    assert r.status_code == 200, r.text
+
+    from ibkr_control.auth.models import User
+    from ibkr_control.db.models.memberships import Membership
+    from ibkr_control.db.models.parties import Party
+
+    Session = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with Session() as s:
+        user = await s.scalar(select(User).where(User.email == "org_owner@test.com"))
+        org_id = await s.scalar(
+            select(Membership.organization_id).where(Membership.user_id == user.id)
+        )
+        founding_party_id = await s.scalar(
+            select(Party.id).where(Party.organization_id == org_id, Party.user_id == user.id)
+        )
+        assert founding_party_id is not None
+
+        parts = (await s.scalars(select(Participation))).all()
+        assert len(parts) == 1
+        p = parts[0]
+        assert p.party_id == founding_party_id
+        assert p.organization_id == org_id
+        assert p.pct == Decimal("0.5000")
+        assert p.valid_to is None
+        # The party-anchored model dropped user_id from participations entirely.
+        assert not hasattr(p, "user_id")
 
 
 async def test_trm_backfill_background_emits_progress_events(monkeypatch):

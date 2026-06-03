@@ -303,6 +303,44 @@ async def auth_headers_with_org(client: AsyncClient, db_engine) -> dict:
 
 
 @pytest.fixture
+async def second_auth_headers_with_org(client: AsyncClient, db_engine) -> dict:
+    """A second org-having user for cross-tenant isolation tests.
+
+    Mirrors auth_headers_with_org but with a distinct email/org so the two
+    can detect disjoint accounts and assert that one org cannot claim the
+    other's. Shares the app testcontainer via db_engine (same lifecycle as
+    auth_headers_with_org)."""
+    from sqlalchemy import select
+    from ibkr_control.auth.models import User
+    from ibkr_control.db.models.memberships import Membership
+    from ibkr_control.db.models.organizations import Organization
+    from ibkr_control.db.models.parties import Party
+
+    email = "org_owner_2@test.com"
+    await client.post(
+        "/api/auth/register",
+        json={"email": email, "password": "supersecret123", "name": "Org Owner 2"},
+    )
+
+    session_maker = async_sessionmaker(db_engine, expire_on_commit=False, class_=AsyncSession)
+    async with session_maker() as session:
+        user = await session.scalar(select(User).where(User.email == email))
+        org = Organization(type="personal", name="Org Owner 2 Household")
+        session.add(org)
+        await session.flush()
+        session.add(Membership(user_id=user.id, organization_id=org.id, role="owner"))
+        session.add(Party(organization_id=org.id, display_name="Org Owner 2", user_id=user.id))
+        await session.commit()
+
+    login = await client.post(
+        "/api/auth/jwt/login",
+        data={"username": email, "password": "supersecret123"},
+    )
+    token = login.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
 async def sample_account(db_session: AsyncSession, sample_org):
     from ibkr_control.db.models.accounts import Account
 

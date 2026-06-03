@@ -34,13 +34,15 @@ _HIST_XML = b"""<?xml version="1.0"?>
 """
 
 
-async def test_full_wizard_flow_no_f_in_db(client: AsyncClient, auth_headers: dict, monkeypatch):
+async def test_full_wizard_flow_no_f_in_db(
+    client: AsyncClient, auth_headers_with_org: dict, monkeypatch
+):
     monkeypatch.setattr("ibkr_control.api.setup._trm_backfill_background", AsyncMock())
 
     # Step 1
     r = await client.post(
         "/api/setup/step1/save",
-        headers=auth_headers,
+        headers=auth_headers_with_org,
         json={"token": "tok_full_flow_12345", "query_id": "999"},
     )
     assert r.status_code == 200
@@ -50,7 +52,7 @@ async def test_full_wizard_flow_no_f_in_db(client: AsyncClient, auth_headers: di
     monkeypatch.setattr(
         flex_client_mod.FlexClient, "get_statement", AsyncMock(return_value=_YTD_XML)
     )
-    r = await client.post("/api/setup/step2/detect", headers=auth_headers)
+    r = await client.post("/api/setup/step2/detect", headers=auth_headers_with_org)
     assert r.status_code == 200, r.text
     detected = r.json()["detected_accounts"]
     assert {a["ibkr_account_id"] for a in detected} == {"U99999999", "U88888888"}
@@ -58,7 +60,7 @@ async def test_full_wizard_flow_no_f_in_db(client: AsyncClient, auth_headers: di
     # Step 2 save
     r = await client.post(
         "/api/setup/step2/save",
-        headers=auth_headers,
+        headers=auth_headers_with_org,
         json={
             "accounts": [
                 {"ibkr_account_id": "U99999999", "alias": "Joint", "pct": "0.5000"},
@@ -71,18 +73,18 @@ async def test_full_wizard_flow_no_f_in_db(client: AsyncClient, auth_headers: di
     # Step 3 upload + commit
     r = await client.post(
         "/api/setup/step3/upload",
-        headers=auth_headers,
+        headers=auth_headers_with_org,
         files={"file": ("hist.xml", _HIST_XML, "application/xml")},
     )
     assert r.status_code == 200
     temp_id = r.json()["flex_import_temp_id"]
     r = await client.post(
-        "/api/setup/step3/commit", headers=auth_headers, json={"temp_ids": [temp_id]}
+        "/api/setup/step3/commit", headers=auth_headers_with_org, json={"temp_ids": [temp_id]}
     )
     assert r.status_code == 200
 
     # Finish
-    r = await client.post("/api/setup/finish", headers=auth_headers)
+    r = await client.post("/api/setup/finish", headers=auth_headers_with_org)
     assert r.status_code == 200
 
     # Assertions: no F-accounts anywhere
