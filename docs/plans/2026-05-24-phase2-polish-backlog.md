@@ -236,19 +236,29 @@ condition teórica entre concurrent ingestions del mismo account ID nuevo.
 
 Estos items fueron evaluados y se decidió no fixarlos en Phase 2 polish:
 
-### D1 — SSE endpoint no verifica ownership de `job_id`
+### D1 — SSE endpoint no verifica ownership de `job_id` — RESUELTO 2026-06-02 (pre-Phase-3)
 
 **Archivo:** `backend/src/ibkr_control/api/ingest.py` GET `/stream/{job_id}`
 
-**Issue:** Cualquier usuario autenticado puede stream el progreso de un job de
-cualquier otro usuario, pasando un job_id arbitrario.
+**Issue (original):** Cualquier usuario autenticado podía stream el progreso de
+un job de cualquier otro usuario, pasando un job_id arbitrario.
 
-**Por qué no se fixa:** Phase 2 es single-user V1 (decisión locked #6 spec maestro).
-No hay otro usuario para spy on. Fix sería trivial post-Phase 3 cuando se
-agregue multi-user: `if job_id not in current_user.owned_jobs: raise 404`.
+**Resolución:** se cerró pre-Phase-3 (no se esperó a wirear multi-user) porque
+su rationale de diferimiento ("single-user, nadie a quien espiar") expira justo
+cuando Phase 3 activa la primitiva de autorización de Phase 2.8 — dejar un
+endpoint SSE sin scope al lado del muro de authz per-account es inconsistente.
 
-**Quien hereda:** Phase 3 si activa multi-user. O fix oportunista cuando alguien
-toque ese endpoint.
+El `JobTracker` ahora guarda el `user_id` dueño del job en `_JobState`;
+`create_job(user_id)` es **obligatorio** (no hay jobs anónimos) y expone
+`owner_id(job_id) -> int | None`. El endpoint chequea
+`if tracker.owner_id(job_id) != user.id: raise 404` — **404, no 403**, para no
+filtrar la existencia de un job ajeno (un job de otro usuario es indistinguible
+de uno inexistente). El check colapsa el caso "job desconocido" y "job ajeno" en
+la misma respuesta. Modelo de ownership: un job lo posee quien lo dispara
+(Phase 2.8 lockeó que los writes operan sobre recursos propios del current_user).
+
+TDD: 3 tests nuevos (owner storage ×2 en `test_job_tracker.py`, cross-user 404
+en `test_ingest.py` vía `second_auth_headers`). Backend tests 310 → 313.
 
 ### D2 — `_LAST_TRIGGER` in-memory rate limit — RESOLVED 45127f1
 

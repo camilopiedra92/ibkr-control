@@ -17,6 +17,7 @@ class TrackerEvent:
 
 @dataclass
 class _JobState:
+    user_id: int
     events: list[TrackerEvent] = field(default_factory=list)
     done: bool = False
     next_event_id: int = 0
@@ -30,10 +31,18 @@ class JobTracker:
         self._jobs: dict[int, _JobState] = {}
         self._next_job_id = count(start=1)
 
-    def create_job(self) -> int:
+    def create_job(self, user_id: int) -> int:
+        """Crea un job propiedad de `user_id`. El owner es quien dispara el job;
+        el SSE endpoint lo usa para rechazar accesos cruzados (D1). No hay jobs
+        anónimos — por eso user_id es obligatorio."""
         job_id = next(self._next_job_id)
-        self._jobs[job_id] = _JobState()
+        self._jobs[job_id] = _JobState(user_id=user_id)
         return job_id
+
+    def owner_id(self, job_id: int) -> int | None:
+        """user_id dueño del job, o None si el job no existe."""
+        state = self._jobs.get(job_id)
+        return state.user_id if state is not None else None
 
     def emit(self, job_id: int, payload: dict[str, Any]) -> None:
         if job_id not in self._jobs:

@@ -5,6 +5,28 @@ import asyncio
 from httpx import AsyncClient
 
 
+async def _user_id_by_email(email: str) -> int:
+    """Look up a registered user's id via a fresh engine on the same test DB.
+
+    Same pattern as test_trigger_persists_timestamp_in_user_row — needed because
+    job ownership (tracker) is keyed by the user's DB id, which we can't know
+    from the JWT headers alone.
+    """
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from ibkr_control.auth.models import User
+    from ibkr_control.config import get_settings
+
+    engine = create_async_engine(get_settings().database_url, echo=False)
+    try:
+        session_local = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_local() as s:
+            return (await s.scalars(select(User).where(User.email == email))).one().id
+    finally:
+        await engine.dispose()
+
+
 async def test_get_logs_empty_when_no_runs(client: AsyncClient, auth_headers: dict):
     resp = await client.get("/api/ingest/logs?limit=10", headers=auth_headers)
     assert resp.status_code == 200
@@ -37,11 +59,13 @@ async def test_stream_unknown_job_returns_404(client: AsyncClient, auth_headers:
 
 
 async def test_stream_emits_done_event(client: AsyncClient, auth_headers: dict):
-    """Crea un job en el tracker, emite eventos, verifica que el SSE los entrega."""
+    """El dueño del job SÍ puede stremearlo: crea un job propiedad del usuario
+    autenticado, emite eventos, verifica que el SSE los entrega."""
     from ibkr_control.ingest.job_tracker import get_tracker
 
+    owner_id = await _user_id_by_email("api_test@test.com")
     tracker = get_tracker()
-    job_id = tracker.create_job()
+    job_id = tracker.create_job(user_id=owner_id)
     tracker.emit(job_id, {"step": "test", "status": "running"})
     tracker.emit(job_id, {"step": "test", "status": "ok"})
     tracker.mark_done(job_id)
@@ -63,6 +87,30 @@ async def test_stream_emits_done_event(client: AsyncClient, auth_headers: dict):
     assert "done" in body
 
 
+async def test_stream_rejects_other_users_job_with_404(
+    client: AsyncClient, auth_headers: dict, second_auth_headers: dict
+):
+    """D1: un usuario autenticado NO puede stremear el job de otro usuario.
+
+    El owner es quien dispara el job; pasar el job_id de otro devuelve 404
+    (no 403 — no filtramos la existencia del job a un tercero). Sin este check,
+    cualquier usuario podía espiar el progreso del ingest de cualquier otro.
+    """
+    from ibkr_control.ingest.job_tracker import get_tracker
+
+    owner_id = await _user_id_by_email("api_test@test.com")
+    tracker = get_tracker()
+    # Job owned by user 1, marked done so the (pre-fix) stream would terminate
+    # instead of hanging — isolates the ownership check as the thing under test.
+    job_id = tracker.create_job(user_id=owner_id)
+    tracker.emit(job_id, {"step": "done"})
+    tracker.mark_done(job_id)
+
+    # user 2 (second_auth_headers) tries to read user 1's job
+    resp = await client.get(f"/api/ingest/stream/{job_id}", headers=second_auth_headers)
+    assert resp.status_code == 404
+
+
 async def test_run_manual_emits_substep_keys_matching_frontend(monkeypatch):
     """Contract lock with ManualRefreshButton.tsx: step must be 'trm_backfill' /
     'flex_ytd' (not the bare 'trm'/'flex'), and ok payloads carry n_days so the
@@ -82,7 +130,7 @@ async def test_run_manual_emits_substep_keys_matching_frontend(monkeypatch):
     monkeypatch.setattr(ingest_mod, "get_engine", lambda: object())
 
     tracker = get_tracker()
-    job_id = tracker.create_job()
+    job_id = tracker.create_job(user_id=1)
     await ingest_mod._run_manual(kind="both", user_id=1, job_id=job_id)
 
     events = [e.payload for e in tracker.events_since(job_id, after_id=-1)]
@@ -112,7 +160,7 @@ async def test_run_manual_marks_failing_substep_as_failed(monkeypatch):
     monkeypatch.setattr(ingest_mod, "get_engine", lambda: object())
 
     tracker = get_tracker()
-    job_id = tracker.create_job()
+    job_id = tracker.create_job(user_id=1)
     await ingest_mod._run_manual(kind="trm", user_id=1, job_id=job_id)
 
     events = [e.payload for e in tracker.events_since(job_id, after_id=-1)]

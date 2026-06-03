@@ -77,7 +77,7 @@ async def trigger_manual_refresh(
 async def _launch_manual_job(kind: str, user_id: int, background: BackgroundTasks) -> int:
     """Lanza el job real en background. Devuelve job_id del tracker."""
     tracker = get_tracker()
-    job_id = tracker.create_job()
+    job_id = tracker.create_job(user_id=user_id)
     background.add_task(_run_manual, kind=kind, user_id=user_id, job_id=job_id)
     return job_id
 
@@ -132,7 +132,10 @@ async def stream_progress(
 ):
     # NOTE: V1 no verifica que job_id pertenezca al usuario — single-user.
     tracker = get_tracker()
-    if not tracker.has_job(job_id):
+    # Ownership scope (D1): a job belongs to the user who triggered it. A job
+    # owned by someone else is reported as 404 — identical to a non-existent
+    # job — so we never leak the existence of another user's job (404, not 403).
+    if tracker.owner_id(job_id) != user.id:
         raise HTTPException(status_code=404, detail="Unknown job_id")
 
     async def event_generator():

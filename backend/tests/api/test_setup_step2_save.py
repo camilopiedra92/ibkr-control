@@ -199,7 +199,7 @@ async def test_trm_backfill_background_emits_progress_events(monkeypatch):
     monkeypatch.setattr(setup_mod, "get_engine", lambda: object())
 
     tracker = get_tracker()
-    job_id = tracker.create_job()
+    job_id = tracker.create_job(user_id=1)
     await setup_mod._trm_backfill_background(user_id=1, job_id=job_id)
 
     events = [e.payload for e in tracker.events_since(job_id, after_id=-1)]
@@ -229,7 +229,7 @@ async def test_trm_backfill_background_marks_failure_on_exception(monkeypatch):
     monkeypatch.setattr(setup_mod, "get_engine", lambda: object())
 
     tracker = get_tracker()
-    job_id = tracker.create_job()
+    job_id = tracker.create_job(user_id=1)
     await setup_mod._trm_backfill_background(user_id=1, job_id=job_id)
 
     events = [e.payload for e in tracker.events_since(job_id, after_id=-1)]

@@ -408,7 +408,7 @@ async def step2_save(
     # Register the job BEFORE add_task so the wizard banner can subscribe to
     # /api/ingest/stream/{job_id} the moment it receives this response without
     # racing the background task start (D12 fix — was fire-and-forget).
-    job_id = get_tracker().create_job()
+    job_id = get_tracker().create_job(user_id=user.id)
     background.add_task(_trm_backfill_background, user_id=user.id, job_id=job_id)
     return Step2SaveResponse(ok=True, trm_backfill_job_id=job_id)
 
