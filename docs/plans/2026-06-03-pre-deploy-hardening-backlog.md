@@ -40,9 +40,9 @@
 
 | Estado | Count |
 |---|---|
-| ✅ Hecho | 0 / 34 |
+| ✅ Hecho | 2 / 34 |
 | 🔨 En progreso | 0 |
-| ⏳ Pendiente | 34 |
+| ⏳ Pendiente | 32 |
 | ⚖️ Aceptado V1 | 11 |
 | 🟦 Diferido | 1 |
 
@@ -50,11 +50,11 @@
 
 | WS | Workstream | Accionables | Hechos |
 |---|---|---|---|
-| WS0 | Genericización del repo (prerequisito) | 1 | 0 |
+| WS0 | Genericización del repo (prerequisito) | 1 | ✅ 1 |
 | WS1 | Seguridad de la aplicación (incl. H1, S14) | 11 | 0 |
 | WS2 | Config de deploy / secrets | 2 | 0 |
 | WS3 | Observabilidad / resiliencia | 3 | 0 |
-| WS4 | CI/CD & automatización | 10 | 0 |
+| WS4 | CI/CD & automatización | 10 | 1 (C3) |
 | WS5 | Arquitectura / Phase-3 readiness | 4 | 0 |
 | WS6 | Testing | 3 | 0 |
 
@@ -64,11 +64,11 @@
 
 > **Origen:** decisión del usuario (2026-06-03). El repo es un **producto general**, no la instalación de un usuario particular. Los datos de cuentas reales son runtime (wizard → DB), no deben vivir en el source. Esto además **desbloquea hacer el repo público gratis** (resuelve C3 sin pagar ni exponer PII) y cierra de raíz el riesgo que el audit ya había visto una vez ("real account IDs leaked into frontend defaults", Phase 2 polish).
 
-### [ ] G1 — Quitar toda info específica de usuario del repo (cuentas, nombres, email, % participación)
+### [x] G1 — Quitar toda info específica de usuario del repo (cuentas, nombres, email, % participación)
 
 - **Severidad:** N/A (decisión de diseño / privacidad) · **Tipo:** 🟢 core · **Effort:** M · **WS:** WS0
 - **Ubicación:** `CLAUDE.md` (tabla "Cuentas IBKR", retrospectivas), `docs/specs/*` (5 archivos), `docs/plans/*`, `docs/references/renta-cross-references.md`, `backend/tests/**` (IDs reales en fixtures/tests), `backend/tests/fixtures/xml/*_sanitized.xml`, `backend/scripts/sanitize_xml.py`
-- **Estado:** 🔨 En progreso — ✅ **HEAD genericizado + verificado** (27 archivos scrubeados, mapping en local untracked, `sanitize_xml.py` + guard refactorizados, **314 tests verdes, ruff limpio, 0 PII real en HEAD**). ⏳ Falta: scrub de historial (`git filter-repo`) + repo público (pasos irreversibles, requieren OK explícito).
+- **Estado:** ✅ **Hecho** (2026-06-03). HEAD genericizado (27 archivos, mapping en local untracked, `sanitize_xml.py` + guard refactorizados, 314 tests verdes). Historial scrubeado con `git filter-repo --replace-text` (case-sensitive + case-insensitive regex para nombres) → **0 PII en los 252 commits**. Metadata de autor: email real → noreply de GitHub vía `--mailmap` (nombre preservado, decisión del usuario). PR refs viejos (con PII) purgados **borrando + re-creando el repo** (`refs/pull/*` son inmutables, no se force-pushean). Repo **público** con historia limpia. Verificado: 0 refs/pull, 0 PRs, 0 PII en `origin/main`.
 
 **Problema (scope ampliado tras investigar 2026-06-03):** PII real commiteada en 3 categorías (valores concretos en el mapping local untracked, no acá):
 1. **Números de cuenta** (3 cuentas `U########` + 1 counterparty `CS-######-##`) en CLAUDE.md + ~13 docs/specs + 3 tests `.py` (en specs como ejemplos; en `test_parser.py`/`test_persister.py` como data de test self-contained; en `test_fixtures_smoke.py` como tests guardián anti-leak).
@@ -303,11 +303,11 @@
 
 **Fix:** agregar `pnpm lint` + `pnpm test:run` (vitest non-watch) al job frontend. Playwright e2e como job separado (necesita backend+postgres; gatear a PRs-a-main si el runtime preocupa). E2E puede quedar fuera de CI por D4 (necesita IBKR mocks) — eso está OK.
 
-### [ ] C3 — CI advisory-only: sin branch protection, un run rojo no bloquea el merge a main
+### [x] C3 — CI advisory-only: sin branch protection, un run rojo no bloquea el merge a main
 
 - **Severidad:** MEDIUM · **Tipo:** 🟢 core · **Effort:** S · **WS:** WS4
 - **Ubicación:** `.github/workflows/ci.yml:3-6`
-- **Estado:** ⏳ Pendiente
+- **Estado:** ✅ **Hecho** (2026-06-03) — resuelto gratis al hacer el repo público (vía G1). Branch protection en `main`: require PR + required status checks (`backend`, `frontend`) + sin force-push/deletion (`enforce_admins=false` para bypass de emergencia del owner). **Nota:** los contexts de status check (`backend`/`frontend`) se afinan en WS4 cuando C1/C2 amplíen el CI (lint/vitest/coverage).
 
 **Problema:** el workflow dispara en push-a-main y pull_request, pero el repo es privado free-tier → `branches/main/protection` devuelve 403 "Upgrade to GitHub Pro or make public". No hay required-status-check → un run fallido (o un push directo a main que rompe tests) no previene el estado roto. El workflow del equipo (commits frecuentes directos a main, per git log) lo hace concreto: CI corre pero es puramente informativo.
 
