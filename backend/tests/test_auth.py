@@ -1,11 +1,11 @@
 async def test_register_creates_user(client):
     response = await client.post(
         "/api/auth/register",
-        json={"email": "Test Owner@example.com", "password": "supersecret123", "name": "Test Owner"},
+        json={"email": "owner@example.com", "password": "supersecret123", "name": "Test Owner"},
     )
     assert response.status_code == 201
     body = response.json()
-    assert body["email"] == "Test Owner@example.com"
+    assert body["email"] == "owner@example.com"
     assert body["name"] == "Test Owner"
 
 

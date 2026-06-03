@@ -27,7 +27,7 @@ un test de paridad que pinte valores y comparalo contra `renta/tests/_invariants
 
 | Regla | Implementación referencia en renta |
 |---|---|
-| Art. 288 ET (TRM compra/venta) | `renta2025.py` buscar `"Art.288"` y `_ib_ingresos_brutos_cop_camilo`, `_ib_costos_cop_camilo` |
+| Art. 288 ET (TRM compra/venta) | `renta2025.py` buscar `"Art.288"` y `_ib_ingresos_brutos_cop_<titular>`, `_ib_costos_cop_<titular>` |
 | Art. 300 ET (730 días → GO) | `renta2025.py` buscar `_clasificar_dias_held` y `Art.300` |
 | Art. 254 ET (WHT US descuento) | `renta2025.py` buscar `Art.254` y `_wht_descuento` |
 | Decreto 1797/2008 (FUT netting) | `renta2025.py` § A.5 "régimen DUAL"; `CLAUDE.md` § "Derivados financieros" |

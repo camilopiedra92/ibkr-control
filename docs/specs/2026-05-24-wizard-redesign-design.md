@@ -136,7 +136,7 @@ response 200: {
       ibkr_account_id: "U99999001",
       suggested_alias: "Joint Account",     # del <AccountInformation accountAlias=...>
       account_type: "Joint",                # del attr accountType (info read-only)
-      account_holder: "Test Owner"   # del attr name (info read-only)
+      account_holder: "TEST OWNER"   # del attr name (info read-only)
     },
     ...
   ],

@@ -910,11 +910,11 @@ async def client(app_with_db):
 async def test_register_creates_user(client):
     response = await client.post(
         "/api/auth/register",
-        json={"email": "Test Owner@example.com", "password": "supersecret123", "name": "Test Owner"},
+        json={"email": "owner@example.com", "password": "supersecret123", "name": "Test Owner"},
     )
     assert response.status_code == 201
     body = response.json()
-    assert body["email"] == "Test Owner@example.com"
+    assert body["email"] == "owner@example.com"
     assert body["name"] == "Test Owner"
 
 
@@ -2488,12 +2488,12 @@ curl -s $DOMAIN/api/health
 # Registrar usuario
 curl -s -X POST $DOMAIN/api/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"email":"Test Owner@tudominio.com","password":"<password>","name":"Test Owner"}'
+  -d '{"email":"owner@example.com","password":"<password>","name":"Test Owner"}'
 
 # Login
 curl -s -X POST $DOMAIN/api/auth/jwt/login \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "username=Test Owner@tudominio.com&password=<password>"
+  -d "username=owner@example.com&password=<password>"
 ```
 
 - [ ] **Step 6: Abrir el dominio en el browser**

@@ -4,7 +4,7 @@
 >
 > **Framing:** la app NUNCA fue deployada a prod. Este hardening es el **gate antes del primer deploy** a Coolify. El core (crypto AES-GCM, authz default-deny, persister idempotente, schema) ya está endurecido y verificado limpio — lo que falta es casi todo **operacional / pre-deploy**: el sistema fue endurecido *como código correcto*, no *como servicio expuesto a internet*.
 >
-> **Calibración (locked):** "mejores prácticas mundiales" acá = app personal de ~3 usuarios (Test Owner, Joint Holder, contador read-only) en un solo host Coolify/Hetzner. Cero superficie de ataque evitable, secrets bien manejados, CI que bloquea merges rotos, logs que explican fallos, deps sin CVEs. **NO**: Prometheus/Grafana/tracing distribuido, secret managers externos (Vault), blue-green, multi-region, maquinaria multi-tenant. Lo `possibly-overkill` se **acepta y documenta como V1 consciente**, no se implementa.
+> **Calibración (locked):** "mejores prácticas mundiales" acá = app personal de ~3 usuarios (propietario, co-titular, contador read-only) en un solo host Coolify/Hetzner. Cero superficie de ataque evitable, secrets bien manejados, CI que bloquea merges rotos, logs que explican fallos, deps sin CVEs. **NO**: Prometheus/Grafana/tracing distribuido, secret managers externos (Vault), blue-green, multi-region, maquinaria multi-tenant. Lo `possibly-overkill` se **acepta y documenta como V1 consciente**, no se implementa.
 
 ## Cómo usar este documento
 
@@ -62,21 +62,30 @@
 
 ## 🟣 WS0 — Genericización del repo (prerequisito: quita acoplamiento a datos de un usuario)
 
-> **Origen:** decisión del usuario (2026-06-03). El repo es un **producto general**, no la instalación de Test Owner. Los datos de cuentas reales son runtime (wizard → DB), no deben vivir en el source. Esto además **desbloquea hacer el repo público gratis** (resuelve C3 sin pagar ni exponer PII) y cierra de raíz el riesgo que el audit ya había visto una vez ("real account IDs leaked into frontend defaults", Phase 2 polish).
+> **Origen:** decisión del usuario (2026-06-03). El repo es un **producto general**, no la instalación de un usuario particular. Los datos de cuentas reales son runtime (wizard → DB), no deben vivir en el source. Esto además **desbloquea hacer el repo público gratis** (resuelve C3 sin pagar ni exponer PII) y cierra de raíz el riesgo que el audit ya había visto una vez ("real account IDs leaked into frontend defaults", Phase 2 polish).
 
 ### [ ] G1 — Quitar toda info específica de usuario del repo (cuentas, nombres, email, % participación)
 
 - **Severidad:** N/A (decisión de diseño / privacidad) · **Tipo:** 🟢 core · **Effort:** M · **WS:** WS0
 - **Ubicación:** `CLAUDE.md` (tabla "Cuentas IBKR", retrospectivas), `docs/specs/*` (5 archivos), `docs/plans/*`, `docs/references/renta-cross-references.md`, `backend/tests/**` (IDs reales en fixtures/tests), `backend/tests/fixtures/xml/*_sanitized.xml`, `backend/scripts/sanitize_xml.py`
-- **Estado:** ⏳ Pendiente
+- **Estado:** 🔨 En progreso — ✅ **HEAD genericizado + verificado** (27 archivos scrubeados, mapping en local untracked, `sanitize_xml.py` + guard refactorizados, **314 tests verdes, ruff limpio, 0 PII real en HEAD**). ⏳ Falta: scrub de historial (`git filter-repo`) + repo público (pasos irreversibles, requieren OK explícito).
 
-**Problema:** números de cuenta IBKR reales (`U155xxxxx`, `CS-xxxxxx`) en 15+ archivos commiteados, nombre/email en CLAUDE.md + 5 specs, porcentajes de participación reales (50% Test Owner). Acopla el producto a un usuario y bloquea hacer el repo público de forma segura. Está además en **53 commits de historial** (solo CLAUDE.md).
+**Problema (scope ampliado tras investigar 2026-06-03):** PII real commiteada en 3 categorías (valores concretos en el mapping local untracked, no acá):
+1. **Números de cuenta** (3 cuentas `U########` + 1 counterparty `CS-######-##`) en CLAUDE.md + ~13 docs/specs + 3 tests `.py` (en specs como ejemplos; en `test_parser.py`/`test_persister.py` como data de test self-contained; en `test_fixtures_smoke.py` como tests guardián anti-leak).
+2. **Identidad SENSIBLE en los XML "sanitized"** — el `sanitize_xml.py` solo mapeaba cuentas, dejando intactos en `<AccountInformation>`: nombre real, email, **dirección de domicilio**, **fecha de nacimiento**, NIT, y el handle/username de GitHub/macOS. Esto es PII más grave que un número de cuenta.
+3. **Nombres** en prosa de CLAUDE.md + 4 specs. (Un `U########` que aparecía era FALSO POSITIVO — estaba dentro del ISIN público de Globant; se deja.)
 
-**Fix (2 capas):**
-1. **HEAD:** reemplazar todos los IDs reales por placeholders consistentes (`U10000001`/`U10000002`/`U10000003`, `CS-100000-01`), genericizar la tabla "Cuentas IBKR" de CLAUDE.md a un ejemplo neutro + nota "las cuentas reales se configuran en runtime vía el wizard"; quitar email/nombre donde sea info de usuario (mantener autoría de git es OK). Verificar que los fixtures sanitizados usen IDs fake y que los tests que asertan contra IDs sigan verdes con los nuevos valores.
-2. **Historial:** `git filter-repo` purgando los IDs/PII de todos los commits (reescribe SHAs — seguro ahora que sos el único clon; re-push `--force` + re-crear tags).
+**Fix (HEAD, por categoría):**
+- **Mapping real→fake va a archivo LOCAL untracked** (`backend/scripts/.sanitize_mapping.local.json`, gitignored). Los números reales salen del repo por completo.
+- **`sanitize_xml.py`:** refactor para leer el mapping del archivo local + **extender a identidad** (nombre/email/dirección/DOB), no solo cuentas.
+- **`test_fixtures_smoke.py`:** el guard lee la lista real del archivo local y **skipea si falta** (así no hardcodea los reales; sigue protegiendo local).
+- **Fixtures XML:** scrubear identidad → genéricos (`Test Owner`, `owner@example.com`, `123 Test Street`, `19900101`, `000000`). Cuentas ya son `U99999*`.
+- **Docs (CLAUDE.md, specs, plans, references):** cuentas → `U99999001/2/3`, `CS-999999-99`; nombres → roles genéricos (`el propietario`/`la co-titular`); tabla "Cuentas IBKR" → ejemplo neutro + nota "se configuran en runtime vía wizard".
+- **`test_parser.py`/`test_persister.py`:** cuentas reales → `U99999*` (data self-contained, mantiene tests verdes).
 
-**Verificación:** `git grep -E 'U155[0-9]{5}|CS-[0-9]{6}|owner@gmail'` → 0 matches en HEAD; `git log -p | grep -E 'U155...'` → 0 en historial; `uv run pytest -q` sigue verde con los IDs nuevos.
+**Fix (historial):** `git filter-repo` con el mismo mapping (untracked) purgando los 53+ commits; re-push `--force` + re-crear los 8 tags. Solo después → repo público.
+
+**Verificación:** grep por cada valor real (las claves del mapping local, ej. `git grep -iFf <(jq -r 'keys[]|select(startswith("_")|not)' backend/scripts/.sanitize_mapping.local.json)`) → 0 en HEAD; mismo chequeo sobre `git log -p` → 0 en historial; `cd backend && uv run pytest -q` verde (era 313).
 
 **Desbloquea:** C3 (repo público gratis → branch protection sin pagar ni exponer).
 

@@ -47,3 +47,6 @@ postgres_data/
 
 # Claude Code personal overrides (settings.json sí se commitea)
 .claude/settings.local.json
+
+# PII sanitization mapping (real->generico) — NUNCA commitear datos del usuario
+backend/scripts/.sanitize_mapping.local.json
