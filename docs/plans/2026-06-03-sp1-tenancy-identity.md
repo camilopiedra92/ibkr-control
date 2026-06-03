@@ -12,6 +12,30 @@
 
 ---
 
+## ⏯ Execution status (paused 2026-06-03 — branch `saas/sp1-tenancy-identity`, 22 commits)
+
+**Foundation DONE + reviewed + drift-clean + RLS isolation PROVEN.** Paused before the (large, mechanical) app-layer green-up — to be resumed in a fresh session for context quality.
+
+**Done (✅):**
+- **Tasks 1-7** — identity models (Organization, Membership, Party, AccessGrant) + refactors (participations party-anchored, flex_credentials per-org, `organization_id` + index on all 15 org-scoped tables). Review fixes applied: `AccessGrant.role` server_default; `counterparties` UNIQUE → `(organization_id, external_id)` (per-org, not global); org_id index on parties/participations.
+- **Old authz/grants layer removed** (was planned as Task 19 Step 1, pulled forward right after Task 4 to avoid carrying `= None` stubs): deleted `authz/` package, `api/grants.py`, the `main.py` mount, and the 4 authz/grants test files. Nothing kept used `require_account_scope`/`visible_account_ids` (S9 confirmed).
+- **Tasks 8-9** — squashed baseline `05943d9efcdb` (`down_revision=None`, 22 tables, apscheduler false-positive avoided) + RLS: `db/rls.py` SSOT (15-table list + policy builders), `app_rls` non-bypass login role, 16 policies + `FORCE` on every org-scoped table + `access_grants` special policy. Review fix: `NULLIF(current_setting(...,true),'')::bigint` so unset context → clean default-deny (0 rows) instead of 22P02 error; explicit `WITH CHECK` on access_grants.
+- **Task 10** — structural tests (migrations/naming/table_comments) target the new baseline (drift test green; `test_migrations` uses dynamic head + ignores apscheduler).
+- **Task 11** — RLS smoke suite (`tests/test_rls.py`, 4 tests, `rls_session_factory` connecting as `app_rls`): default-deny, org A ≠ org B isolation, no-bypass, access_grants grantor/grantee visibility. **Cross-tenant isolation proven.**
+- **Tasks 12-13** — `api/_context.py`: `apply_org_context` (SET LOCAL, pooling-safe), `resolve_current_org_id` (membership-based, default-deny 403), `org_context` FastAPI dependency.
+- **Task 15** — persister stamps `organization_id` on FlexImport + all facts + flex_import_accounts + ensure_accounts/counterparties; dedup + R1 cleanup scope by org. Follow-up fix: `flex_imports` dedup UNIQUE → `(organization_id, xml_hash)`, `user_id` nullable audit (per-org idempotency); `flex_import_accounts` comment de-staled.
+- **Task 17** — `scripts/provision_org.py` (`provision_org()` + CLI): org + user (PasswordHelper hash) + UserSettings + Membership(owner) + Party.
+
+**Remaining (⏳ — the convergence; suite is 197 pass / 106 fail / 22 err, all app-layer user-centric):**
+- **Task 18** — rebuild `conftest.py` fixtures around org/party: `sample_user` creates org+membership+party; `sample_org`, `sample_party`, `auth_headers_with_org` (use `provision_org`); `sample_account`/`sample_flex_import` take `organization_id`.
+- **Task 16** — wizard (`api/setup.py`, ~9 endpoints): `org_context` dependency + party-anchored participations (SP1 minimal: founding user↔party; multi-party UI is SP3). Persist calls pass `organization_id`. Drop the H1 `_user_*` scoping helpers (RLS + ownership supersede).
+- **Task 19** — green-up: adapt every remaining user-centric test (persister 16 tests pass `user_id=`→`organization_id=`; credentials/ingest/scheduler/job/isolation/replay/poison; api/setup_* tests). **DELETE** the migration-mechanics tests targeting squashed-away revisions: `test_phase2_*_migration.py`, `test_counterparties_migration.py`, `test_phase25_persister_migration.py` (the 22 errors). Full suite green + ruff clean.
+- **Task 14** — switch `app_with_db` from `Base.metadata.create_all` to `alembic upgrade head` + connect as `app_rls` + auto-set org context, so the endpoint suite runs UNDER RLS (world-class). **Do this LAST** (after 16/18/19 make endpoints+tests org-aware) — the `create_all` fixture has no RLS, so endpoint tests can go green on the model change first, then RLS hardening surfaces any missing-context bugs.
+
+**Resume order:** 18 → 16 → 19 (green under `create_all`) → 14 (RLS hardening) → final code review → `superpowers:finishing-a-development-branch`. Container is bind-mounted; generate/verify migrations via `docker compose exec backend`. Run tests from host: `cd backend && uv run pytest`.
+
+---
+
 ## Key implementation decisions (read before starting)
 
 - **Squashed baseline.** Delete the 3 existing migrations (`cbeaac94933d`, `eb5ef6d36e06`, `8d69e795a517`). Generate ONE new baseline (`down_revision=None`) from the final models, then hand-add RLS/roles DDL. DB wipe is authorized — no reversibility, no data preservation.
