@@ -77,6 +77,21 @@ El valor autoritativo **ya está en la fuente**: el XML trae `assetCategory` dir
 - `trades.asset_class` (sin cambios).
 - Poblar `participations` (decisión abierta de Phase 3, no relacionada).
 
+## Follow-ups conocidos (no bloquean; decisión consciente)
+
+- **Asimetría `trades.asset_class` vs lotes (detectada en code review):** `_parse_trade`
+  usa `asset_class=elem.get("assetCategory") or ""` (vacío silencioso), mientras los
+  lotes ahora son fail-loud. `trades.asset_class` es NOT NULL en DB pero puede quedar
+  `""`. No es un fiscal-discriminator hoy como sí lo son los lotes, y armonizarlo
+  ampliaría el blast radius (parse path distinto, fixtures propias). Candidato a
+  harmonizar (fail-loud en trades) en un cleanup futuro si trades pasa a usarse para
+  clasificación fiscal.
+- **Precondición de la migración:** `eb5ef6d36e06` agrega NOT NULL sin `server_default`
+  → exige tablas de lotes vacías al `upgrade`. Documentado en el docstring de la
+  migración + Task 4 del plan. Para el deploy a prod: mergear esta branch ANTES del
+  primer deploy a Coolify (la primera corrida de migraciones será contra una DB vacía),
+  o si prod ya tuviera datos, wipear los lotes antes del upgrade.
+
 ## Referencias
 
 - Análisis fiscal manual 2026-06-02 (sesión que motivó esto).

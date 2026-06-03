@@ -4,6 +4,12 @@ Revision ID: eb5ef6d36e06
 Revises: cbeaac94933d
 Create Date: 2026-06-03 02:58:20.885931
 
+PRECONDITION: adds a NOT NULL column without a server_default, so closed_lots
+and open_position_lots MUST be empty when this runs (no backfill — asset_class
+comes from re-parsing the XML). Rollout is wipe + upgrade + re-import via the
+wizard, in that order (see docs/plans/2026-06-02-lot-asset-class.md Task 4).
+Running this against populated lot tables will fail loudly — by design.
+
 """
 
 from typing import Sequence, Union
