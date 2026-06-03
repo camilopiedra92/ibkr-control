@@ -27,6 +27,7 @@ DO NOTHING absorbe colisiones cross-XML sin error.
 from datetime import date
 
 from sqlalchemy import select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ibkr_control.db.models.accounts import Account
@@ -36,6 +37,7 @@ from ibkr_control.db.models.flex_raw import (
     ChangeInDividendAccrual,
     ClosedLot,
     FlexImport,
+    FlexImportAccount,
     OpenDividendAccrual,
     OpenPositionLot,
     Trade,
@@ -161,6 +163,19 @@ async def persist(
     session.add(fi)
     await session.flush()  # para tener fi.id
 
+    # Procedencia cuenta<->import (hardening H1): registra TODAS las cuentas
+    # no-shadow observadas en el XML (accounts_map ya excluye F-shadow e incluye
+    # las AccountInformation-only sin hechos). Es el link durable que el wizard
+    # usa para scopear la validacion anti-IDOR de step2/save. ON CONFLICT DO
+    # NOTHING lo hace idempotente; el fast-path A4 ya cubre el re-ingest del
+    # mismo XML, esto cubre el caso degenerado de un retry intra-transaccion.
+    if accounts_map:
+        await session.execute(
+            pg_insert(FlexImportAccount.__table__)
+            .values([{"flex_import_id": fi.id, "account_id": aid} for aid in accounts_map.values()])
+            .on_conflict_do_nothing(index_elements=["flex_import_id", "account_id"])
+        )
+
     # UPSERTs en orden de dependencia FK
     n_new = await _upsert_all_children(session, fi, parsed, accounts_map)
 
@@ -176,6 +191,16 @@ async def persist(
     # R1 latest-1 cleanup. For year_status='rolling' rows of the same
     # (user_id, anyo, source), retain only the row just persisted (fi.id).
     # Sealed rows are pinned. Poison rows are forensic evidence — preserved.
+    #
+    # H1 provenance interaction: deleting an evicted rolling import CASCADE-deletes
+    # its flex_import_accounts rows. This is intentional — provenance follows the
+    # import. The current import's provenance was just written above (same
+    # transaction, before this DELETE, against a different fi.id), so it survives;
+    # any account still present in the new XML is re-covered. Consequence: if a
+    # later rolling import for the same (user, anyo, source) drops an account
+    # (not in the new XML), that account's provenance is gone — step2/save would
+    # then return ACCOUNT_NOT_DETECTED for it. That is the correct outcome: the
+    # most recent statement is authoritative about which accounts exist.
     await session.execute(
         text("""
             DELETE FROM flex_imports
