@@ -911,6 +911,23 @@ def upgrade() -> None:
     )
     # ### end Alembic commands ###
 
+    # RLS: org isolation (FORCE so even table owner is subject) + the app_rls
+    # non-bypass login role the app connects as. Migrations run as the DB owner.
+    from ibkr_control.db.rls import (
+        ORG_SCOPED_TABLES,
+        access_grants_policy_sql,
+        app_role_grants_sql,
+        standard_policy_sql,
+    )
+
+    for stmt in app_role_grants_sql():
+        op.execute(stmt)
+    for table in ORG_SCOPED_TABLES:
+        for stmt in standard_policy_sql(table):
+            op.execute(stmt)
+    for stmt in access_grants_policy_sql():
+        op.execute(stmt)
+
 
 def downgrade() -> None:
     """Downgrade schema."""
@@ -981,3 +998,10 @@ def downgrade() -> None:
     op.drop_table("trm_days")
     op.drop_table("organizations")
     # ### end Alembic commands ###
+
+    # Policies are dropped implicitly with their tables above. Drop the role last
+    # (its grants are gone once the tables are dropped). This is a wipe baseline,
+    # so downgrade fidelity is low-priority.
+    from ibkr_control.db.rls import APP_ROLE
+
+    op.execute(f"DROP ROLE IF EXISTS {APP_ROLE}")
