@@ -58,6 +58,7 @@ async def test_upsert_snapshot_inserts_then_updates(
         flex_import_id=sample_flex_import.id,
         account_id=sample_account.id,
         symbol="AAPL",
+        asset_class="STK",
         open_date=date(2025, 1, 15),
         snapshot_date=date(2025, 5, 25),
         qty=Decimal("10"),
@@ -71,7 +72,14 @@ async def test_upsert_snapshot_inserts_then_updates(
         OpenPositionLot.__table__,
         [base_row],
         ["account_id", "symbol", "open_date", "snapshot_date", "originating_transaction_id"],
-        ["qty", "cost_basis_usd", "mark_price_usd", "mark_value_usd", "flex_import_id"],
+        [
+            "asset_class",
+            "qty",
+            "cost_basis_usd",
+            "mark_price_usd",
+            "mark_value_usd",
+            "flex_import_id",
+        ],
     )
     assert n_first == 1
 
@@ -81,7 +89,14 @@ async def test_upsert_snapshot_inserts_then_updates(
         OpenPositionLot.__table__,
         [updated],
         ["account_id", "symbol", "open_date", "snapshot_date", "originating_transaction_id"],
-        ["qty", "cost_basis_usd", "mark_price_usd", "mark_value_usd", "flex_import_id"],
+        [
+            "asset_class",
+            "qty",
+            "cost_basis_usd",
+            "mark_price_usd",
+            "mark_value_usd",
+            "flex_import_id",
+        ],
     )
     assert n_second == 1  # touched (UPDATE path)
 

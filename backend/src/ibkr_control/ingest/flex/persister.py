@@ -252,6 +252,7 @@ async def _upsert_all_children(
             "transaction_id": (cl.transaction_id or f"NO-TX-{cl.symbol}-{cl.close_date}-{i}"),
             "account_id": accounts_map[cl.ibkr_account_id],
             "symbol": cl.symbol,
+            "asset_class": cl.asset_class,
             "open_date": cl.open_date,
             "close_date": cl.close_date,
             "close_datetime": cl.close_datetime,
@@ -363,6 +364,7 @@ async def _upsert_all_children(
             "flex_import_id": fi.id,
             "account_id": accounts_map[op_lot.ibkr_account_id],
             "symbol": op_lot.symbol,
+            "asset_class": op_lot.asset_class,
             "open_date": op_lot.open_date,
             "qty": op_lot.qty,
             "cost_basis_usd": op_lot.cost_basis_usd,
@@ -381,6 +383,7 @@ async def _upsert_all_children(
         ["account_id", "symbol", "open_date", "snapshot_date", "originating_transaction_id"],
         [
             "flex_import_id",
+            "asset_class",
             "qty",
             "cost_basis_usd",
             "mark_price_usd",

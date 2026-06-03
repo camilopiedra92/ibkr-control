@@ -137,6 +137,7 @@ class ClosedLot(Base):
     transaction_id: Mapped[str] = mapped_column(String, nullable=False)
     account_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("accounts.id"), nullable=False)
     symbol: Mapped[str] = mapped_column(String, nullable=False)
+    asset_class: Mapped[str] = mapped_column(String, nullable=False)
     open_date: Mapped[date] = mapped_column(Date, nullable=False)
     close_date: Mapped[date] = mapped_column(Date, nullable=False)
     # A3 amendment #3: per-execution timestamp discriminator (multiple <Lot>
@@ -185,6 +186,7 @@ class OpenPositionLot(Base):
     )
     account_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("accounts.id"), nullable=False)
     symbol: Mapped[str] = mapped_column(String, nullable=False)
+    asset_class: Mapped[str] = mapped_column(String, nullable=False)
     open_date: Mapped[date] = mapped_column(Date, nullable=False)
     qty: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
     cost_basis_usd: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)

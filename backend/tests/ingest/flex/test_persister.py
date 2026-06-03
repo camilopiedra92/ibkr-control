@@ -653,3 +653,32 @@ async def test_fop_fixture_creates_counterparty_no_orphan_account(
     assert internal_row is not None
     assert internal_row[0] is not None and internal_row[1] is None  # src = own account
     assert internal_row[2] is not None and internal_row[3] is None  # dst = own account
+
+
+@pytest.mark.asyncio
+async def test_persist_stores_asset_class_on_both_lot_tables(db_session: AsyncSession, sample_user):
+    from sqlalchemy import distinct, select
+
+    xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
+    from ibkr_control.ingest.flex.parser import parse
+
+    parsed = parse(xml)
+    await persist(
+        db_session, parsed=parsed, user_id=sample_user.id, xml_bytes=xml, source="manual_upload"
+    )
+    await db_session.commit()
+
+    from ibkr_control.db.models.flex_raw import ClosedLot, OpenPositionLot
+
+    closed_classes = set(
+        (await db_session.execute(select(distinct(ClosedLot.asset_class)))).scalars().all()
+    )
+    open_classes = set(
+        (await db_session.execute(select(distinct(OpenPositionLot.asset_class)))).scalars().all()
+    )
+    assert "STK" in closed_classes and "FUT" in closed_classes
+    assert open_classes == {"STK"}
+    n_null = await db_session.scalar(
+        select(func.count()).select_from(ClosedLot).where(ClosedLot.asset_class.is_(None))
+    )
+    assert n_null == 0
