@@ -77,3 +77,35 @@ async def test_access_grant_exclusive_grantee_arc(db_session):
     )
     with pytest.raises(IntegrityError):
         await db_session.flush()
+
+
+@pytest.mark.asyncio
+async def test_participation_is_party_anchored(db_session):
+    from datetime import date
+    from decimal import Decimal
+    from ibkr_control.db.models.accounts import Account
+    from ibkr_control.db.models.organizations import Organization
+    from ibkr_control.db.models.parties import Party
+    from ibkr_control.db.models.participations import Participation
+
+    org = Organization(type="personal", name="H")
+    db_session.add(org)
+    await db_session.flush()
+    party = Party(organization_id=org.id, display_name="Owner")
+    acc = Account(ibkr_account_id="U99999001", organization_id=org.id, currency="USD")
+    db_session.add_all([party, acc])
+    await db_session.flush()
+    db_session.add(
+        Participation(
+            party_id=party.id,
+            account_id=acc.id,
+            organization_id=org.id,
+            pct=Decimal("0.5000"),
+            valid_from=date(2026, 1, 1),
+            valid_to=None,
+        )
+    )
+    await db_session.flush()
+    got = await db_session.scalar(select(Participation).where(Participation.party_id == party.id))
+    assert got.pct == Decimal("0.5000")
+    assert not hasattr(got, "user_id")
