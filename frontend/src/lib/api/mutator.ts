@@ -1,16 +1,16 @@
 import Axios, { AxiosRequestConfig } from "axios";
 
+import { clearToken, getToken } from "@/lib/auth/storeToken";
+
 const baseURL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export const axiosInstance = Axios.create({ baseURL });
 
 axiosInstance.interceptors.request.use((cfg) => {
-  if (typeof window !== "undefined") {
-    const token = localStorage.getItem("auth_token");
-    if (token) {
-      cfg.headers = cfg.headers ?? {};
-      cfg.headers["Authorization"] = `Bearer ${token}`;
-    }
+  const token = getToken();
+  if (token) {
+    cfg.headers = cfg.headers ?? {};
+    cfg.headers["Authorization"] = `Bearer ${token}`;
   }
   return cfg;
 });
@@ -24,7 +24,7 @@ axiosInstance.interceptors.response.use(
       error.response?.status === 401 &&
       !window.location.pathname.startsWith("/login")
     ) {
-      localStorage.removeItem("auth_token");
+      clearToken();
       window.location.replace("/login");
     }
     // Axios always rejects with an AxiosError (an Error subclass); the wrapper

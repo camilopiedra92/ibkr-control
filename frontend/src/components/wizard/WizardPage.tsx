@@ -55,8 +55,8 @@ function screenToStep(screen: WizardScreen): 1 | 2 | 3 | 4 {
  *
  * The 7-screen state machine is documented in `useWizardNav.ts`.
  *
- * Step 3 components are placeholders for Task 14, which will swap them for
- * the real upload / new-accounts / commit components.
+ * Step 3 routes between the real `Step3Upload` / `Step3NewAccountsModal` /
+ * `Step3Commit` components depending on the detected/unresolved-account state.
  */
 export function WizardPage() {
   const { state, refetch, isLoading } = useSetupState();

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sse_starlette.sse import EventSourceResponse
 
 from ibkr_control.api._schemas import IngestJobStarted, IngestLogRead, IngestTrigger
 from ibkr_control.auth.backend import current_active_user
@@ -15,11 +16,6 @@ from ibkr_control.config import get_settings
 from ibkr_control.db.models.ingest_log import IngestLog
 from ibkr_control.db.session import get_async_session, get_engine
 from ibkr_control.ingest.job_tracker import get_tracker
-
-try:
-    from sse_starlette.sse import EventSourceResponse
-except ImportError:
-    EventSourceResponse = None  # type: ignore[assignment,misc]
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 
@@ -138,9 +134,6 @@ async def stream_progress(
     tracker = get_tracker()
     if not tracker.has_job(job_id):
         raise HTTPException(status_code=404, detail="Unknown job_id")
-
-    if EventSourceResponse is None:
-        raise HTTPException(status_code=501, detail="SSE no disponible")
 
     async def event_generator():
         # events_since es EXCLUSIVO: last_id=-1 devuelve todos (id > -1 = id >= 0).
