@@ -374,6 +374,12 @@
 
 **Fix:** `concurrency: { group: ${{ github.workflow }}-${{ github.ref }}, cancel-in-progress: true }` al tope del workflow.
 
+### [x] C12 — Actions del CI corren sobre Node 20 (deprecado, forzado a Node 24 el 16-jun-2026)
+
+- **Severidad:** LOW · **Tipo:** 🟢 core · **Effort:** S · **WS:** WS4
+- **Ubicación:** `.github/workflows/ci.yml`
+- **Estado:** ✅ **Hecho** (2026-06-03) — detectado por warnings del CI. Bumpeadas: `actions/checkout` v4→v6, `actions/setup-node` v4→v6, `actions/setup-python` v5→v6, `pnpm/action-setup` v4→v6, `astral-sh/setup-uv` v3→v8. Todas corren en Node 24. (C4/Dependabot las mantendrá frescas a futuro.)
+
 ### [ ] C11 — Sin coverage gate en CI: el 86% es informativo, las regresiones no fallan el build
 
 - **Severidad:** MEDIUM · **Tipo:** 🔵 contextual · **Effort:** S · **WS:** WS4
