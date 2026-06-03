@@ -79,13 +79,13 @@ El valor autoritativo **ya está en la fuente**: el XML trae `assetCategory` dir
 
 ## Follow-ups conocidos (no bloquean; decisión consciente)
 
-- **Asimetría `trades.asset_class` vs lotes (detectada en code review):** `_parse_trade`
-  usa `asset_class=elem.get("assetCategory") or ""` (vacío silencioso), mientras los
-  lotes ahora son fail-loud. `trades.asset_class` es NOT NULL en DB pero puede quedar
-  `""`. No es un fiscal-discriminator hoy como sí lo son los lotes, y armonizarlo
-  ampliaría el blast radius (parse path distinto, fixtures propias). Candidato a
-  harmonizar (fail-loud en trades) en un cleanup futuro si trades pasa a usarse para
-  clasificación fiscal.
+- **Asimetría `trades.asset_class` vs lotes (detectada en code review) — RESUELTO:**
+  Harmonizado a fail-loud en el mismo branch `fix/lot-asset-class` como follow-up
+  inmediato post code review. `_parse_trade` ahora usa `_require_asset_class(elem,
+  "<Trade>")` igual que los parsers de lotes. Un `<Trade>` sin `assetCategory` levanta
+  `ValueError` (no persiste `""`). Verificado 100% presente en 302 filas reales
+  (fixtures 2024/2025 + XML 2026). Test de regresión:
+  `test_parse_trade_fails_loud_when_asset_category_missing`.
 - **Precondición de la migración:** `eb5ef6d36e06` agrega NOT NULL sin `server_default`
   → exige tablas de lotes vacías al `upgrade`. Documentado en el docstring de la
   migración + Task 4 del plan. Para el deploy a prod: mergear esta branch ANTES del

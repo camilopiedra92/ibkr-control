@@ -269,7 +269,7 @@ def _parse_trade(elem, trades: list[ParsedTrade]) -> None:
             transaction_id=elem.get("transactionID") or "",
             ibkr_account_id=elem.get("accountId") or "",
             symbol=elem.get("symbol") or "",
-            asset_class=elem.get("assetCategory") or "",
+            asset_class=_require_asset_class(elem, "<Trade>"),
             trade_date=trade_date,
             settle_date=settle_date,
             qty=_dec(elem.get("quantity")),

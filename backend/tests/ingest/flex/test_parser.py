@@ -285,3 +285,23 @@ def test_require_asset_class_fails_loud_when_missing():
     elem = etree.fromstring(b'<Lot symbol="GLOB" quantity="10"/>')
     with pytest.raises(ValueError, match="assetCategory"):
         _require_asset_class(elem, "<Lot CLOSED_LOT>")
+
+
+def test_parse_trade_fails_loud_when_asset_category_missing():
+    """A <Trade> EXECUTION row without assetCategory must fail loud, matching
+    the lot parsers (asset_class is the fiscal-regime discriminator, NOT NULL)."""
+    xml = b"""<?xml version="1.0"?>
+<FlexQueryResponse>
+  <FlexStatements count="1">
+    <FlexStatement accountId="U99999002" fromDate="20250101" toDate="20251231">
+      <AccountInformation accountId="U99999002" currency="USD"/>
+      <Trades>
+        <Trade transactionID="T1" accountId="U99999002" symbol="AAPL"
+               tradeDate="20250115" quantity="10" tradePrice="100"
+               buySell="BUY" levelOfDetail="EXECUTION"/>
+      </Trades>
+    </FlexStatement>
+  </FlexStatements>
+</FlexQueryResponse>"""
+    with pytest.raises(ValueError, match="assetCategory"):
+        parse(xml)
