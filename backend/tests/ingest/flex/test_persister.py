@@ -682,3 +682,54 @@ async def test_persist_stores_asset_class_on_both_lot_tables(db_session: AsyncSe
         select(func.count()).select_from(ClosedLot).where(ClosedLot.asset_class.is_(None))
     )
     assert n_null == 0
+
+
+@pytest.mark.asyncio
+async def test_fop_closed_lot_gets_asset_class_without_source_trade(
+    db_session: AsyncSession, sample_user
+):
+    """A FOP-acquired closed lot (no opening trade -> transaction_id None ->
+    source_trade_id NULL) must still carry asset_class from the XML."""
+    from datetime import datetime
+    from decimal import Decimal
+
+    from sqlalchemy import select
+
+    from ibkr_control.ingest.flex._models import ParsedClosedLot
+    from ibkr_control.db.models.flex_raw import ClosedLot
+
+    parsed = _minimal_parsed(n_trades=0, account_id="U99999002")
+    parsed.closed_lots = [
+        ParsedClosedLot(
+            ibkr_account_id="U99999002",
+            symbol="GLOB",
+            asset_class="STK",
+            open_date=date(2026, 4, 28),
+            close_date=date(2026, 5, 1),
+            close_datetime=datetime(2026, 5, 1, 10, 0, 0),
+            qty=Decimal("74"),
+            cost_basis_usd=Decimal("3137.60"),
+            proceeds_usd=Decimal("3141.0924"),
+            fifo_pnl_usd=Decimal("3.4924"),
+            transaction_id=None,
+        )
+    ]
+    await persist(
+        db_session,
+        parsed=parsed,
+        user_id=sample_user.id,
+        xml_bytes=b"<fop/>",
+        source="manual_upload",
+    )
+    await db_session.commit()
+
+    row = (
+        await db_session.execute(
+            select(ClosedLot.asset_class, ClosedLot.source_trade_id).where(
+                ClosedLot.symbol == "GLOB"
+            )
+        )
+    ).first()
+    assert row is not None
+    assert row[0] == "STK"
+    assert row[1] is None
