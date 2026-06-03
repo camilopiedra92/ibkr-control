@@ -16,10 +16,6 @@ from ibkr_control.db.session import get_async_session
 router = APIRouter(prefix="/grants", tags=["grants"])
 
 
-async def _email(session: AsyncSession, user_id: int) -> str:
-    return await session.scalar(select(User.email).where(User.id == user_id))
-
-
 @router.post("", response_model=GrantRead, status_code=201)
 async def create_grant(
     payload: GrantCreate,
@@ -69,20 +65,34 @@ async def list_grants(
         )
     ).all()
 
-    async def _ser(g: DataAccessGrant) -> GrantRead:
+    # Resolve every referenced user's email in a single query instead of two
+    # lookups per grant. Grant cardinality is tiny (personal app), but a flat IN
+    # keeps the endpoint O(1) in round-trips regardless of grant count.
+    user_ids = {
+        uid for g in (*granted, *received) for uid in (g.grantor_user_id, g.grantee_user_id)
+    }
+    emails: dict[int, str] = (
+        dict(
+            (await session.execute(select(User.id, User.email).where(User.id.in_(user_ids)))).all()
+        )
+        if user_ids
+        else {}
+    )
+
+    def _ser(g: DataAccessGrant) -> GrantRead:
         return GrantRead(
             grantor_user_id=g.grantor_user_id,
             grantee_user_id=g.grantee_user_id,
-            grantor_email=await _email(session, g.grantor_user_id),
-            grantee_email=await _email(session, g.grantee_user_id),
+            grantor_email=emails[g.grantor_user_id],
+            grantee_email=emails[g.grantee_user_id],
             role=g.role,
             valid_from=g.valid_from,
             valid_to=g.valid_to,
         )
 
     return GrantListResponse(
-        granted=[await _ser(g) for g in granted],
-        received=[await _ser(g) for g in received],
+        granted=[_ser(g) for g in granted],
+        received=[_ser(g) for g in received],
     )
 
 
