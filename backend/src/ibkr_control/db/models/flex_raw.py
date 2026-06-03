@@ -36,7 +36,10 @@ class FlexImport(Base):
         CheckConstraint("source IN ('web_service', 'manual_upload')", name="source"),
         CheckConstraint("year_status IN ('rolling', 'sealed')", name="year_status"),
         CheckConstraint("status IN ('ok', 'poison')", name="status"),
-        UniqueConstraint("user_id", "xml_hash"),
+        # Dedup is per-ORG now (the persister scopes by organization_id). user_id
+        # is nullable audit metadata (which user triggered the import), NOT the
+        # idempotency key — a NULL user_id must never allow a duplicate import.
+        UniqueConstraint("organization_id", "xml_hash", name="uq_flex_imports_org_xml_hash"),
         Index(None, "organization_id"),
     )
 
@@ -83,11 +86,10 @@ class FlexImportAccount(Base):
         {
             "comment": (
                 "Procedencia cuenta<->import: cada cuenta observada en un FlexImport "
-                "(incluidas las AccountInformation-only sin hechos). Hecho de primera "
-                "clase, no inferido. El wizard lo usa para scopear la validacion "
-                "anti-IDOR de step2/save: un usuario solo reclama participacion en "
-                "cuentas que aparecen en SUS imports (join via flex_imports.user_id), "
-                "no en toda la tabla compartida accounts. Ver hardening H1."
+                "(incluidas las AccountInformation-only sin hechos). Org-scoped (RLS). "
+                "Hecho de primera clase: que cuentas trajo el import de un org. El "
+                "aislamiento cross-tenant lo da RLS por organization_id; esta tabla "
+                "sirve al wizard para scopear que cuentas reclama un org via sus imports."
             )
         },
     )

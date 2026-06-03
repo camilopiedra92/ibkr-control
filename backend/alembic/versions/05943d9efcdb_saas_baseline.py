@@ -187,7 +187,7 @@ def upgrade() -> None:
         "flex_imports",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
         sa.Column("organization_id", sa.BigInteger(), nullable=False),
-        sa.Column("user_id", sa.BigInteger(), nullable=False),
+        sa.Column("user_id", sa.BigInteger(), nullable=True),
         sa.Column("anyo", sa.Integer(), nullable=False),
         sa.Column("xml_hash", sa.String(), nullable=False),
         sa.Column("xml_size_bytes", sa.Integer(), nullable=False),
@@ -233,10 +233,12 @@ def upgrade() -> None:
             ["user_id"],
             ["users.id"],
             name=op.f("fk_flex_imports_user_id_users"),
-            ondelete="CASCADE",
+            ondelete="SET NULL",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_flex_imports")),
-        sa.UniqueConstraint("user_id", "xml_hash", name=op.f("uq_flex_imports_user_id_xml_hash")),
+        sa.UniqueConstraint(
+            "organization_id", "xml_hash", name="uq_flex_imports_org_xml_hash"
+        ),
     )
     op.create_index(
         op.f("ix_flex_imports_organization_id"), "flex_imports", ["organization_id"], unique=False
@@ -565,7 +567,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint(
             "flex_import_id", "account_id", name=op.f("pk_flex_import_accounts")
         ),
-        comment="Procedencia cuenta<->import: cada cuenta observada en un FlexImport (incluidas las AccountInformation-only sin hechos). Hecho de primera clase, no inferido. El wizard lo usa para scopear la validacion anti-IDOR de step2/save: un usuario solo reclama participacion en cuentas que aparecen en SUS imports (join via flex_imports.user_id), no en toda la tabla compartida accounts. Ver hardening H1.",
+        comment="Procedencia cuenta<->import: cada cuenta observada en un FlexImport (incluidas las AccountInformation-only sin hechos). Org-scoped (RLS). Hecho de primera clase: que cuentas trajo el import de un org. El aislamiento cross-tenant lo da RLS por organization_id; esta tabla sirve al wizard para scopear que cuentas reclama un org via sus imports.",
     )
     op.create_index(
         op.f("ix_flex_import_accounts_organization_id"),
