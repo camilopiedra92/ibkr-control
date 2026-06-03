@@ -19,13 +19,14 @@ async def test_ephemeral_db_has_phase26_columns_at_head(ephemeral_session_factor
 
 
 @pytest.mark.asyncio
-async def test_ephemeral_db_has_per_user_unique_constraint(ephemeral_session_factory):
+async def test_ephemeral_db_has_per_org_unique_constraint(ephemeral_session_factory):
+    """Dedup is per-ORG now (SP1): (organization_id, xml_hash), not per-user."""
     async with ephemeral_session_factory() as session:
         result = await session.execute(
             text("""
             SELECT constraint_name FROM information_schema.table_constraints
             WHERE table_name='flex_imports'
-              AND constraint_name='uq_flex_imports_user_id_xml_hash'
+              AND constraint_name='uq_flex_imports_org_xml_hash'
               AND constraint_type='UNIQUE'
         """)
         )

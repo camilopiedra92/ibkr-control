@@ -8,21 +8,24 @@ from ibkr_control.ingest.log import ingest_log_entry
 
 
 @pytest.mark.asyncio
-async def test_log_creates_running_row_on_enter(db_session: AsyncSession, sample_user):
-    async with ingest_log_entry(db_session, "flex", sample_user.id, "cron") as log_id:
+async def test_log_creates_running_row_on_enter(db_session: AsyncSession, sample_org):
+    async with ingest_log_entry(db_session, "flex", sample_org.id, "cron") as log_id:
         result = await db_session.execute(
-            text(f"SELECT status, job_kind, user_id, trigger FROM ingest_log WHERE id = {log_id}")
+            text(
+                "SELECT status, job_kind, organization_id, trigger "
+                f"FROM ingest_log WHERE id = {log_id}"
+            )
         )
         row = result.first()
         assert row.status == "running"
         assert row.job_kind == "flex"
-        assert row.user_id == sample_user.id
+        assert row.organization_id == sample_org.id
         assert row.trigger == "cron"
 
 
 @pytest.mark.asyncio
-async def test_log_finishes_ok_on_normal_exit(db_session: AsyncSession, sample_user):
-    async with ingest_log_entry(db_session, "trm", sample_user.id, "manual") as log_id:
+async def test_log_finishes_ok_on_normal_exit(db_session: AsyncSession, sample_org):
+    async with ingest_log_entry(db_session, "trm", sample_org.id, "manual") as log_id:
         pass
     result = await db_session.execute(
         text(f"SELECT status, finished_at, error_message FROM ingest_log WHERE id = {log_id}")
@@ -34,9 +37,9 @@ async def test_log_finishes_ok_on_normal_exit(db_session: AsyncSession, sample_u
 
 
 @pytest.mark.asyncio
-async def test_log_finishes_failed_on_exception(db_session: AsyncSession, sample_user):
+async def test_log_finishes_failed_on_exception(db_session: AsyncSession, sample_org):
     with pytest.raises(ValueError, match="boom"):
-        async with ingest_log_entry(db_session, "flex", sample_user.id, "wizard") as log_id:
+        async with ingest_log_entry(db_session, "flex", sample_org.id, "wizard") as log_id:
             raise ValueError("boom")
 
     result = await db_session.execute(
@@ -50,12 +53,12 @@ async def test_log_finishes_failed_on_exception(db_session: AsyncSession, sample
 
 
 @pytest.mark.asyncio
-async def test_log_items_processed_settable(db_session: AsyncSession, sample_user):
+async def test_log_items_processed_settable(db_session: AsyncSession, sample_org):
     """El caller puede setear items_processed antes del exit."""
     from ibkr_control.db.models.ingest_log import IngestLog
     from sqlalchemy import select
 
-    async with ingest_log_entry(db_session, "flex", sample_user.id, "cron") as log_id:
+    async with ingest_log_entry(db_session, "flex", sample_org.id, "cron") as log_id:
         row = await db_session.scalar(select(IngestLog).where(IngestLog.id == log_id))
         row.items_processed = 42
 

@@ -2,92 +2,19 @@
 
 ## ⏯ Cómo continuar (próxima sesión)
 
-**PRE-DEPLOY HARDENING EN CURSO (iniciado 2026-06-03). Phase 2.x está cerrada; Phase 3 va DESPUÉS del hardening.**
+**PROGRAMA ACTIVO: pivote a SaaS multi-tenant (SP1–SP8).** La calibración "app personal de 3 usuarios" fue removida el 2026-06-03 (ver memoria [[saas-pivot-target]]); se construye como SaaS multi-tenant world-class. Cada SP tiene su ciclo spec → plan → implementación. La tabla "Estado actual" más abajo (Phase 1–6) es **pre-pivot, contexto histórico** — el programa vigente es SP1–SP8 (descomposición en el spec de SP1 §"Contexto del programa").
 
-> **⚠️ El repo ahora es PÚBLICO y `main` está PROTEGIDO — NO se commitea directo a `main`. TODO va por branch → PR → CI verde (`backend` + `frontend`) → merge.** El owner puede bypassear en emergencia (`enforce_admins=false`). Ver memoria [[repo-must-be-generic-product]].
+> **⚠️ Repo PÚBLICO, `main` PROTEGIDO — NADA se commitea directo a `main`. Todo va branch → PR → CI verde (`backend` + `frontend`) → merge.** El owner puede bypassear en emergencia (`enforce_admins=false`). Ver [[repo-must-be-generic-product]].
 >
-> **Backlog del hardening (tracker con checkboxes): `docs/plans/2026-06-03-pre-deploy-hardening-backlog.md`** — 34 accionables, derivados de una auditoría multi-agente (seguridad / CI-CD / observabilidad / arquitectura / testing). **Hecho (3/34):** G1 (genericización del repo + público + historia limpia), C3 (branch protection), C12 (actions Node 24). **PRÓXIMO: Ola 1 — seguridad (WS1), empezando por H1 (IDOR del wizard, `api/setup.py`) + S1 (cerrar el registro abierto).** Olas, orden y método (subagent-driven + TDD, branch+PR por item/ola) en el backlog §"Notas de implementación".
->
-> **PII / producto genérico:** cero datos reales en el repo (cuentas → `U99999001/2/3`, nombres → `Test Owner`/`Joint Holder`). El mapping real→genérico vive en `backend/scripts/.sanitize_mapping.local.json` (**gitignored, untracked**); `sanitize_xml.py` + el guard `test_fixtures_smoke.py` lo leen. **No reintroducir datos reales** — verificar con grep antes de commitear.
->
-> _Phase 2.x (contexto histórico): completa, tags `v0.2.0`→`v0.2.7` en remote. La numeración de SHAs/commits cambió tras el scrub de historial de G1 (filter-repo); los tags fueron re-creados sobre la historia limpia._
+> **PII / producto genérico:** cero datos reales en el repo (cuentas → `U99999001/2/3`, nombres → `Test Owner`/`Joint Holder`). El mapping real→genérico vive en `backend/scripts/.sanitize_mapping.local.json` (**gitignored, untracked**); `sanitize_xml.py` + el guard `test_fixtures_smoke.py` lo leen. **No reintroducir datos reales** — grep antes de commitear.
 
-> Verificado contra git/tests el 2026-06-02 (cierre Phase 2.9): `main` en el tag `v0.2.7-lot-asset-class` (código mergeado ff en `8197c5d` + este doc), working tree limpio, branch `fix/lot-asset-class` mergeada (fast-forward) y borrada. `cd backend && uv run pytest -q` → **310 passed**. `ruff check .` → clean, `ruff format --check .` → 0 drift. DB dev wipeada + recargada sobre el schema nuevo (migración `eb5ef6d36e06`) + verificada con datos reales: lotes GLOB (bono RSU Globant, FOP) = `asset_class='STK'` con `source_trade_id` NULL, futuro MES = `asset_class='FUT'`, 0 nulos. Ver Retrospectiva §"Phase 2.9".
+### Estado del programa SaaS (verificado contra git el 2026-06-03)
 
-> Verificado el 2026-06-02 (cierre Phase 2.8): `main` en `b83a9fa`, **304 passed**, ruff clean. Phase 2.8 cerró los 3 items de auditoría de schema + construyó la primitiva de autorización multi-user (`data_access_grants` + `visible_account_ids` + `require_account_scope` + CRUD `/api/grants`) que Phase 3 consumirá. Ver Retrospectiva §"Phase 2.8".
+- **SP1 — Tenancy & Identity: ✅ convergencia COMPLETA, en review.** Branch `saas/sp1-tenancy-identity` → **PR #5** a `main` (esperando CI verde + merge; no mergeado aún). Modelo multi-tenant (orgs/parties/memberships/access_grants) + `organization_id` en toda tabla tenant + **Postgres RLS** (rol `app_rls` sin bypass, `FORCE`, `SET LOCAL app.current_org` por request, default-deny sin contexto) sobre baseline squasheado nuevo `05943d9efcdb`. Suite **337 passed corriendo BAJO RLS como `app_rls`**, ruff clean, boot smoke OK. Spec: `docs/specs/2026-06-03-sp1-tenancy-identity-design.md` · Plan: `docs/plans/2026-06-03-sp1-tenancy-identity.md` (§"CONVERGENCE COMPLETE" lista cada commit + los gaps documentados). Decisiones clave: TRM = control plane ([[trm-system-control-plane]], fuera de `ingest_log`), org-pure D-CONV-3 (sin vestigios `user_id` en la capa operacional; throttle per-org; selección de org explícita), RLS end-to-end. **Gaps documentados (NO bugs, cortes de alcance):** enumeración cross-tenant del cron → SP7; enforcement de grants → SP2; `accounts.ibkr_account_id` UNIQUE-global = cuenta broker single-org por diseño.
+- **SIGUIENTE — SP2 (Authorization):** enforcement de los `access_grants` (acceso cross-org del contador), `require_*_scope`, ReBAC. Depende de SP1. SP1 dejó el dato del grant *shaped* (tabla `access_grants` + policy RLS especial); SP2 construye el *enforcement* (qué org puede hacer switch a qué org). Arrancar tras el merge de SP1: `superpowers:brainstorming` → spec `docs/specs/YYYY-MM-DD-sp2-authorization-design.md` → `writing-plans` → `subagent-driven-development`. Branch `saas/sp2-authorization` desde `main` (post-merge SP1).
+- **Descomposición SP1–SP8** (qué difiere cada uno): SP3 onboarding/MFA/multi-party UI · SP4 KMS envelope · SP5 durable jobs + rate-limit por org · SP6 billing · SP7 ingest tenant-aware (cron org-iterante) · SP8 compliance/observability (audit log). Detalle en el spec de SP1.
 
-> ✅ **Pusheado a `origin` (2026-06-02):** `main` sincronizado con `origin/main` y los **8 tags `v0.2.0`→`v0.2.7` en remote** (verificado con `git ls-remote --tags origin`: el código de Phase 2.9 cierra en `8197c5d`, tag `v0.2.7-lot-asset-class`). Repo `github.com/owner/ibkr-control`. No quedan acciones de respaldo pendientes.
-
-> 🧹 **Cleanup pre-Phase-3 (2026-06-02, commit `0b61a9b`, pusheado — sin tag, es housekeeping no hito de phase):** auditoría de 3 agentes (backend/frontend/schema, con lint/tests/drift reales) confirmó **base sin deuda oculta** — cero hacks, type-bypasses ni bugs enmascarados. Punch-list menor cerrado: borrados `card.tsx`+`field.tsx` (dead code; `field.tsx` materializaba una convención de forms que el código nunca adoptó — ver §"Notas frontend"), consolidada la key `auth_token` en el helper `storeToken`, root `/` redirige a `/dashboard`, import SSE muerto eliminado en `api/ingest.py`, comentarios stale. **Más:** cerrada la deuda **D1** (SSE `/stream/{job_id}` ahora scopea por owner — ver §"Deuda conocida" + polish backlog §D1; 3 tests TDD), y un **N+1 en `api/grants.py::list_grants`** (resolvía emails con 2 queries por grant → ahora 1 solo `IN`; behavior-preserving — ver polish backlog §"Hallazgos menores de review"). Una segunda observación del mismo review (PK compuesta en el path del DELETE de grants) se **evaluó y se dejó: es REST correcto, no deuda.** **313 passed, ruff/format/lint/build/vitest clean.** **Corrección importante:** la creencia de que `participations` vacía bloqueaba Phase 3 era **FALSA** — el wizard YA la puebla (`api/setup.py`, lógica SCD-2, test-cubierto); la DB de dev solo está vacía por el wipe. Phase 3 debe **CONSUMIRLA** (domain `apply_pct`, ya en scope), no poblarla. Ver memoria [[globant-rsu-cost-basis-phase3]]. **Decisión registrada:** la abstracción de forms validada (react-hook-form + zod) se adopta en Phase 3 con el Simulador (primer consumidor real), no antes.
-
-Todas las branches de Phase 2.x ya mergeadas a `main`: `phase2/ingestion` + `feat/wizard-redesign` + `phase25/flex-persister-idempotent` + `phase26/flex-hardening` (esta última via PR #2, merge `0e576f3`). Smoke tests en dev completados (wizard 2026-05-24; persister idempotente 2026-05-25).
-
-Tag `v0.2.0-ingest` apunta al cierre original de polish (`a606be2`). Tag `v0.2.1-persistent-state` apunta a `172cc12` — incluye SQLAlchemyJobStore + DB-backed rate limit. Tag `v0.2.2-wizard-redesign` apunta al cierre del rewrite del wizard (detect-first, F-filter en persister, Migration H wipea legacy). Tag `v0.2.3-persister-idempotent` apunta al fix del bug del 2026-05-25 (D13 [BUG-FIXED]): rewrite del Flex persister a UPSERT por natural key — cron + manual refresh ahora idempotentes fila por fila + smoke test end-to-end validado (segundo Flex refresh real-conditions devuelve `items_processed=0` sin failures). Tag `v0.2.4-flex-hardening` apunta a `0e576f3` (merge de Phase 2.6). Tag `v0.2.5-persister-cleanup` apunta al cierre de Phase 2.7 (counterparties + exclusive arc; drop transfer_lots — ver Retrospectiva §"Phase 2.7"). Post-Phase-2.7 se agregó lint/format cleanup en la misma sesión: ruff (backend, 41 errores → 0 + `ruff format` en toda la base) + ESLint flat config nuevo en frontend (no existía linter — ver §"Phase 2.7" lecciones). Tag `v0.2.6-schema-hardening` apunta a `b83a9fa` (cierre de Phase 2.8: naming_convention + squash baseline `cbeaac94933d` + drift test endurecido + `data_access_grants`/authz — ver Retrospectiva §"Phase 2.8"). **304/0 backend tests pasan, frontend lint/build/vitest clean.**
-
-Fixes post-deploy del wizard ya en `main` + pusheados: `8bd578f` infra DNS fix para container backend (resolver local AdGuard/NextDNS SERVFAILa `gdcdyn.interactivebrokers.com` → pinned a `1.1.1.1`/`8.8.8.8`), `24aa5f9` fix gap del fallback "subir XML manual" (ahora persiste igual que `step2/detect` para que `step2/save` valide contra `accounts`), `4eb4f80` migración a endpoints V3 oficiales (`ndcdyn` + `/AccountManagement/FlexWebService/`) + User-Agent header requerido. Ver §"Wizard redesign post-deploy" abajo para detalle completo.
-
-### Camino A — Planificar Phase 3 (recomendado)
-
-Phase 3 = domain layer + 3 pantallas (Lotes Abiertos/Cerrados/Alertas 730d). Spec maestro §6 + §4.2. Phase 3 NO requiere prod deploy ni datos reales — desarrolla 100% contra testcontainer + fixtures sanitizadas.
-
-```
-1. Verificar Phase 2.x cerrada (ya confirmado 2026-06-02):
-   git tag -l "v0.2*" → debe mostrar v0.2.0-ingest + v0.2.1-persistent-state +
-                       v0.2.2-wizard-redesign + v0.2.3-persister-idempotent +
-                       v0.2.4-flex-hardening
-2. Leer este CLAUDE.md (lo cargás automáticamente)
-3. Leer docs/plans/2026-05-24-phase2-polish-backlog.md (entender deuda conocida D1-D13
-   + apendice "Post-Phase-2: Wizard redesign"; D13 = persister idempotente RESOLVED)
-4. Invocar `superpowers:brainstorming` con prompt:
-   "Phase 3 = domain layer + lotes. Decisiones abiertas listadas en
-    CLAUDE.md §Roadmap Phase 3. Resolver una a una, luego escribir spec
-    en docs/specs/YYYY-MM-DD-phase3-domain-design.md"
-5. Después `superpowers:writing-plans` → docs/plans/YYYY-MM-DD-ibkr-control-phase3-lotes.md
-6. Update tabla "Estado actual" con el link al plan nuevo
-7. Ejecución: superpowers:subagent-driven-development (mismo método que Phase 2)
-8. Branch: git checkout -b phase3/lotes main
-```
-
-### Camino B — Deploy a Coolify (tarea del usuario)
-
-Smoke test en dev + push a remote YA están hechos (2026-05-24/25, ver §"Wizard redesign post-deploy"). Repo privado en `https://github.com/owner/ibkr-control`. Falta solo deploy prod:
-
-```
-1. Configurar TOKEN_ENCRYPTION_KEY en Coolify (1 min):
-   openssl rand -base64 32  # generar key
-   # Pegarla en Coolify env vars del backend container
-   # CRÍTICO: sin esta key, decrypt_token() crashea al primer fetch del cron
-
-2. Confirmar DNS en Coolify (1 min):
-   # El compose.yml local ahora pinea `dns: [1.1.1.1, 8.8.8.8]` en backend.
-   # Coolify normalmente usa DNS público por default — verificar que no
-   # haya un override de network que herede DNS del host server. Si lo hay,
-   # replicar el pin en la config de Coolify.
-
-3. Trigger redeploy desde Coolify UI apuntando a main (~3 min build):
-   # Verificar logs: "Registered 3 ingest jobs: flex_daily, trm_daily, cleanup_job_tracker"
-   # Migration H wipea data legacy — preserva flex_credentials + apscheduler_jobs
-   # Si las migrations no se aplican automáticamente:
-   docker exec <backend-container> uv run alembic upgrade head
-
-4. Smoke test end-to-end del wizard en prod (~20-30 min):
-   # Mismo flow validado en dev: Step 1 creds → Step 2 detect (online o
-   # XML fallback) → Step 2 configure → Step 3 históricos → finish.
-   # Si IBKR responde 1001 BUSY (puede pasar — es 1x/día por design),
-   # usar "Subir XML manualmente" — funciona end-to-end.
-```
-
-### Pre-Phase-3 checklist (TODO verificado verde el 2026-06-02)
-
-- [x] `git status` limpio en `main`, sincronizado con `origin/main` (post-Phase-2.8; tag `v0.2.6-schema-hardening` @ `b83a9fa`)
-- [x] `git ls-remote --tags origin` muestra los **7 tags `v0.2.0`→`v0.2.6`** en remote (todos pusheados 2026-06-02)
-- [x] `cd backend && uv run pytest -q` → **304 passed** (era 299 al cierre de Phase 2.7; +5 por Phase 2.8 — naming_convention + grant model + resolver + dependency + CRUD/isolation; ver §"Phase 2.8")
-- [x] `cd backend && uv run ruff check .` → clean · `ruff format --check .` → 0 drift (lint/format adoptados en toda la base esta sesión)
-- [x] `cd frontend && pnpm lint` → 0 errores (ESLint flat config nuevo) · `pnpm build` → exit 0 · vitest 7 passed
-- [ ] Leer `docs/plans/2026-05-24-phase2-polish-backlog.md` § "Deuda conocida" (D1-D13; D13 [BUG-FIXED] documenta el incidente del persister + lecciones)
-- [ ] (Opcional) `docker compose ps` para confirmar postgres + backend healthy si vas a smoke test
-
-**Nada bloquea el desarrollo de Phase 3.** Lo único pendiente es del usuario y NO bloquea dev local: deploy a Coolify + `TOKEN_ENCRYPTION_KEY` + verificar DNS + smoke test en prod (Camino B). El siguiente paso para avanzar es Camino A (brainstorming → spec → plan).
+_Phase 2.x (pre-pivot, contexto histórico): completa, tags `v0.2.0`→`v0.2.7`. La numeración de SHAs cambió tras el scrub de historia (G1 filter-repo). El SaaS pivot re-baseló el schema sobre el baseline squasheado nuevo (DB wipe autorizado, pre-deploy) — las migraciones viejas `cbeaac94933d`→`eb5ef6d36e06` fueron reemplazadas. Retrospectiva Phase 2.x + lecciones siguen abajo (válidas)._
 
 ### Convenciones (heredadas)
 
@@ -232,6 +159,8 @@ para responder preguntas como:
 Globant, AFC, leasing, etc. Esta app es el **centro de control IBKR-only**.
 
 ## Estado actual
+
+> **⚠️ Tabla PRE-PIVOT (histórica).** Estas Phases 1–6 eran la app personal de 3 usuarios. El **programa vigente es el pivote SaaS (SP1–SP8)** — ver §"Estado del programa SaaS" arriba + el spec de SP1. Esta tabla queda como referencia de qué se construyó en la base monolítica que SP1 re-baseló (modelo, ingest Flex/TRM, wizard, persister, lotes — el dominio fiscal sigue siendo el mismo; lo que cambió es la fundación multi-tenant).
 
 | Phase | Status | Plan | Spec | Tag al completar |
 |---|---|---|---|---|

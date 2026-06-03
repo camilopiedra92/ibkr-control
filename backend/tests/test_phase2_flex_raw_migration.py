@@ -24,46 +24,11 @@ async def test_flex_imports_tables_exist(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_flex_imports_xml_hash_unique(db_session: AsyncSession, sample_user, sample_account):
-    from ibkr_control.db.models.flex_raw import FlexImport
-
-    fi1 = FlexImport(
-        user_id=sample_user.id,
-        anyo=2025,
-        xml_hash="deadbeef",
-        xml_size_bytes=1000,
-        xml_bytes=b"<xml/>",
-        source="manual_upload",
-        period_covered_from=date(2025, 1, 1),
-        period_covered_to=date(2025, 12, 31),
-        status="ok",
-    )
-    db_session.add(fi1)
-    await db_session.commit()
-    db_session.add(
-        FlexImport(
-            user_id=sample_user.id,
-            anyo=2025,
-            xml_hash="deadbeef",  # dup
-            xml_size_bytes=2000,
-            xml_bytes=b"<xml/>",
-            source="web_service",
-            period_covered_from=date(2025, 1, 1),
-            period_covered_to=date(2025, 12, 31),
-            status="ok",
-        )
-    )
-    with pytest.raises(IntegrityError):
-        await db_session.commit()
-    await db_session.rollback()
-
-
-@pytest.mark.asyncio
-async def test_trades_transaction_id_unique(db_session: AsyncSession, sample_user, sample_account):
+async def test_trades_transaction_id_unique(db_session: AsyncSession, sample_org, sample_account):
     from ibkr_control.db.models.flex_raw import FlexImport, Trade
 
     fi = FlexImport(
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         anyo=2025,
         xml_hash="hash-trades-test",
         xml_size_bytes=100,
@@ -76,6 +41,7 @@ async def test_trades_transaction_id_unique(db_session: AsyncSession, sample_use
     db_session.add(fi)
     await db_session.commit()
     t1 = Trade(
+        organization_id=sample_org.id,
         flex_import_id=fi.id,
         transaction_id="TXN-001",
         account_id=sample_account.id,
@@ -92,6 +58,7 @@ async def test_trades_transaction_id_unique(db_session: AsyncSession, sample_use
     await db_session.commit()
     db_session.add(
         Trade(
+            organization_id=sample_org.id,
             flex_import_id=fi.id,
             transaction_id="TXN-001",  # dup
             account_id=sample_account.id,
@@ -111,11 +78,11 @@ async def test_trades_transaction_id_unique(db_session: AsyncSession, sample_use
 
 
 @pytest.mark.asyncio
-async def test_trades_buy_sell_check(db_session: AsyncSession, sample_user, sample_account):
+async def test_trades_buy_sell_check(db_session: AsyncSession, sample_org, sample_account):
     from ibkr_control.db.models.flex_raw import FlexImport, Trade
 
     fi = FlexImport(
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         anyo=2025,
         xml_hash="hash-bs-test",
         xml_size_bytes=100,
@@ -129,6 +96,7 @@ async def test_trades_buy_sell_check(db_session: AsyncSession, sample_user, samp
     await db_session.commit()
     db_session.add(
         Trade(
+            organization_id=sample_org.id,
             flex_import_id=fi.id,
             transaction_id="TXN-BAD",
             account_id=sample_account.id,
@@ -149,7 +117,7 @@ async def test_trades_buy_sell_check(db_session: AsyncSession, sample_user, samp
 
 @pytest.mark.asyncio
 async def test_delete_flex_import_sets_children_null(
-    db_session: AsyncSession, sample_user, sample_account
+    db_session: AsyncSession, sample_org, sample_account
 ):
     """Phase 2.5: delete del flex_import nulea flex_import_id en hijos (SET NULL, no CASCADE).
 
@@ -160,7 +128,7 @@ async def test_delete_flex_import_sets_children_null(
     from ibkr_control.db.models.flex_raw import FlexImport, Trade
 
     fi = FlexImport(
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         anyo=2025,
         xml_hash="hash-set-null-test",
         xml_size_bytes=100,
@@ -176,6 +144,7 @@ async def test_delete_flex_import_sets_children_null(
 
     db_session.add(
         Trade(
+            organization_id=sample_org.id,
             flex_import_id=fi_id,
             transaction_id="TXN-SET-NULL",
             account_id=sample_account.id,

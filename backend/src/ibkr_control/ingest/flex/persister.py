@@ -66,7 +66,7 @@ async def persist(
     session: AsyncSession,
     *,
     parsed: ParsedXML,
-    user_id: int,
+    organization_id: int,
     xml_bytes: bytes,
     source: str,  # 'web_service' | 'manual_upload'
 ) -> tuple[int, dict]:
@@ -85,12 +85,13 @@ async def persist(
     """
     h = xml_hash(xml_bytes)
 
-    # Fast-path A4: hash dedup — scoped to (user_id, xml_hash) matching
-    # the UNIQUE(user_id, xml_hash) constraint. A bare WHERE xml_hash = :h
-    # would match rows from other users (multi-user isolation bug).
+    # Fast-path A4: hash dedup — scoped to (organization_id, xml_hash).
+    # Scoping by org prevents matching rows from other orgs (RLS not active
+    # on owner connections used in tests; explicit WHERE is correct in both
+    # prod and test contexts).
     row = await session.execute(
         select(FlexImport.id, FlexImport.status).where(
-            FlexImport.user_id == user_id,
+            FlexImport.organization_id == organization_id,
             FlexImport.xml_hash == h,
         )
     )
@@ -127,7 +128,9 @@ async def persist(
         if not _is_shadow_account(oda.ibkr_account_id):
             all_account_ids.add(oda.ibkr_account_id)
 
-    accounts_map = await _ensure_accounts(session, list(all_account_ids))
+    accounts_map = await _ensure_accounts(
+        session, list(all_account_ids), organization_id=organization_id
+    )
 
     year_status = "sealed" if parsed.period_to >= date(parsed.anyo, 12, 31) else "rolling"
 
@@ -143,7 +146,7 @@ async def persist(
     }
 
     fi = FlexImport(
-        user_id=user_id,
+        organization_id=organization_id,
         anyo=parsed.anyo,
         xml_hash=h,
         xml_size_bytes=len(xml_bytes),
@@ -172,12 +175,21 @@ async def persist(
     if accounts_map:
         await session.execute(
             pg_insert(FlexImportAccount.__table__)
-            .values([{"flex_import_id": fi.id, "account_id": aid} for aid in accounts_map.values()])
+            .values(
+                [
+                    {
+                        "flex_import_id": fi.id,
+                        "account_id": aid,
+                        "organization_id": organization_id,
+                    }
+                    for aid in accounts_map.values()
+                ]
+            )
             .on_conflict_do_nothing(index_elements=["flex_import_id", "account_id"])
         )
 
     # UPSERTs en orden de dependencia FK
-    n_new = await _upsert_all_children(session, fi, parsed, accounts_map)
+    n_new = await _upsert_all_children(session, fi, parsed, accounts_map, organization_id)
 
     # Update n_new_* en flex_imports
     fi.n_new_trades = n_new["trades"]
@@ -189,7 +201,7 @@ async def persist(
     await session.flush()
 
     # R1 latest-1 cleanup. For year_status='rolling' rows of the same
-    # (user_id, anyo, source), retain only the row just persisted (fi.id).
+    # (organization_id, anyo, source), retain only the row just persisted (fi.id).
     # Sealed rows are pinned. Poison rows are forensic evidence — preserved.
     #
     # H1 provenance interaction: deleting an evicted rolling import CASCADE-deletes
@@ -197,14 +209,14 @@ async def persist(
     # import. The current import's provenance was just written above (same
     # transaction, before this DELETE, against a different fi.id), so it survives;
     # any account still present in the new XML is re-covered. Consequence: if a
-    # later rolling import for the same (user, anyo, source) drops an account
+    # later rolling import for the same (org, anyo, source) drops an account
     # (not in the new XML), that account's provenance is gone — step2/save would
     # then return ACCOUNT_NOT_DETECTED for it. That is the correct outcome: the
     # most recent statement is authoritative about which accounts exist.
     await session.execute(
         text("""
             DELETE FROM flex_imports
-            WHERE user_id = :user_id
+            WHERE organization_id = :organization_id
               AND anyo = :anyo
               AND source = :source
               AND year_status = 'rolling'
@@ -212,7 +224,7 @@ async def persist(
               AND id != :current_id
         """),
         {
-            "user_id": user_id,
+            "organization_id": organization_id,
             "anyo": parsed.anyo,
             "source": source,
             "current_id": fi.id,
@@ -231,12 +243,14 @@ async def _upsert_all_children(
     fi: FlexImport,
     parsed: ParsedXML,
     accounts_map: dict[str, int],
+    organization_id: int,
 ) -> dict[str, int]:
     """Hace UPSERT de todos los children. Devuelve n_new por entity type."""
     # === Trades (immutable) ===
     trade_rows = [
         {
             "flex_import_id": fi.id,
+            "organization_id": organization_id,
             "transaction_id": t.transaction_id,
             "account_id": accounts_map[t.ibkr_account_id],
             "symbol": t.symbol,
@@ -274,6 +288,7 @@ async def _upsert_all_children(
     closed_rows = [
         {
             "flex_import_id": fi.id,
+            "organization_id": organization_id,
             "transaction_id": (cl.transaction_id or f"NO-TX-{cl.symbol}-{cl.close_date}-{i}"),
             "account_id": accounts_map[cl.ibkr_account_id],
             "symbol": cl.symbol,
@@ -308,6 +323,7 @@ async def _upsert_all_children(
     cash_rows = [
         {
             "flex_import_id": fi.id,
+            "organization_id": organization_id,
             "transaction_id": ct.transaction_id,
             "account_id": accounts_map[ct.ibkr_account_id],
             "type": ct.type,
@@ -338,7 +354,9 @@ async def _upsert_all_children(
         for peer in (tr.src_ibkr_account_id, tr.dst_ibkr_account_id):
             if peer and not _is_shadow_account(peer) and peer not in accounts_map:
                 external_ids.add(peer)
-    counterparties_map = await _ensure_counterparties(session, list(external_ids))
+    counterparties_map = await _ensure_counterparties(
+        session, list(external_ids), organization_id=organization_id
+    )
 
     def _resolve_side(peer: str | None) -> tuple[int | None, int | None]:
         """Returns (account_id, counterparty_id) — exactamente uno non-None,
@@ -361,6 +379,7 @@ async def _upsert_all_children(
         transfer_rows.append(
             {
                 "flex_import_id": fi.id,
+                "organization_id": organization_id,
                 "transaction_id": tr.transaction_id,
                 "transfer_date": tr.transfer_date,
                 "direction": tr.direction,
@@ -387,6 +406,7 @@ async def _upsert_all_children(
     open_rows = [
         {
             "flex_import_id": fi.id,
+            "organization_id": organization_id,
             "account_id": accounts_map[op_lot.ibkr_account_id],
             "symbol": op_lot.symbol,
             "asset_class": op_lot.asset_class,
@@ -426,6 +446,7 @@ async def _upsert_all_children(
     change_div_rows = [
         {
             "flex_import_id": fi.id,
+            "organization_id": organization_id,
             "account_id": accounts_map[da.ibkr_account_id],
             "symbol": da.symbol,
             "conid": da.conid,
@@ -492,6 +513,7 @@ async def _upsert_all_children(
     open_div_rows = [
         {
             "flex_import_id": fi.id,
+            "organization_id": organization_id,
             "account_id": accounts_map[oda.ibkr_account_id],
             "symbol": oda.symbol,
             "conid": oda.conid,
@@ -560,28 +582,37 @@ async def _upsert_all_children(
 async def _ensure_counterparties(
     session: AsyncSession,
     external_ids: list[str],
+    *,
+    organization_id: int,
 ) -> dict[str, int]:
     """Ensure counterparties rows exist for external (non-own) transfer peers.
 
-    Returns external_id -> db id map. Mirrors _ensure_accounts (SELECT-then-INSERT
-    bajo el mismo advisory lock; UNIQUE(external_id) backstops manual-upload races).
+    Returns external_id -> db id map. Scoped by organization_id because
+    counterparties now have UNIQUE(organization_id, external_id) — two orgs
+    can independently reference the same external broker peer.
     """
     if not external_ids:
         return {}
 
     result = await session.scalars(
-        select(Counterparty).where(Counterparty.external_id.in_(external_ids))
+        select(Counterparty).where(
+            Counterparty.organization_id == organization_id,
+            Counterparty.external_id.in_(external_ids),
+        )
     )
     existing: dict[str, int] = {c.external_id: c.id for c in result.all()}
 
     missing = set(external_ids) - set(existing.keys())
     for ext_id in missing:
-        session.add(Counterparty(external_id=ext_id))
+        session.add(Counterparty(organization_id=organization_id, external_id=ext_id))
 
     if missing:
         await session.flush()
         result2 = await session.scalars(
-            select(Counterparty).where(Counterparty.external_id.in_(missing))
+            select(Counterparty).where(
+                Counterparty.organization_id == organization_id,
+                Counterparty.external_id.in_(missing),
+            )
         )
         for c in result2.all():
             existing[c.external_id] = c.id
@@ -592,13 +623,19 @@ async def _ensure_counterparties(
 async def _ensure_accounts(
     session: AsyncSession,
     ibkr_ids: list[str],
+    *,
+    organization_id: int,
 ) -> dict[str, int]:
     """Ensure DB rows exist for all given IBKR account IDs. Returns ibkr_id -> db id map.
 
+    New accounts are created with organization_id stamped (ibkr_account_id UNIQUE
+    global means there is at most one row per broker account across all orgs — a
+    shared identity, by design; org FK points to the first org that ingested it).
+
     Race condition note: this function uses SELECT-then-INSERT, not ON CONFLICT.
     For the cron Flex flow, this is safe because flex_job.run() holds an
-    advisory_lock(source='flex', user_id=X) preventing concurrent ingests for
-    the same user. For manual uploads via /api/imports/upload, the spec (D9)
+    advisory_lock(source='flex', org_id=X) preventing concurrent ingests for
+    the same org. For manual uploads via /api/imports/upload, the spec (D9)
     explicitly forgoes the advisory lock (different XML hashes = independent
     work). In that case, two parallel uploads referencing the same NEW account
     could race here — the second would either get the existing row (race lost
@@ -613,7 +650,9 @@ async def _ensure_accounts(
 
     missing = set(ibkr_ids) - set(existing.keys())
     for ibkr_id in missing:
-        a = Account(ibkr_account_id=ibkr_id, alias=None, currency="USD")
+        a = Account(
+            organization_id=organization_id, ibkr_account_id=ibkr_id, alias=None, currency="USD"
+        )
         session.add(a)
 
     if missing:

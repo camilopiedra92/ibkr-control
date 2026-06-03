@@ -6,9 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ibkr_control.api._context import org_context
 from ibkr_control.api._schemas import FlexCredentialsRead, FlexCredentialsUpdate
-from ibkr_control.auth.backend import current_active_user
-from ibkr_control.auth.models import User
 from ibkr_control.db.models.flex_credentials import FlexCredentials
 from ibkr_control.db.session import get_async_session
 from ibkr_control.ingest.flex import client as flex_client_mod
@@ -19,10 +18,12 @@ router = APIRouter(prefix="/credentials", tags=["credentials"])
 
 @router.get("/flex", response_model=FlexCredentialsRead)
 async def get_flex_credentials(
-    user: User = Depends(current_active_user),
+    org_id: int = Depends(org_context),
     session: AsyncSession = Depends(get_async_session),
 ) -> FlexCredentialsRead:
-    creds = await session.scalar(select(FlexCredentials).where(FlexCredentials.user_id == user.id))
+    creds = await session.scalar(
+        select(FlexCredentials).where(FlexCredentials.organization_id == org_id)
+    )
     if creds is None:
         raise HTTPException(status_code=404, detail="No Flex credentials configured")
     return FlexCredentialsRead(
@@ -35,11 +36,13 @@ async def get_flex_credentials(
 @router.put("/flex")
 async def update_flex_credentials(
     payload: FlexCredentialsUpdate,
-    user: User = Depends(current_active_user),
+    org_id: int = Depends(org_context),
     session: AsyncSession = Depends(get_async_session),
 ) -> dict:
     """Si pasa token, lo valida contra IBKR antes de guardar."""
-    creds = await session.scalar(select(FlexCredentials).where(FlexCredentials.user_id == user.id))
+    creds = await session.scalar(
+        select(FlexCredentials).where(FlexCredentials.organization_id == org_id)
+    )
 
     new_token = payload.token
     new_query_id = payload.query_id
@@ -62,7 +65,7 @@ async def update_flex_credentials(
         if not new_token or not new_query_id:
             raise HTTPException(status_code=400, detail="Primera vez requiere token + query_id")
         creds = FlexCredentials(
-            user_id=user.id,
+            organization_id=org_id,
             token_encrypted=flex_crypto_mod.encrypt_token(new_token),
             ytd_query_id=new_query_id,
         )

@@ -63,7 +63,7 @@ def _make_cash_tx(account_id: str, amount: str, description: str) -> ParsedCashT
 
 
 @pytest.mark.asyncio
-async def test_persister_filters_f_accounts_from_all_tables(db_session: AsyncSession, sample_user):
+async def test_persister_filters_f_accounts_from_all_tables(db_session: AsyncSession, sample_org):
     """Single ParsedXML with both U99999999 and U99999999F across all entities.
 
     Only the non-shadow account row + its trade + its cash_tx must persist.
@@ -96,7 +96,7 @@ async def test_persister_filters_f_accounts_from_all_tables(db_session: AsyncSes
     _fi_id, _counters = await persist(
         db_session,
         parsed=parsed,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=b"<xml>f-filter-001</xml>",
         source="manual_upload",
     )
@@ -117,7 +117,7 @@ async def test_persister_filters_f_accounts_from_all_tables(db_session: AsyncSes
 
 
 @pytest.mark.asyncio
-async def test_persister_handles_xml_with_only_f_accounts(db_session: AsyncSession, sample_user):
+async def test_persister_handles_xml_with_only_f_accounts(db_session: AsyncSession, sample_org):
     """Degenerate case: XML where every accountId ends in F. Insert nothing, no error.
 
     The persister must not crash on a KeyError trying to look up an F-account in
@@ -140,7 +140,7 @@ async def test_persister_handles_xml_with_only_f_accounts(db_session: AsyncSessi
     _fi_id, _counters = await persist(
         db_session,
         parsed=parsed,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=b"<xml>f-filter-only-002</xml>",
         source="manual_upload",
     )

@@ -1,6 +1,7 @@
 """Observability log — tracks every cron/manual/wizard ingest run."""
 
 from datetime import datetime
+
 from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, Integer, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,16 +27,15 @@ class IngestLog(Base):
             f"trigger IN {_TRIGGER_VALUES}",
             name="trigger",
         ),
-        Index("ix_ingest_log_user_id_started_at", "user_id", text("started_at DESC")),
+        Index("ix_ingest_log_org_started_at", "organization_id", text("started_at DESC")),
+        Index(None, "organization_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    job_kind: Mapped[str] = mapped_column(Text, nullable=False)
-    user_id: Mapped[int | None] = mapped_column(
-        BigInteger,
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
+    organization_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
     )
+    job_kind: Mapped[str] = mapped_column(Text, nullable=False)
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("NOW()")
     )

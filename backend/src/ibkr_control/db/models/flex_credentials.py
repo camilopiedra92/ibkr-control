@@ -1,7 +1,8 @@
-"""Token Flex encriptado + query_id por user."""
+"""Token Flex encriptado + query_id por organization (no por user)."""
 
 from datetime import datetime
-from sqlalchemy import BigInteger, LargeBinary, String, DateTime, ForeignKey, text
+
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, LargeBinary, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ibkr_control.db.base import Base
@@ -9,9 +10,19 @@ from ibkr_control.db.base import Base
 
 class FlexCredentials(Base):
     __tablename__ = "flex_credentials"
+    __table_args__ = (
+        Index(None, "organization_id"),
+        {
+            "comment": (
+                "Flex token del org (no del user). Org-scoped, RLS. "
+                ">1 login IBKR por org permitido."
+            )
+        },
+    )
 
-    user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
     )
     token_encrypted: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     ytd_query_id: Mapped[str] = mapped_column(String, nullable=False)

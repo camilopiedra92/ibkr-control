@@ -27,29 +27,44 @@ async def _user_id_by_email(email: str) -> int:
         await engine.dispose()
 
 
-async def test_get_logs_empty_when_no_runs(client: AsyncClient, auth_headers: dict):
-    resp = await client.get("/api/ingest/logs?limit=10", headers=auth_headers)
+async def test_get_logs_empty_when_no_runs(client: AsyncClient, auth_headers_with_org: dict):
+    resp = await client.get("/api/ingest/logs?limit=10", headers=auth_headers_with_org)
     assert resp.status_code == 200
     assert resp.json() == []
 
 
-async def test_trigger_rate_limit_429(client: AsyncClient, auth_headers: dict, monkeypatch):
-    """Llamadas seguidas devuelven 429. Estado vive en DB (users.last_ingest_trigger_at)."""
+async def test_logs_requires_org(client: AsyncClient, auth_headers: dict):
+    """A user with no org membership cannot resolve org_context → 403."""
+    resp = await client.get("/api/ingest/logs?limit=10", headers=auth_headers)
+    assert resp.status_code == 403
+
+
+async def test_trigger_rate_limit_429(
+    client: AsyncClient, auth_headers_with_org: dict, monkeypatch
+):
+    """Llamadas seguidas devuelven 429. Estado vive en DB, per-org
+    (organizations.last_ingest_trigger_at) — D-CONV-3."""
 
     async def noop(*args, **kwargs) -> int:
         return 999
 
     monkeypatch.setattr("ibkr_control.api.ingest._launch_manual_job", noop)
 
-    r1 = await client.post("/api/ingest/trigger", json={"kind": "trm"}, headers=auth_headers)
+    r1 = await client.post(
+        "/api/ingest/trigger", json={"kind": "trm"}, headers=auth_headers_with_org
+    )
     assert r1.status_code == 200
 
-    r2 = await client.post("/api/ingest/trigger", json={"kind": "trm"}, headers=auth_headers)
+    r2 = await client.post(
+        "/api/ingest/trigger", json={"kind": "trm"}, headers=auth_headers_with_org
+    )
     assert r2.status_code == 429
 
 
-async def test_trigger_invalid_kind_returns_422(client: AsyncClient, auth_headers: dict):
-    resp = await client.post("/api/ingest/trigger", json={"kind": "garbage"}, headers=auth_headers)
+async def test_trigger_invalid_kind_returns_422(client: AsyncClient, auth_headers_with_org: dict):
+    resp = await client.post(
+        "/api/ingest/trigger", json={"kind": "garbage"}, headers=auth_headers_with_org
+    )
     assert resp.status_code == 422
 
 
@@ -119,10 +134,13 @@ async def test_run_manual_emits_substep_keys_matching_frontend(monkeypatch):
     from ibkr_control.api import ingest as ingest_mod
     from ibkr_control.ingest.job_tracker import get_tracker
 
+    flex_kwargs: dict = {}
+
     async def fake_trm_run(*_a, **_kw):
         return {"status": "ok", "n_rows_api": 1, "n_days": 7}
 
-    async def fake_flex_run(*_a, **_kw):
+    async def fake_flex_run(*_a, **kw):
+        flex_kwargs.update(kw)
         return None
 
     monkeypatch.setattr("ibkr_control.ingest.trm.job.run", fake_trm_run)
@@ -131,7 +149,13 @@ async def test_run_manual_emits_substep_keys_matching_frontend(monkeypatch):
 
     tracker = get_tracker()
     job_id = tracker.create_job(user_id=1)
-    await ingest_mod._run_manual(kind="both", user_id=1, job_id=job_id)
+    await ingest_mod._run_manual(kind="both", org_id=42, job_id=job_id)
+
+    # The flex run must be invoked with the org scope (per-org ingest). There is
+    # no user_id on the ingest path (D-CONV-3).
+    assert flex_kwargs.get("organization_id") == 42
+    assert "user_id" not in flex_kwargs
+    assert flex_kwargs.get("trigger") == "manual"
 
     events = [e.payload for e in tracker.events_since(job_id, after_id=-1)]
     assert [(e["step"], e.get("status")) for e in events] == [
@@ -161,7 +185,7 @@ async def test_run_manual_marks_failing_substep_as_failed(monkeypatch):
 
     tracker = get_tracker()
     job_id = tracker.create_job(user_id=1)
-    await ingest_mod._run_manual(kind="trm", user_id=1, job_id=job_id)
+    await ingest_mod._run_manual(kind="trm", org_id=1, job_id=job_id)
 
     events = [e.payload for e in tracker.events_since(job_id, after_id=-1)]
     failed = next(e for e in events if e.get("status") == "failed")
@@ -169,33 +193,42 @@ async def test_run_manual_marks_failing_substep_as_failed(monkeypatch):
     assert "boom" in failed["error"]
 
 
-async def test_trigger_persists_timestamp_in_user_row(
-    client: AsyncClient, auth_headers: dict, monkeypatch
+async def test_trigger_persists_timestamp_in_org_row(
+    client: AsyncClient, auth_headers_with_org: dict, monkeypatch
 ):
-    """POST /api/ingest/trigger debe actualizar users.last_ingest_trigger_at."""
+    """POST /api/ingest/trigger debe actualizar organizations.last_ingest_trigger_at.
+
+    The rate-limit throttle is PER-ORG (D-CONV-3): the ingest is the tenant's
+    unit of operation, not the user's."""
     from sqlalchemy import select
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-    from ibkr_control.auth.models import User
     from ibkr_control.config import get_settings
+    from ibkr_control.db.models.organizations import Organization
 
     async def noop(*args, **kwargs) -> int:
         return 999
 
     monkeypatch.setattr("ibkr_control.api.ingest._launch_manual_job", noop)
 
-    r = await client.post("/api/ingest/trigger", json={"kind": "trm"}, headers=auth_headers)
+    r = await client.post(
+        "/api/ingest/trigger", json={"kind": "trm"}, headers=auth_headers_with_org
+    )
     assert r.status_code == 200
 
-    # Verify the column was updated using a fresh engine on the same DB
+    # Verify the org column was updated using a fresh engine on the same DB
     settings = get_settings()
     engine = create_async_engine(settings.database_url, echo=False)
     session_local = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with session_local() as s:
-            user = (await s.scalars(select(User).where(User.email == "api_test@test.com"))).one()
-            assert user.last_ingest_trigger_at is not None, (
-                "trigger endpoint did not persist last_ingest_trigger_at"
+            org = (
+                await s.scalars(
+                    select(Organization).where(Organization.name == "Org Owner Household")
+                )
+            ).one()
+            assert org.last_ingest_trigger_at is not None, (
+                "trigger endpoint did not persist organizations.last_ingest_trigger_at"
             )
     finally:
         await engine.dispose()

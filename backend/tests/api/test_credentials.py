@@ -1,4 +1,4 @@
-"""Tests del router /api/credentials/flex."""
+"""Tests del router /api/credentials/flex (org-scoped)."""
 
 import base64
 
@@ -11,31 +11,24 @@ def _make_test_key() -> str:
     return base64.b64encode(b"X" * 32).decode("ascii")
 
 
-async def _register_and_login(client: AsyncClient) -> str:
-    await client.post(
-        "/api/auth/register",
-        json={"email": "creds@test.com", "password": "supersecret123", "name": "Creds User"},
-    )
-    login = await client.post(
-        "/api/auth/jwt/login",
-        data={"username": "creds@test.com", "password": "supersecret123"},
-    )
-    return login.json()["access_token"]
-
-
-async def test_get_credentials_404_when_not_configured(client: AsyncClient):
-    token = await _register_and_login(client)
-    headers = {"Authorization": f"Bearer {token}"}
-    resp = await client.get("/api/credentials/flex", headers=headers)
+async def test_get_credentials_404_when_not_configured(
+    client: AsyncClient, auth_headers_with_org: dict
+):
+    resp = await client.get("/api/credentials/flex", headers=auth_headers_with_org)
     assert resp.status_code == 404
 
 
-async def test_put_credentials_validates_token_with_ibkr(client: AsyncClient, monkeypatch):
+async def test_get_credentials_403_when_no_org(client: AsyncClient, auth_headers: dict):
+    """A user with no org membership cannot resolve org_context → 403."""
+    resp = await client.get("/api/credentials/flex", headers=auth_headers)
+    assert resp.status_code == 403
+
+
+async def test_put_credentials_validates_token_with_ibkr(
+    client: AsyncClient, auth_headers_with_org: dict, monkeypatch
+):
     """PUT con token + query_id hace ping a IBKR antes de guardar."""
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", _make_test_key())
-
-    token = await _register_and_login(client)
-    headers = {"Authorization": f"Bearer {token}"}
 
     with respx.mock(base_url="https://ndcdyn.interactivebrokers.com") as mock_router:
         mock_router.get("/AccountManagement/FlexWebService/SendRequest").mock(
@@ -48,25 +41,58 @@ async def test_put_credentials_validates_token_with_ibkr(client: AsyncClient, mo
         resp = await client.put(
             "/api/credentials/flex",
             json={"token": "valid-token-abc123", "query_id": "1234567"},
-            headers=headers,
+            headers=auth_headers_with_org,
         )
 
     assert resp.status_code == 200
 
     # GET ahora debe devolver los credentials (sin el token plaintext)
-    get_resp = await client.get("/api/credentials/flex", headers=headers)
+    get_resp = await client.get("/api/credentials/flex", headers=auth_headers_with_org)
     assert get_resp.status_code == 200
     body = get_resp.json()
     assert body["query_id"] == "1234567"
     assert "token" not in body
 
 
-async def test_put_credentials_rejects_invalid_token(client: AsyncClient, monkeypatch):
-    """PUT con token invalido (IBKR retorna ErrorCode 1018) devuelve 401."""
+async def test_credentials_isolated_per_org(
+    client: AsyncClient,
+    auth_headers_with_org: dict,
+    second_auth_headers_with_org: dict,
+    monkeypatch,
+):
+    """Org A's credentials are invisible to org B (org-scoped, not user-scoped)."""
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", _make_test_key())
 
-    token = await _register_and_login(client)
-    headers = {"Authorization": f"Bearer {token}"}
+    with respx.mock(base_url="https://ndcdyn.interactivebrokers.com") as mock_router:
+        mock_router.get("/AccountManagement/FlexWebService/SendRequest").mock(
+            return_value=Response(
+                200,
+                content=b"""<?xml version="1.0"?>
+<FlexStatementResponse><Status>Success</Status><ReferenceCode>9</ReferenceCode></FlexStatementResponse>""",
+            )
+        )
+        r = await client.put(
+            "/api/credentials/flex",
+            json={"token": "org-a-token-abc", "query_id": "ORG-A-QID"},
+            headers=auth_headers_with_org,
+        )
+    assert r.status_code == 200
+
+    # Org A sees its creds
+    ga = await client.get("/api/credentials/flex", headers=auth_headers_with_org)
+    assert ga.status_code == 200
+    assert ga.json()["query_id"] == "ORG-A-QID"
+
+    # Org B sees nothing
+    gb = await client.get("/api/credentials/flex", headers=second_auth_headers_with_org)
+    assert gb.status_code == 404
+
+
+async def test_put_credentials_rejects_invalid_token(
+    client: AsyncClient, auth_headers_with_org: dict, monkeypatch
+):
+    """PUT con token invalido (IBKR retorna ErrorCode 1018) devuelve 401."""
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", _make_test_key())
 
     with respx.mock(base_url="https://ndcdyn.interactivebrokers.com") as mock_router:
         mock_router.get("/AccountManagement/FlexWebService/SendRequest").mock(
@@ -79,7 +105,7 @@ async def test_put_credentials_rejects_invalid_token(client: AsyncClient, monkey
         resp = await client.put(
             "/api/credentials/flex",
             json={"token": "bad-token-123456", "query_id": "1234567"},
-            headers=headers,
+            headers=auth_headers_with_org,
         )
 
     assert resp.status_code == 401
@@ -93,30 +119,15 @@ async def test_get_credentials_requires_auth(client: AsyncClient):
 
 
 # ---------------------------------------------------------------------------
-# Additional tests to raise coverage on lines 27-29, 47-83
+# Additional tests over the handler branches (org-scoped)
 # ---------------------------------------------------------------------------
 
 
-async def _register_and_login_unique(client: AsyncClient, email: str) -> str:
-    """Register a unique user and return JWT token."""
-    await client.post(
-        "/api/auth/register",
-        json={"email": email, "password": "supersecret123", "name": "Test User"},
-    )
-    login = await client.post(
-        "/api/auth/jwt/login",
-        data={"username": email, "password": "supersecret123"},
-    )
-    return login.json()["access_token"]
-
-
 async def test_get_credentials_returns_metadata_without_token_plaintext(
-    client: AsyncClient, monkeypatch
+    client: AsyncClient, auth_headers_with_org: dict, monkeypatch
 ):
     """GET /credentials/flex returns query_id + timestamps, never the token plaintext."""
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", _make_test_key())
-    token = await _register_and_login_unique(client, "getmeta@test.com")
-    headers = {"Authorization": f"Bearer {token}"}
 
     success_xml = b"""<?xml version="1.0"?>
 <FlexStatementResponse><Status>Success</Status><ReferenceCode>42</ReferenceCode></FlexStatementResponse>"""
@@ -129,10 +140,10 @@ async def test_get_credentials_returns_metadata_without_token_plaintext(
         await client.put(
             "/api/credentials/flex",
             json={"token": "secret-token-abc123", "query_id": "QID-555"},
-            headers=headers,
+            headers=auth_headers_with_org,
         )
 
-    get_resp = await client.get("/api/credentials/flex", headers=headers)
+    get_resp = await client.get("/api/credentials/flex", headers=auth_headers_with_org)
     assert get_resp.status_code == 200
     body = get_resp.json()
     assert body["query_id"] == "QID-555"
@@ -145,12 +156,10 @@ async def test_get_credentials_returns_metadata_without_token_plaintext(
 
 
 async def test_put_credentials_query_id_only_updates_without_ibkr_ping(
-    client: AsyncClient, monkeypatch
+    client: AsyncClient, auth_headers_with_org: dict, monkeypatch
 ):
     """PUT with only query_id (no token) does not ping IBKR and updates query_id."""
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", _make_test_key())
-    token = await _register_and_login_unique(client, "qidonly@test.com")
-    headers = {"Authorization": f"Bearer {token}"}
 
     success_xml = b"""<?xml version="1.0"?>
 <FlexStatementResponse><Status>Success</Status><ReferenceCode>11</ReferenceCode></FlexStatementResponse>"""
@@ -163,12 +172,10 @@ async def test_put_credentials_query_id_only_updates_without_ibkr_ping(
         await client.put(
             "/api/credentials/flex",
             json={"token": "initial-token-xyz", "query_id": "OLD-QID"},
-            headers=headers,
+            headers=auth_headers_with_org,
         )
 
     # Now update only the query_id — no token, no IBKR ping should occur.
-    # We use assert_all_called=False so the mock doesn't complain about uncalled routes;
-    # if IBKR were hit, the side_effect would raise and the test would fail.
     ibkr_was_pinged = []
     with respx.mock(assert_all_called=False) as mock_router:
         mock_router.get(
@@ -177,7 +184,7 @@ async def test_put_credentials_query_id_only_updates_without_ibkr_ping(
         resp = await client.put(
             "/api/credentials/flex",
             json={"query_id": "NEW-QID"},
-            headers=headers,
+            headers=auth_headers_with_org,
         )
 
     assert ibkr_was_pinged == [], "IBKR was unexpectedly pinged when updating query_id only"
@@ -185,15 +192,15 @@ async def test_put_credentials_query_id_only_updates_without_ibkr_ping(
     assert resp.status_code == 200
 
     # Verify query_id was updated
-    get_resp = await client.get("/api/credentials/flex", headers=headers)
+    get_resp = await client.get("/api/credentials/flex", headers=auth_headers_with_org)
     assert get_resp.json()["query_id"] == "NEW-QID"
 
 
-async def test_put_credentials_ibkr_unreachable_returns_502(client: AsyncClient, monkeypatch):
+async def test_put_credentials_ibkr_unreachable_returns_502(
+    client: AsyncClient, auth_headers_with_org: dict, monkeypatch
+):
     """Network error contacting IBKR during PUT returns 502."""
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", _make_test_key())
-    token = await _register_and_login_unique(client, "ibkrtimeout@test.com")
-    headers = {"Authorization": f"Bearer {token}"}
 
     with respx.mock(base_url="https://ndcdyn.interactivebrokers.com") as mock_router:
         mock_router.get("/AccountManagement/FlexWebService/SendRequest").mock(
@@ -202,7 +209,7 @@ async def test_put_credentials_ibkr_unreachable_returns_502(client: AsyncClient,
         resp = await client.put(
             "/api/credentials/flex",
             json={"token": "some-valid-token", "query_id": "1234567"},
-            headers=headers,
+            headers=auth_headers_with_org,
         )
 
     assert resp.status_code == 502
@@ -211,45 +218,41 @@ async def test_put_credentials_ibkr_unreachable_returns_502(client: AsyncClient,
 
 
 async def test_put_credentials_first_time_requires_both_token_and_query_id(
-    client: AsyncClient, monkeypatch
+    client: AsyncClient, auth_headers_with_org: dict, monkeypatch
 ):
     """First-time PUT with only query_id (no token) returns 400."""
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", _make_test_key())
-    token = await _register_and_login_unique(client, "firsttime@test.com")
-    headers = {"Authorization": f"Bearer {token}"}
 
     resp = await client.put(
         "/api/credentials/flex",
         json={"query_id": "1234567"},
-        headers=headers,
+        headers=auth_headers_with_org,
     )
     assert resp.status_code == 400
     assert "query_id" in resp.json()["detail"].lower() or "token" in resp.json()["detail"].lower()
 
 
 async def test_put_credentials_first_time_requires_both_only_token(
-    client: AsyncClient, monkeypatch
+    client: AsyncClient, auth_headers_with_org: dict, monkeypatch
 ):
     """First-time PUT with only token (no query_id) also returns 400 (missing query_id for ping)."""
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", _make_test_key())
-    token = await _register_and_login_unique(client, "firsttimetoken@test.com")
-    headers = {"Authorization": f"Bearer {token}"}
 
     # With only token — no query_id to use for IBKR ping
     # This hits the "not test_query_id → 400" branch in update_flex_credentials
     resp = await client.put(
         "/api/credentials/flex",
         json={"token": "some-valid-token-ab"},
-        headers=headers,
+        headers=auth_headers_with_org,
     )
     assert resp.status_code == 400
 
 
-async def test_put_credentials_updates_existing_credentials_token(client: AsyncClient, monkeypatch):
+async def test_put_credentials_updates_existing_credentials_token(
+    client: AsyncClient, auth_headers_with_org: dict, monkeypatch
+):
     """PUT with new token on existing credentials validates + rotates the token."""
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", _make_test_key())
-    token = await _register_and_login_unique(client, "rotatetoken@test.com")
-    headers = {"Authorization": f"Bearer {token}"}
 
     success_xml = b"""<?xml version="1.0"?>
 <FlexStatementResponse><Status>Success</Status><ReferenceCode>77</ReferenceCode></FlexStatementResponse>"""
@@ -262,7 +265,7 @@ async def test_put_credentials_updates_existing_credentials_token(client: AsyncC
         r1 = await client.put(
             "/api/credentials/flex",
             json={"token": "original-token-abc", "query_id": "QFIRST"},
-            headers=headers,
+            headers=auth_headers_with_org,
         )
     assert r1.status_code == 200
 
@@ -274,12 +277,12 @@ async def test_put_credentials_updates_existing_credentials_token(client: AsyncC
         r2 = await client.put(
             "/api/credentials/flex",
             json={"token": "rotated-token-xyz", "query_id": "QSECOND"},
-            headers=headers,
+            headers=auth_headers_with_org,
         )
     assert r2.status_code == 200
 
     # Verify query_id was updated to new value
-    get_resp = await client.get("/api/credentials/flex", headers=headers)
+    get_resp = await client.get("/api/credentials/flex", headers=auth_headers_with_org)
     assert get_resp.json()["query_id"] == "QSECOND"
 
 
@@ -295,21 +298,22 @@ async def test_put_credentials_requires_auth(client: AsyncClient):
 # ---------------------------------------------------------------------------
 # Direct handler tests — bypass ASGI transport to get coverage.py tracing
 # on the async handler bodies (sys.settrace doesn't follow ASGI coroutines).
+# Handlers are now org-scoped: pass org_id (sample_user is sample_org's founder).
 # ---------------------------------------------------------------------------
 
 
-async def test_get_flex_credentials_handler_404_branch(db_session, sample_user, monkeypatch):
+async def test_get_flex_credentials_handler_404_branch(db_session, sample_org, monkeypatch):
     """Direct call to get_flex_credentials raises 404 when no credentials exist."""
     import pytest
     from ibkr_control.api.credentials import get_flex_credentials
 
     with pytest.raises(Exception) as exc_info:
-        await get_flex_credentials(user=sample_user, session=db_session)
+        await get_flex_credentials(org_id=sample_org.id, session=db_session)
 
     assert "404" in str(exc_info.value) or "No Flex credentials" in str(exc_info.value)
 
 
-async def test_get_flex_credentials_handler_200_branch(db_session, sample_user, monkeypatch):
+async def test_get_flex_credentials_handler_200_branch(db_session, sample_org, monkeypatch):
     """Direct call to get_flex_credentials returns FlexCredentialsRead when creds exist."""
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", _make_test_key())
 
@@ -318,7 +322,7 @@ async def test_get_flex_credentials_handler_200_branch(db_session, sample_user, 
     from ibkr_control.ingest.flex import crypto as crypto_mod
 
     creds = FlexCredentials(
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         token_encrypted=crypto_mod.encrypt_token("test-token-abc"),
         ytd_query_id="DIRECT-QID",
     )
@@ -326,13 +330,13 @@ async def test_get_flex_credentials_handler_200_branch(db_session, sample_user, 
     await db_session.commit()
     await db_session.refresh(creds)
 
-    result = await get_flex_credentials(user=sample_user, session=db_session)
+    result = await get_flex_credentials(org_id=sample_org.id, session=db_session)
     assert result.query_id == "DIRECT-QID"
     assert result.last_rotated_at is not None
 
 
 async def test_update_flex_credentials_handler_first_time_no_token_raises_400(
-    db_session, sample_user, monkeypatch
+    db_session, sample_org, monkeypatch
 ):
     """Direct call to update_flex_credentials: first time, only query_id → 400."""
     import pytest
@@ -342,7 +346,7 @@ async def test_update_flex_credentials_handler_first_time_no_token_raises_400(
     payload = FlexCredentialsUpdate(token=None, query_id="QID-ONLY")
 
     with pytest.raises(Exception) as exc_info:
-        await update_flex_credentials(payload=payload, user=sample_user, session=db_session)
+        await update_flex_credentials(payload=payload, org_id=sample_org.id, session=db_session)
 
     assert (
         "400" in str(exc_info.value)
@@ -352,7 +356,7 @@ async def test_update_flex_credentials_handler_first_time_no_token_raises_400(
 
 
 async def test_update_flex_credentials_handler_token_ping_succeeds(
-    db_session, sample_user, monkeypatch
+    db_session, sample_org, monkeypatch
 ):
     """Direct call to update_flex_credentials: with token + query_id, IBKR ping succeeds → saves."""
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", _make_test_key())
@@ -363,9 +367,6 @@ async def test_update_flex_credentials_handler_token_ping_succeeds(
 
     payload = FlexCredentialsUpdate(token="valid-token-abc123", query_id="QID-DIRECT")
 
-    async def fake_send_request(query_id):
-        return "REF-CODE"
-
     class FakeFlexClient:
         def __init__(self, token):
             self.token = token
@@ -375,12 +376,14 @@ async def test_update_flex_credentials_handler_token_ping_succeeds(
 
     monkeypatch.setattr(flex_client_mod, "FlexClient", FakeFlexClient)
 
-    result = await update_flex_credentials(payload=payload, user=sample_user, session=db_session)
+    result = await update_flex_credentials(
+        payload=payload, org_id=sample_org.id, session=db_session
+    )
     assert result == {"ok": True}
 
 
 async def test_update_flex_credentials_handler_ibkr_auth_error_raises_401(
-    db_session, sample_user, monkeypatch
+    db_session, sample_org, monkeypatch
 ):
     """Direct call: IBKR returns FlexAuthError → raises 401."""
     import pytest
@@ -403,7 +406,7 @@ async def test_update_flex_credentials_handler_ibkr_auth_error_raises_401(
     monkeypatch.setattr(flex_client_mod, "FlexClient", FakeFlexClientAuthFail)
 
     with pytest.raises(Exception) as exc_info:
-        await update_flex_credentials(payload=payload, user=sample_user, session=db_session)
+        await update_flex_credentials(payload=payload, org_id=sample_org.id, session=db_session)
 
     assert (
         "401" in str(exc_info.value)
@@ -413,7 +416,7 @@ async def test_update_flex_credentials_handler_ibkr_auth_error_raises_401(
 
 
 async def test_update_flex_credentials_handler_ibkr_network_error_raises_502(
-    db_session, sample_user, monkeypatch
+    db_session, sample_org, monkeypatch
 ):
     """Direct call: network error → raises 502."""
     import pytest
@@ -436,13 +439,13 @@ async def test_update_flex_credentials_handler_ibkr_network_error_raises_502(
     monkeypatch.setattr(flex_client_mod, "FlexClient", FakeFlexClientTimeout)
 
     with pytest.raises(Exception) as exc_info:
-        await update_flex_credentials(payload=payload, user=sample_user, session=db_session)
+        await update_flex_credentials(payload=payload, org_id=sample_org.id, session=db_session)
 
     assert "502" in str(exc_info.value) or "alcanzar" in str(exc_info.value).lower()
 
 
 async def test_update_flex_credentials_handler_updates_existing(
-    db_session, sample_user, monkeypatch
+    db_session, sample_org, monkeypatch
 ):
     """Direct call: existing creds, update token only → updates token_encrypted and last_rotated_at."""
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", _make_test_key())
@@ -454,7 +457,7 @@ async def test_update_flex_credentials_handler_updates_existing(
 
     # Create initial credentials
     creds = FlexCredentials(
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         token_encrypted=crypto_mod.encrypt_token("original-token"),
         ytd_query_id="ORIGINAL-QID",
     )
@@ -464,7 +467,9 @@ async def test_update_flex_credentials_handler_updates_existing(
     # Update only query_id (no token, no IBKR ping)
     payload = FlexCredentialsUpdate(token=None, query_id="NEW-QID-DIRECT")
 
-    result = await update_flex_credentials(payload=payload, user=sample_user, session=db_session)
+    result = await update_flex_credentials(
+        payload=payload, org_id=sample_org.id, session=db_session
+    )
     assert result == {"ok": True}
 
     # Verify query_id was updated
@@ -473,7 +478,7 @@ async def test_update_flex_credentials_handler_updates_existing(
 
 
 async def test_update_flex_credentials_handler_token_with_no_query_id_available_raises_400(
-    db_session, sample_user, monkeypatch
+    db_session, sample_org, monkeypatch
 ):
     """Direct call: token provided but no query_id anywhere (no payload, no existing creds) → 400."""
     import pytest
@@ -488,13 +493,13 @@ async def test_update_flex_credentials_handler_token_with_no_query_id_available_
     payload = FlexCredentialsUpdate(token="some-token-abc123", query_id=None)
 
     with pytest.raises(Exception) as exc_info:
-        await update_flex_credentials(payload=payload, user=sample_user, session=db_session)
+        await update_flex_credentials(payload=payload, org_id=sample_org.id, session=db_session)
 
     assert "400" in str(exc_info.value) or "query_id" in str(exc_info.value).lower()
 
 
 async def test_update_flex_credentials_handler_new_token_on_existing(
-    db_session, sample_user, monkeypatch
+    db_session, sample_org, monkeypatch
 ):
     """Direct call: existing creds, provide new token → validates against IBKR and updates."""
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", _make_test_key())
@@ -507,7 +512,7 @@ async def test_update_flex_credentials_handler_new_token_on_existing(
 
     # Create initial credentials
     creds = FlexCredentials(
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         token_encrypted=crypto_mod.encrypt_token("original-token"),
         ytd_query_id="ORIGINAL-QID",
     )
@@ -524,7 +529,9 @@ async def test_update_flex_credentials_handler_new_token_on_existing(
     monkeypatch.setattr(flex_client_mod, "FlexClient", FakeFlexClientOk)
 
     payload = FlexCredentialsUpdate(token="new-token-abc123", query_id=None)
-    result = await update_flex_credentials(payload=payload, user=sample_user, session=db_session)
+    result = await update_flex_credentials(
+        payload=payload, org_id=sample_org.id, session=db_session
+    )
     assert result == {"ok": True}
 
     await db_session.refresh(creds)

@@ -36,14 +36,16 @@ async def test_open_dividend_accruals_indexes_exist(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_change_in_dividend_accruals_cascade_on_flex_import(
-    db_session: AsyncSession, sample_user, sample_account
+async def test_change_in_dividend_accruals_orphaned_on_flex_import_delete(
+    db_session: AsyncSession, sample_org, sample_account
 ):
-    """Delete de flex_import borra los change_in_dividend_accruals hijos."""
+    """Delete de flex_import desliga (SET NULL) los change_in_dividend_accruals
+    hijos: la fila sobrevive como hecho append-only, flex_import_id -> NULL
+    (no quedan filas apuntando al import borrado)."""
     from ibkr_control.db.models.flex_raw import FlexImport, ChangeInDividendAccrual
 
     fi = FlexImport(
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         anyo=2025,
         xml_hash="hash-cascade-div-chg",
         xml_size_bytes=100,
@@ -59,6 +61,7 @@ async def test_change_in_dividend_accruals_cascade_on_flex_import(
 
     db_session.add(
         ChangeInDividendAccrual(
+            organization_id=sample_org.id,
             flex_import_id=fi_id,
             account_id=sample_account.id,
             symbol="AAPL",
@@ -76,21 +79,28 @@ async def test_change_in_dividend_accruals_cascade_on_flex_import(
     await db_session.delete(fi)
     await db_session.commit()
 
+    # No row points at the deleted import...
     result = await db_session.execute(
         text(f"SELECT COUNT(*) FROM change_in_dividend_accruals WHERE flex_import_id = {fi_id}")
     )
     assert result.scalar() == 0
+    # ...but the accrual itself SURVIVED with a NULL FK (SET NULL, not CASCADE).
+    survived = await db_session.execute(
+        text("SELECT COUNT(*) FROM change_in_dividend_accruals WHERE flex_import_id IS NULL")
+    )
+    assert survived.scalar() == 1
 
 
 @pytest.mark.asyncio
-async def test_open_dividend_accruals_cascade_on_flex_import(
-    db_session: AsyncSession, sample_user, sample_account
+async def test_open_dividend_accruals_orphaned_on_flex_import_delete(
+    db_session: AsyncSession, sample_org, sample_account
 ):
-    """Delete de flex_import borra los open_dividend_accruals hijos."""
+    """Delete de flex_import desliga (SET NULL) los open_dividend_accruals
+    hijos: la fila sobrevive, flex_import_id -> NULL (append-only ledger)."""
     from ibkr_control.db.models.flex_raw import FlexImport, OpenDividendAccrual
 
     fi = FlexImport(
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         anyo=2025,
         xml_hash="hash-cascade-div-open",
         xml_size_bytes=100,
@@ -106,6 +116,7 @@ async def test_open_dividend_accruals_cascade_on_flex_import(
 
     db_session.add(
         OpenDividendAccrual(
+            organization_id=sample_org.id,
             flex_import_id=fi_id,
             account_id=sample_account.id,
             symbol="NKE",
@@ -122,21 +133,27 @@ async def test_open_dividend_accruals_cascade_on_flex_import(
     await db_session.delete(fi)
     await db_session.commit()
 
+    # No row points at the deleted import...
     result = await db_session.execute(
         text(f"SELECT COUNT(*) FROM open_dividend_accruals WHERE flex_import_id = {fi_id}")
     )
     assert result.scalar() == 0
+    # ...but the accrual itself SURVIVED with a NULL FK (SET NULL, not CASCADE).
+    survived = await db_session.execute(
+        text("SELECT COUNT(*) FROM open_dividend_accruals WHERE flex_import_id IS NULL")
+    )
+    assert survived.scalar() == 1
 
 
 @pytest.mark.asyncio
 async def test_change_in_dividend_accruals_report_date_not_null(
-    db_session: AsyncSession, sample_user, sample_account
+    db_session: AsyncSession, sample_org, sample_account
 ):
     """report_date NOT NULL is enforced at DB level."""
     from ibkr_control.db.models.flex_raw import FlexImport, ChangeInDividendAccrual
 
     fi = FlexImport(
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         anyo=2025,
         xml_hash="hash-div-nn-chg",
         xml_size_bytes=100,
@@ -151,6 +168,7 @@ async def test_change_in_dividend_accruals_report_date_not_null(
 
     db_session.add(
         ChangeInDividendAccrual(
+            organization_id=sample_org.id,
             flex_import_id=fi.id,
             account_id=sample_account.id,
             symbol="AAPL",
@@ -169,13 +187,13 @@ async def test_change_in_dividend_accruals_report_date_not_null(
 
 @pytest.mark.asyncio
 async def test_open_dividend_accruals_report_date_not_null(
-    db_session: AsyncSession, sample_user, sample_account
+    db_session: AsyncSession, sample_org, sample_account
 ):
     """report_date NOT NULL is enforced at DB level."""
     from ibkr_control.db.models.flex_raw import FlexImport, OpenDividendAccrual
 
     fi = FlexImport(
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         anyo=2025,
         xml_hash="hash-div-nn-open",
         xml_size_bytes=100,
@@ -190,6 +208,7 @@ async def test_open_dividend_accruals_report_date_not_null(
 
     db_session.add(
         OpenDividendAccrual(
+            organization_id=sample_org.id,
             flex_import_id=fi.id,
             account_id=sample_account.id,
             symbol="NKE",

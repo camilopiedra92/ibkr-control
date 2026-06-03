@@ -40,6 +40,7 @@ from ibkr_control.api._schemas import (
     Step3UploadResponse,
     WizardStateResponse,
 )
+from ibkr_control.api._context import org_context
 from ibkr_control.api._step3_stash import get_stash
 from ibkr_control.auth.backend import current_active_user
 from ibkr_control.auth.models import User
@@ -47,6 +48,8 @@ from ibkr_control.config import get_settings
 from ibkr_control.db.models.accounts import Account
 from ibkr_control.db.models.flex_credentials import FlexCredentials
 from ibkr_control.db.models.flex_raw import FlexImport, FlexImportAccount
+from ibkr_control.db.models.organizations import Organization
+from ibkr_control.db.models.parties import Party
 from ibkr_control.db.models.participations import Participation
 from ibkr_control.db.session import get_async_session, get_engine
 from ibkr_control.ingest.flex import client as flex_client_mod
@@ -64,12 +67,27 @@ router = APIRouter(prefix="/setup", tags=["setup"])
 # ===== Helpers =====
 
 
-def _set_progress(user: User, key: str, value) -> None:
-    """Mutate setup_progress dict y flagear dirty para SQLAlchemy."""
-    progress = dict(user.setup_progress or {})
+def _set_progress(org: Organization, key: str, value) -> None:
+    """Mutate the org's setup_progress dict y flagear dirty para SQLAlchemy.
+
+    Setup state is per-org (Task 5 moved it off User onto Organization)."""
+    progress = dict(org.setup_progress or {})
     progress[key] = value
-    user.setup_progress = progress
-    attributes.flag_modified(user, "setup_progress")
+    org.setup_progress = progress
+    attributes.flag_modified(org, "setup_progress")
+
+
+async def _founding_party_id(session: AsyncSession, org_id: int, user_id: int) -> int:
+    """The org's founding party for this user (SP1 minimal: one party per
+    founding user). Every participation the wizard writes is anchored to it;
+    multi-party selection UI is SP3. It always exists post-provision, so a
+    missing row is a server-side invariant break, not a client error."""
+    party_id = await session.scalar(
+        select(Party.id).where(Party.organization_id == org_id, Party.user_id == user_id)
+    )
+    if party_id is None:
+        raise HTTPException(status_code=500, detail="NO_FOUNDING_PARTY")
+    return party_id
 
 
 def _to_detected_account(account: ParsedAccount) -> DetectedAccount:
@@ -86,37 +104,36 @@ def _is_shadow(ibkr_account_id: str) -> bool:
     return ibkr_account_id.endswith("F")
 
 
-async def _user_imported_account_ids(session: AsyncSession, user_id: int) -> set[str]:
-    """ibkr_account_ids that appear in the given user's own Flex imports.
+async def _org_imported_account_ids(session: AsyncSession, org_id: int) -> set[str]:
+    """ibkr_account_ids that appear in this org's Flex imports.
 
-    Anti-IDOR scope (hardening H1): ownership of an account is proven by the
-    account appearing in a FlexImport belonging to this user — recorded in the
-    flex_import_accounts provenance table (includes AccountInformation-only
-    accounts with no facts). A user may only claim participation on, or mutate
-    the alias of, accounts in this set — never the whole shared `accounts`
-    table, which would let any authenticated user grab another user's accounts.
+    Provenance gate: an account is claimable only if it appears in a FlexImport
+    belonging to THIS org — recorded in the flex_import_accounts provenance
+    table (includes AccountInformation-only accounts with no facts). Cross-org
+    isolation is enforced structurally by org-scoping here (and RLS, Task 14);
+    this query keeps the wizard from claiming an account the org never imported.
     """
     rows = await session.scalars(
         select(Account.ibkr_account_id)
         .join(FlexImportAccount, FlexImportAccount.account_id == Account.id)
         .join(FlexImport, FlexImport.id == FlexImportAccount.flex_import_id)
-        .where(FlexImport.user_id == user_id)
+        .where(FlexImport.organization_id == org_id)
     )
     return set(rows.all())
 
 
-async def _user_configured_account_ids(session: AsyncSession, user_id: int) -> set[str]:
-    """ibkr_account_ids the user has an open participation on ('configured').
+async def _org_configured_account_ids(session: AsyncSession, org_id: int) -> set[str]:
+    """ibkr_account_ids this org has an open participation on ('configured').
 
-    Used by step3/commit (H1): an XML may only be committed once every
-    non-shadow account it references has been resolved BY THIS USER (alias +
-    pct via step2/save or step3/save_new_accounts). Scopes the completeness
-    gate to the user's own participations instead of the shared `accounts`
-    table, where an account another user created would pass falsely."""
+    Used by step3/commit: an XML may only be committed once every non-shadow
+    account it references has been resolved (alias + pct via step2/save or
+    step3/save_new_accounts). Scopes the completeness gate to the org's own
+    participations rather than the shared `accounts` table, where an account
+    another org created would pass falsely."""
     rows = await session.scalars(
         select(Account.ibkr_account_id)
         .join(Participation, Participation.account_id == Account.id)
-        .where(Participation.user_id == user_id, Participation.valid_to.is_(None))
+        .where(Participation.organization_id == org_id, Participation.valid_to.is_(None))
     )
     return set(rows.all())
 
@@ -124,9 +141,10 @@ async def _user_configured_account_ids(session: AsyncSession, user_id: int) -> s
 def _user_stashed_account_ids(user_id: int) -> set[str]:
     """Non-shadow ibkr_account_ids across the user's own Step 3 stash uploads.
 
-    Anti-IDOR scope (H1) for step3/save_new_accounts: a user may only create /
-    claim participation on accounts that appear in an XML THEY uploaded — never
-    an arbitrary id they POST. The stash is already per-user (list_for_user)."""
+    Provenance scope for step3/save_new_accounts: only accounts that appear in
+    an XML the uploading user actually staged are claimable — never an arbitrary
+    id they POST. The stash is an in-memory, per-user session concept
+    (list_for_user), so it stays keyed by the uploading user, not the org."""
     ids: set[str] = set()
     for entry in get_stash().list_for_user(user_id=user_id):
         for a in entry.data["parsed"].accounts:
@@ -191,28 +209,32 @@ async def _trm_backfill_background(user_id: int, job_id: int) -> None:
 @router.get("/state", response_model=WizardStateResponse)
 async def get_state(
     user: User = Depends(current_active_user),
+    org_id: int = Depends(org_context),
     session: AsyncSession = Depends(get_async_session),
 ) -> WizardStateResponse:
     has_creds = (
         await session.scalar(
-            select(func.count(FlexCredentials.user_id)).where(FlexCredentials.user_id == user.id)
+            select(func.count(FlexCredentials.id)).where(FlexCredentials.organization_id == org_id)
         )
     ) > 0
     has_parts = (
         await session.scalar(
-            select(func.count(Participation.user_id)).where(Participation.user_id == user.id)
+            select(func.count())
+            .select_from(Participation)
+            .where(Participation.organization_id == org_id)
         )
     ) > 0
     n_xmls = (
         await session.scalar(
             select(func.count(FlexImport.id)).where(
-                FlexImport.user_id == user.id,
+                FlexImport.organization_id == org_id,
                 FlexImport.source == "manual_upload",
             )
         )
     ) or 0
 
-    p = user.setup_progress or {}
+    org = await session.get(Organization, org_id)
+    p = org.setup_progress or {}
     stash = get_stash()
     pending = [e.temp_id for e in stash.list_for_user(user_id=user.id)]
 
@@ -221,7 +243,7 @@ async def get_state(
         step2_accounts=has_parts,
         step3_xmls=p.get("step3_xmls", False),
         step3_n_xmls_uploaded=n_xmls,
-        setup_completed_at=user.setup_completed_at,
+        setup_completed_at=org.setup_completed_at,
         detected_accounts=None,
         pending_stash_temp_ids=pending,
     )
@@ -233,15 +255,17 @@ async def get_state(
 @router.post("/step1/save")
 async def step1_save(
     payload: FlexCredentialsValidate,
-    user: User = Depends(current_active_user),
+    org_id: int = Depends(org_context),
     session: AsyncSession = Depends(get_async_session),
 ) -> dict:
     """Save creds (encrypt token). Does NOT call IBKR per spec D5."""
-    creds = await session.scalar(select(FlexCredentials).where(FlexCredentials.user_id == user.id))
+    creds = await session.scalar(
+        select(FlexCredentials).where(FlexCredentials.organization_id == org_id)
+    )
     encrypted = flex_crypto_mod.encrypt_token(payload.token)
     if creds is None:
         creds = FlexCredentials(
-            user_id=user.id,
+            organization_id=org_id,
             token_encrypted=encrypted,
             ytd_query_id=payload.query_id,
         )
@@ -262,14 +286,16 @@ _DETECT_RETRY_DELAYS = [5, 15, 30]  # seconds; total max wait ~50s plus the call
 
 @router.post("/step2/detect", response_model=Step2DetectResponse)
 async def step2_detect(
-    user: User = Depends(current_active_user),
+    org_id: int = Depends(org_context),
     session: AsyncSession = Depends(get_async_session),
 ) -> Step2DetectResponse:
     """Fetch + parse + persist YTD. Returns detected accounts (sin F).
 
     Retry policy per spec D10: server-side retry on 1001 with backoff [5, 15, 30]s.
     """
-    creds = await session.scalar(select(FlexCredentials).where(FlexCredentials.user_id == user.id))
+    creds = await session.scalar(
+        select(FlexCredentials).where(FlexCredentials.organization_id == org_id)
+    )
     if creds is None:
         raise HTTPException(status_code=400, detail="MISSING_CREDENTIALS")
 
@@ -324,7 +350,7 @@ async def step2_detect(
     flex_import_id, counters = await flex_persister_mod.persist(
         session,
         parsed=parsed,
-        user_id=user.id,
+        organization_id=org_id,
         xml_bytes=xml_bytes,
         source="web_service",
     )
@@ -342,7 +368,7 @@ async def step2_detect(
 @router.post("/step2/detect_from_xml", response_model=Step2DetectFromXmlResponse)
 async def step2_detect_from_xml(
     file: UploadFile = File(...),
-    user: User = Depends(current_active_user),
+    org_id: int = Depends(org_context),
     session: AsyncSession = Depends(get_async_session),
 ) -> Step2DetectFromXmlResponse:
     """Fallback when IBKR is unreachable: parse uploaded XML and persist it as
@@ -367,7 +393,7 @@ async def step2_detect_from_xml(
     _flex_import_id, _counters = await flex_persister_mod.persist(
         session,
         parsed=parsed,
-        user_id=user.id,
+        organization_id=org_id,
         xml_bytes=content,
         source="manual_upload",
     )
@@ -387,22 +413,24 @@ async def step2_save(
     payload: Step2SaveRequest,
     background: BackgroundTasks,
     user: User = Depends(current_active_user),
+    org_id: int = Depends(org_context),
     session: AsyncSession = Depends(get_async_session),
 ) -> Step2SaveResponse:
     """Persist accounts + participations. Dispatches TRM backfill in background (per D6)."""
-    # Validation pass: must have detected at least one flex_import OR have
-    # accounts already in DB (re-entry after partial setup). Then every
-    # incoming ibkr_account_id must already exist in `accounts` (it gets there
-    # via step2/detect's persist() call, which skips F-shadow accounts).
+    # Validation pass: must have detected at least one flex_import for this org
+    # (re-entry after partial setup also OK). Then every incoming
+    # ibkr_account_id must already exist in `accounts` (it gets there via
+    # step2/detect's persist() call, which skips F-shadow accounts).
     flex_imports_count = await session.scalar(
-        select(func.count(FlexImport.id)).where(FlexImport.user_id == user.id)
+        select(func.count(FlexImport.id)).where(FlexImport.organization_id == org_id)
     )
     if not flex_imports_count:
         raise HTTPException(status_code=400, detail="NO_DETECT_YET")
 
-    # Anti-IDOR (H1): only accounts that appear in THIS user's imports are
+    # Provenance gate: only accounts that appear in THIS org's imports are
     # claimable — not the whole shared `accounts` table.
-    existing_account_ids = await _user_imported_account_ids(session, user.id)
+    existing_account_ids = await _org_imported_account_ids(session, org_id)
+    party_id = await _founding_party_id(session, org_id, user.id)
 
     for item in payload.accounts:
         if _is_shadow(item.ibkr_account_id):
@@ -425,7 +453,10 @@ async def step2_save(
     today = date.today()
     for item in payload.accounts:
         acc = await session.scalar(
-            select(Account).where(Account.ibkr_account_id == item.ibkr_account_id)
+            select(Account).where(
+                Account.organization_id == org_id,
+                Account.ibkr_account_id == item.ibkr_account_id,
+            )
         )
         # acc must exist because validation above verified detected_ids
         if item.alias is not None:
@@ -433,7 +464,7 @@ async def step2_save(
 
         existing = await session.scalar(
             select(Participation).where(
-                Participation.user_id == user.id,
+                Participation.party_id == party_id,
                 Participation.account_id == acc.id,
                 Participation.valid_to.is_(None),
             )
@@ -445,8 +476,9 @@ async def step2_save(
             await session.flush()
         session.add(
             Participation(
-                user_id=user.id,
+                party_id=party_id,
                 account_id=acc.id,
+                organization_id=org_id,
                 pct=item.pct,
                 valid_from=today,
                 valid_to=None,
@@ -469,6 +501,7 @@ async def step2_save(
 async def step3_upload(
     file: UploadFile = File(...),
     user: User = Depends(current_active_user),
+    org_id: int = Depends(org_context),
     session: AsyncSession = Depends(get_async_session),
 ) -> Step3UploadResponse:
     """Stash one XML in memory. Detect new accounts vs already-configured."""
@@ -479,7 +512,9 @@ async def step3_upload(
 
     sha = hashlib.sha256(content).hexdigest()
 
-    existing_import = await session.scalar(select(FlexImport).where(FlexImport.xml_hash == sha))
+    existing_import = await session.scalar(
+        select(FlexImport).where(FlexImport.organization_id == org_id, FlexImport.xml_hash == sha)
+    )
     if existing_import is not None:
         raise HTTPException(
             status_code=409,
@@ -501,7 +536,12 @@ async def step3_upload(
             detail={"code": "PARSE_ERROR", "message": str(e)[:500]},
         ) from e
 
-    existing_accounts = {a.ibkr_account_id for a in (await session.scalars(select(Account))).all()}
+    existing_accounts = {
+        a.ibkr_account_id
+        for a in (
+            await session.scalars(select(Account).where(Account.organization_id == org_id))
+        ).all()
+    }
 
     detected = _detected_from_parsed(parsed)
     new_accounts = [da for da in detected if da.ibkr_account_id not in existing_accounts]
@@ -537,13 +577,15 @@ async def step3_upload(
 async def step3_save_new_accounts(
     payload: Step3SaveNewAccountsRequest,
     user: User = Depends(current_active_user),
+    org_id: int = Depends(org_context),
     session: AsyncSession = Depends(get_async_session),
 ) -> dict:
     """Persist accounts + participations for newly-detected IDs from Step 3 uploads."""
-    # Anti-IDOR (H1): only ids the user actually uploaded in Step 3 are
+    # Provenance gate: only ids the user actually uploaded in Step 3 are
     # claimable — guard before any create/mutate so a guessed id can neither
     # fabricate an account nor grant participation.
     stashed_ids = _user_stashed_account_ids(user.id)
+    party_id = await _founding_party_id(session, org_id, user.id)
     today = date.today()
     for item in payload.accounts:
         if _is_shadow(item.ibkr_account_id):
@@ -563,10 +605,14 @@ async def step3_save_new_accounts(
                 },
             )
         acc = await session.scalar(
-            select(Account).where(Account.ibkr_account_id == item.ibkr_account_id)
+            select(Account).where(
+                Account.organization_id == org_id,
+                Account.ibkr_account_id == item.ibkr_account_id,
+            )
         )
         if acc is None:
             acc = Account(
+                organization_id=org_id,
                 ibkr_account_id=item.ibkr_account_id,
                 alias=item.alias,
                 currency="USD",
@@ -578,7 +624,7 @@ async def step3_save_new_accounts(
 
         existing = await session.scalar(
             select(Participation).where(
-                Participation.user_id == user.id,
+                Participation.party_id == party_id,
                 Participation.account_id == acc.id,
                 Participation.valid_to.is_(None),
             )
@@ -590,8 +636,9 @@ async def step3_save_new_accounts(
             await session.flush()
         session.add(
             Participation(
-                user_id=user.id,
+                party_id=party_id,
                 account_id=acc.id,
+                organization_id=org_id,
                 pct=item.pct,
                 valid_from=today,
                 valid_to=None,
@@ -605,6 +652,7 @@ async def step3_save_new_accounts(
 async def step3_commit(
     payload: Step3CommitRequest,
     user: User = Depends(current_active_user),
+    org_id: int = Depends(org_context),
     session: AsyncSession = Depends(get_async_session),
 ) -> Step3CommitResponse:
     """Drain stash, persist all selected XMLs in one transaction.
@@ -617,9 +665,9 @@ async def step3_commit(
     total_rows = 0
 
     # Validate first pass: all temp_ids exist + every referenced account was
-    # resolved BY THIS USER (has a participation) — anti-IDOR scope (H1), not
-    # mere global existence.
-    configured_accounts = await _user_configured_account_ids(session, user.id)
+    # resolved by THIS ORG (has a participation) — provenance/isolation scope,
+    # not mere global existence.
+    configured_accounts = await _org_configured_account_ids(session, org_id)
     for temp_id in payload.temp_ids:
         entry = stash.get(user_id=user.id, temp_id=temp_id)
         if entry is None:
@@ -660,14 +708,15 @@ async def step3_commit(
         flex_import_id, counters = await flex_persister_mod.persist(
             session,
             parsed=parsed,
-            user_id=user.id,
+            organization_id=org_id,
             xml_bytes=data["xml_bytes"],
             source="manual_upload",
         )
         flex_import_ids.append(flex_import_id)
         total_rows += sum(counters.get(k, 0) for k in _NEW_KEYS)
 
-    _set_progress(user, "step3_xmls", True)
+    org = await session.get(Organization, org_id)
+    _set_progress(org, "step3_xmls", True)
     await session.commit()
     return Step3CommitResponse(
         flex_import_ids=flex_import_ids,
@@ -680,25 +729,28 @@ async def step3_commit(
 
 @router.post("/finish")
 async def finish(
-    user: User = Depends(current_active_user),
+    org_id: int = Depends(org_context),
     session: AsyncSession = Depends(get_async_session),
 ) -> dict:
     """Mark setup_completed_at. Validates preconditions (creds + at least 1 participation + step3 marked)."""
-    if user.setup_completed_at is not None:
+    org = await session.get(Organization, org_id)
+    if org.setup_completed_at is not None:
         return {"ok": True, "already_completed": True}
 
     has_parts = (
         await session.scalar(
-            select(func.count(Participation.user_id)).where(Participation.user_id == user.id)
+            select(func.count())
+            .select_from(Participation)
+            .where(Participation.organization_id == org_id)
         )
     ) > 0
     if not has_parts:
         raise HTTPException(status_code=400, detail="INCOMPLETE_SETUP")
 
-    p = user.setup_progress or {}
+    p = org.setup_progress or {}
     if not p.get("step3_xmls"):
         raise HTTPException(status_code=400, detail="INCOMPLETE_SETUP")
 
-    user.setup_completed_at = datetime.now(timezone.utc)
+    org.setup_completed_at = datetime.now(timezone.utc)
     await session.commit()
     return {"ok": True}

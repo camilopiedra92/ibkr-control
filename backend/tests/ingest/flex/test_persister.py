@@ -52,13 +52,13 @@ def _make_parsed(account_id: str = "U99999001", n_trades: int = 2) -> ParsedXML:
 
 @pytest.mark.asyncio
 async def test_persist_creates_flex_import_and_trades(
-    db_session: AsyncSession, sample_user, sample_account
+    db_session: AsyncSession, sample_org, sample_account
 ):
     parsed = _make_parsed(account_id=sample_account.ibkr_account_id, n_trades=3)
     flex_import_id, counters = await persist(
         db_session,
         parsed=parsed,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=b"<xml>fake</xml>",
         source="manual_upload",
     )
@@ -70,7 +70,7 @@ async def test_persist_creates_flex_import_and_trades(
     from ibkr_control.db.models.flex_raw import FlexImport, Trade
 
     fi = await db_session.scalar(select(FlexImport).where(FlexImport.id == flex_import_id))
-    assert fi.user_id == sample_user.id
+    assert fi.organization_id == sample_org.id
     assert fi.anyo == 2025
     assert fi.source == "manual_upload"
     assert fi.status == "ok"
@@ -85,14 +85,14 @@ async def test_persist_creates_flex_import_and_trades(
 
 @pytest.mark.asyncio
 async def test_persist_year_status_sealed_when_period_to_is_dec31(
-    db_session: AsyncSession, sample_user, sample_account
+    db_session: AsyncSession, sample_org, sample_account
 ):
     parsed = _make_parsed(account_id=sample_account.ibkr_account_id, n_trades=1)
     parsed.period_to = date(2025, 12, 31)
     fi_id, _ = await persist(
         db_session,
         parsed=parsed,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=b"<xml>1</xml>",
         source="manual_upload",
     )
@@ -104,14 +104,14 @@ async def test_persist_year_status_sealed_when_period_to_is_dec31(
 
 @pytest.mark.asyncio
 async def test_persist_year_status_rolling_when_period_to_before_dec31(
-    db_session: AsyncSession, sample_user, sample_account
+    db_session: AsyncSession, sample_org, sample_account
 ):
     parsed = _make_parsed(account_id=sample_account.ibkr_account_id, n_trades=1)
     parsed.period_to = date(2025, 5, 24)
     fi_id, _ = await persist(
         db_session,
         parsed=parsed,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=b"<xml>2</xml>",
         source="manual_upload",
     )
@@ -123,7 +123,7 @@ async def test_persist_year_status_rolling_when_period_to_before_dec31(
 
 @pytest.mark.asyncio
 async def test_persist_duplicate_hash_returns_existing_id(
-    db_session: AsyncSession, sample_user, sample_account
+    db_session: AsyncSession, sample_org, sample_account
 ):
     """Si el mismo XML (mismo hash) se persiste dos veces, devuelve el id existente sin re-insertar."""
     parsed = _make_parsed(account_id=sample_account.ibkr_account_id, n_trades=2)
@@ -132,7 +132,7 @@ async def test_persist_duplicate_hash_returns_existing_id(
     fi_id_1, counters_1 = await persist(
         db_session,
         parsed=parsed,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=xml_bytes,
         source="manual_upload",
     )
@@ -140,7 +140,7 @@ async def test_persist_duplicate_hash_returns_existing_id(
     fi_id_2, counters_2 = await persist(
         db_session,
         parsed=parsed,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=xml_bytes,
         source="manual_upload",
     )
@@ -155,13 +155,13 @@ async def test_persist_duplicate_hash_returns_existing_id(
 
 
 @pytest.mark.asyncio
-async def test_persist_creates_missing_accounts_on_the_fly(db_session: AsyncSession, sample_user):
+async def test_persist_creates_missing_accounts_on_the_fly(db_session: AsyncSession, sample_org):
     """Si el XML referencia un account que no existe en DB, se crea automaticamente."""
     parsed = _make_parsed(account_id="U99999777", n_trades=1)
     fi_id, _ = await persist(
         db_session,
         parsed=parsed,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=b"<xml>new-acc</xml>",
         source="manual_upload",
     )
@@ -175,7 +175,7 @@ async def test_persist_creates_missing_accounts_on_the_fly(db_session: AsyncSess
 
 @pytest.mark.asyncio
 async def test_persist_intra_batch_dup_is_absorbed_by_upsert(
-    db_session: AsyncSession, sample_user, sample_account
+    db_session: AsyncSession, sample_org, sample_account
 ):
     """Spec phase 2.5: UPSERTs ON CONFLICT DO NOTHING absorben duplicados
     intra-batch sin lanzar IntegrityError.
@@ -195,7 +195,7 @@ async def test_persist_intra_batch_dup_is_absorbed_by_upsert(
     fi_id, counters = await persist(
         db_session,
         parsed=parsed,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=b"<xml>intra-dup</xml>",
         source="manual_upload",
     )
@@ -218,7 +218,7 @@ async def test_persist_intra_batch_dup_is_absorbed_by_upsert(
 
 
 @pytest.mark.asyncio
-async def test_persist_links_closed_lots_to_source_trades(db_session: AsyncSession, sample_user):
+async def test_persist_links_closed_lots_to_source_trades(db_session: AsyncSession, sample_org):
     """ClosedLot.source_trade_id is populated from matching Trade.transaction_id."""
     xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
     from ibkr_control.ingest.flex.parser import parse
@@ -227,7 +227,7 @@ async def test_persist_links_closed_lots_to_source_trades(db_session: AsyncSessi
     fi_id, _ = await persist(
         db_session,
         parsed=parsed,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=xml,
         source="manual_upload",
     )
@@ -256,7 +256,7 @@ async def test_persist_links_closed_lots_to_source_trades(db_session: AsyncSessi
 
 
 @pytest.mark.asyncio
-async def test_persist_dividend_accruals_from_2025_fixture(db_session: AsyncSession, sample_user):
+async def test_persist_dividend_accruals_from_2025_fixture(db_session: AsyncSession, sample_org):
     """After persisting the 2025 fixture:
     - change_in_dividend_accruals: 51 rows (DETAIL-level rows; 46 SUMMARY rows skipped)
     - open_dividend_accruals: 1 row (NKE Q4 2025, account U99999001)
@@ -278,7 +278,7 @@ async def test_persist_dividend_accruals_from_2025_fixture(db_session: AsyncSess
     fi_id, _ = await persist(
         db_session,
         parsed=parsed,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=xml,
         source="manual_upload",
     )
@@ -316,7 +316,7 @@ async def test_persist_dividend_accruals_from_2025_fixture(db_session: AsyncSess
 @pytest.mark.asyncio
 async def test_persist_deletes_previous_rolling_for_same_user_anyo_source(
     db_session,
-    sample_user,
+    sample_org,
 ):
     """R1 latest-1 retention: previous rolling row for same key gets deleted."""
     from pathlib import Path
@@ -341,7 +341,7 @@ async def test_persist_deletes_previous_rolling_for_same_user_anyo_source(
     id_v1, _ = await persist(
         db_session,
         parsed=parsed_v1,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=xml_v1,
         source="web_service",
     )
@@ -353,7 +353,7 @@ async def test_persist_deletes_previous_rolling_for_same_user_anyo_source(
     id_v2, _ = await persist(
         db_session,
         parsed=parsed_v2,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=xml_v2,
         source="web_service",
     )
@@ -362,7 +362,7 @@ async def test_persist_deletes_previous_rolling_for_same_user_anyo_source(
     rows = (
         await db_session.scalars(
             select(FlexImport).where(
-                FlexImport.user_id == sample_user.id,
+                FlexImport.organization_id == sample_org.id,
                 FlexImport.anyo == 2025,
                 FlexImport.source == "web_service",
                 FlexImport.year_status == "rolling",
@@ -374,7 +374,7 @@ async def test_persist_deletes_previous_rolling_for_same_user_anyo_source(
 
 
 @pytest.mark.asyncio
-async def test_persist_does_not_delete_sealed_years(db_session, sample_user):
+async def test_persist_does_not_delete_sealed_years(db_session, sample_org):
     """R1: sealed years are pinned regardless of latest-1 cleanup."""
     from pathlib import Path
     from datetime import date
@@ -398,7 +398,7 @@ async def test_persist_does_not_delete_sealed_years(db_session, sample_user):
     id_sealed, _ = await persist(
         db_session,
         parsed=parsed_sealed,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=xml_sealed,
         source="web_service",
     )
@@ -410,7 +410,7 @@ async def test_persist_does_not_delete_sealed_years(db_session, sample_user):
     id_rolling, _ = await persist(
         db_session,
         parsed=parsed_rolling,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=xml_rolling,
         source="web_service",
     )
@@ -427,7 +427,7 @@ async def test_persist_does_not_delete_sealed_years(db_session, sample_user):
 
 
 @pytest.mark.asyncio
-async def test_persist_does_not_delete_poison_rows(db_session, sample_user):
+async def test_persist_does_not_delete_poison_rows(db_session, sample_org):
     """R1: poison rows are forensic evidence — never auto-deleted."""
     from pathlib import Path
     from datetime import date
@@ -439,7 +439,7 @@ async def test_persist_does_not_delete_poison_rows(db_session, sample_user):
     # Seed a poison row first
     db_session.add(
         FlexImport(
-            user_id=sample_user.id,
+            organization_id=sample_org.id,
             xml_hash="poison-row-hash",
             xml_bytes=b"x",
             xml_size_bytes=1,
@@ -464,7 +464,7 @@ async def test_persist_does_not_delete_poison_rows(db_session, sample_user):
     await persist(
         db_session,
         parsed=parsed,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=base,
         source="web_service",
     )
@@ -521,7 +521,7 @@ def _minimal_parsed(
 
 @pytest.mark.asyncio
 async def test_external_transfer_peer_becomes_counterparty_not_account(
-    db_session: AsyncSession, sample_user
+    db_session: AsyncSession, sample_org
 ):
     """Un <Transfer> FOP IN desde un broker externo (CS-...) crea fila en
     counterparties, NO en accounts; el transfer queda con src_counterparty_id
@@ -547,7 +547,7 @@ async def test_external_transfer_peer_becomes_counterparty_not_account(
     await persist(
         db_session,
         parsed=p,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=b"<fop/>",
         source="web_service",
     )
@@ -576,7 +576,7 @@ async def test_external_transfer_peer_becomes_counterparty_not_account(
 
 @pytest.mark.asyncio
 async def test_fop_fixture_creates_counterparty_no_orphan_account(
-    db_session: AsyncSession, sample_user
+    db_session: AsyncSession, sample_org
 ):
     """End-to-end: parse(xml) + persist del fixture FOP sanitizado.
 
@@ -614,7 +614,7 @@ async def test_fop_fixture_creates_counterparty_no_orphan_account(
     await persist(
         db_session,
         parsed=parsed,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=xml,
         source="manual_upload",
     )
@@ -656,7 +656,7 @@ async def test_fop_fixture_creates_counterparty_no_orphan_account(
 
 
 @pytest.mark.asyncio
-async def test_persist_stores_asset_class_on_both_lot_tables(db_session: AsyncSession, sample_user):
+async def test_persist_stores_asset_class_on_both_lot_tables(db_session: AsyncSession, sample_org):
     from sqlalchemy import distinct, select
 
     xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
@@ -664,7 +664,11 @@ async def test_persist_stores_asset_class_on_both_lot_tables(db_session: AsyncSe
 
     parsed = parse(xml)
     await persist(
-        db_session, parsed=parsed, user_id=sample_user.id, xml_bytes=xml, source="manual_upload"
+        db_session,
+        parsed=parsed,
+        organization_id=sample_org.id,
+        xml_bytes=xml,
+        source="manual_upload",
     )
     await db_session.commit()
 
@@ -686,7 +690,7 @@ async def test_persist_stores_asset_class_on_both_lot_tables(db_session: AsyncSe
 
 @pytest.mark.asyncio
 async def test_fop_closed_lot_gets_asset_class_without_source_trade(
-    db_session: AsyncSession, sample_user
+    db_session: AsyncSession, sample_org
 ):
     """A FOP-acquired closed lot (no opening trade -> transaction_id None ->
     source_trade_id NULL) must still carry asset_class from the XML."""
@@ -717,7 +721,7 @@ async def test_fop_closed_lot_gets_asset_class_without_source_trade(
     await persist(
         db_session,
         parsed=parsed,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=b"<fop/>",
         source="manual_upload",
     )
@@ -737,7 +741,7 @@ async def test_fop_closed_lot_gets_asset_class_without_source_trade(
 
 @pytest.mark.asyncio
 async def test_persist_records_account_provenance_including_factless(
-    db_session: AsyncSession, sample_user
+    db_session: AsyncSession, sample_org
 ):
     """persist() must record a flex_import_accounts row for every non-shadow
     account observed in the XML — INCLUDING accounts that appear only in
@@ -788,7 +792,7 @@ async def test_persist_records_account_provenance_including_factless(
     fi_id, _ = await persist(
         db_session,
         parsed=parsed,
-        user_id=sample_user.id,
+        organization_id=sample_org.id,
         xml_bytes=b"<xml>provenance</xml>",
         source="manual_upload",
     )
@@ -805,3 +809,27 @@ async def test_persist_records_account_provenance_including_factless(
     ).all()
     ids = {r[0] for r in rows}
     assert ids == {"U99999001", "U99999002"}, ids
+
+
+@pytest.mark.asyncio
+async def test_persist_stamps_organization_id_on_all_rows(db_session):
+    from sqlalchemy import select
+
+    from ibkr_control.db.models.organizations import Organization
+    from ibkr_control.db.models.flex_raw import FlexImport, Trade
+
+    org = Organization(type="personal", name="H")
+    db_session.add(org)
+    await db_session.flush()
+    parsed = _make_parsed(account_id="U99999001", n_trades=2)
+    fi_id, _ = await persist(
+        db_session,
+        parsed=parsed,
+        organization_id=org.id,
+        xml_bytes=b"<x/>",
+        source="manual_upload",
+    )
+    fi = await db_session.scalar(select(FlexImport).where(FlexImport.id == fi_id))
+    assert fi.organization_id == org.id
+    t = await db_session.scalar(select(Trade).where(Trade.flex_import_id == fi_id))
+    assert t.organization_id == org.id

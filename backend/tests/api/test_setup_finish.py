@@ -30,7 +30,9 @@ _FAKE_XML = b"""<?xml version="1.0"?>
 """
 
 
-async def _run_through_to_step3(client: AsyncClient, auth_headers: dict, monkeypatch) -> None:
+async def _run_through_to_step3(
+    client: AsyncClient, auth_headers_with_org: dict, monkeypatch
+) -> None:
     """Walk through step1/save -> step2/detect -> step2/save -> step3/commit(empty).
 
     After this helper returns, the user has creds + an Account + a
@@ -39,7 +41,7 @@ async def _run_through_to_step3(client: AsyncClient, auth_headers: dict, monkeyp
     monkeypatch.setattr("ibkr_control.api.setup._trm_backfill_background", AsyncMock())
     r = await client.post(
         "/api/setup/step1/save",
-        headers=auth_headers,
+        headers=auth_headers_with_org,
         json={"token": "tok_value_x_12345", "query_id": "999"},
     )
     assert r.status_code == 200, r.text
@@ -49,44 +51,44 @@ async def _run_through_to_step3(client: AsyncClient, auth_headers: dict, monkeyp
         "get_statement",
         AsyncMock(return_value=_FAKE_XML),
     )
-    r = await client.post("/api/setup/step2/detect", headers=auth_headers)
+    r = await client.post("/api/setup/step2/detect", headers=auth_headers_with_org)
     assert r.status_code == 200, r.text
     r = await client.post(
         "/api/setup/step2/save",
-        headers=auth_headers,
+        headers=auth_headers_with_org,
         json={"accounts": [{"ibkr_account_id": "U99999999", "alias": "A", "pct": "1.0000"}]},
     )
     assert r.status_code == 200, r.text
     r = await client.post(
         "/api/setup/step3/commit",
-        headers=auth_headers,
+        headers=auth_headers_with_org,
         json={"temp_ids": []},
     )
     assert r.status_code == 200, r.text
 
 
-async def test_finish_400_when_no_participations(client: AsyncClient, auth_headers: dict):
+async def test_finish_400_when_no_participations(client: AsyncClient, auth_headers_with_org: dict):
     """Pristine user, no participations yet → 400 INCOMPLETE_SETUP."""
-    r = await client.post("/api/setup/finish", headers=auth_headers)
+    r = await client.post("/api/setup/finish", headers=auth_headers_with_org)
     assert r.status_code == 400
     assert r.json()["detail"] == "INCOMPLETE_SETUP"
 
 
-async def test_finish_happy_path(client: AsyncClient, auth_headers: dict, monkeypatch):
+async def test_finish_happy_path(client: AsyncClient, auth_headers_with_org: dict, monkeypatch):
     """Full wizard walk-through then /finish → setup_completed_at populated."""
-    await _run_through_to_step3(client, auth_headers, monkeypatch)
-    r = await client.post("/api/setup/finish", headers=auth_headers)
+    await _run_through_to_step3(client, auth_headers_with_org, monkeypatch)
+    r = await client.post("/api/setup/finish", headers=auth_headers_with_org)
     assert r.status_code == 200, r.text
-    state = await client.get("/api/setup/state", headers=auth_headers)
+    state = await client.get("/api/setup/state", headers=auth_headers_with_org)
     assert state.status_code == 200
     assert state.json()["setup_completed_at"] is not None
 
 
-async def test_finish_idempotent(client: AsyncClient, auth_headers: dict, monkeypatch):
+async def test_finish_idempotent(client: AsyncClient, auth_headers_with_org: dict, monkeypatch):
     """Calling /finish a second time short-circuits with already_completed=True."""
-    await _run_through_to_step3(client, auth_headers, monkeypatch)
-    r1 = await client.post("/api/setup/finish", headers=auth_headers)
+    await _run_through_to_step3(client, auth_headers_with_org, monkeypatch)
+    r1 = await client.post("/api/setup/finish", headers=auth_headers_with_org)
     assert r1.status_code == 200, r1.text
-    r2 = await client.post("/api/setup/finish", headers=auth_headers)
+    r2 = await client.post("/api/setup/finish", headers=auth_headers_with_org)
     assert r2.status_code == 200, r2.text
     assert r2.json().get("already_completed") is True

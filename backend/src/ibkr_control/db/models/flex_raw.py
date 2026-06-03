@@ -36,12 +36,16 @@ class FlexImport(Base):
         CheckConstraint("source IN ('web_service', 'manual_upload')", name="source"),
         CheckConstraint("year_status IN ('rolling', 'sealed')", name="year_status"),
         CheckConstraint("status IN ('ok', 'poison')", name="status"),
-        UniqueConstraint("user_id", "xml_hash"),
+        # Dedup is per-ORG: the persister scopes by organization_id. The org is
+        # the unit of tenancy and operation — there is no user_id on operational
+        # tables (D-CONV-3).
+        UniqueConstraint("organization_id", "xml_hash", name="uq_flex_imports_org_xml_hash"),
+        Index(None, "organization_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    organization_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
     )
     anyo: Mapped[int] = mapped_column(Integer, nullable=False)
     xml_hash: Mapped[str] = mapped_column(String, nullable=False)
@@ -74,16 +78,18 @@ class FlexImport(Base):
 
 class FlexImportAccount(Base):
     __tablename__ = "flex_import_accounts"
-    __table_args__ = {
-        "comment": (
-            "Procedencia cuenta<->import: cada cuenta observada en un FlexImport "
-            "(incluidas las AccountInformation-only sin hechos). Hecho de primera "
-            "clase, no inferido. El wizard lo usa para scopear la validacion "
-            "anti-IDOR de step2/save: un usuario solo reclama participacion en "
-            "cuentas que aparecen en SUS imports (join via flex_imports.user_id), "
-            "no en toda la tabla compartida accounts. Ver hardening H1."
-        )
-    }
+    __table_args__ = (
+        Index(None, "organization_id"),
+        {
+            "comment": (
+                "Procedencia cuenta<->import: cada cuenta observada en un FlexImport "
+                "(incluidas las AccountInformation-only sin hechos). Org-scoped (RLS). "
+                "Hecho de primera clase: que cuentas trajo el import de un org. El "
+                "aislamiento cross-tenant lo da RLS por organization_id; esta tabla "
+                "sirve al wizard para scopear que cuentas reclama un org via sus imports."
+            )
+        },
+    )
 
     flex_import_id: Mapped[int] = mapped_column(
         BigInteger,
@@ -95,6 +101,9 @@ class FlexImportAccount(Base):
         ForeignKey("accounts.id", ondelete="CASCADE"),
         primary_key=True,
     )
+    organization_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
 
 
 class Trade(Base):
@@ -104,6 +113,7 @@ class Trade(Base):
         CheckConstraint("buy_sell IN ('BUY', 'SELL')", name="buy_sell"),
         Index(None, "account_id", "symbol"),
         Index(None, "trade_date"),
+        Index(None, "organization_id"),
         {
             "comment": (
                 "Account-scoped. Visibilidad vía participations; sin user_id. "
@@ -114,6 +124,9 @@ class Trade(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
     flex_import_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )
@@ -138,6 +151,7 @@ class ClosedLot(Base):
     __tablename__ = "closed_lots"
     __table_args__ = (
         Index(None, "account_id", "symbol"),
+        Index(None, "organization_id"),
         UniqueConstraint(
             "transaction_id",
             "close_datetime",
@@ -156,6 +170,9 @@ class ClosedLot(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
     flex_import_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )
@@ -182,6 +199,7 @@ class OpenPositionLot(Base):
     __tablename__ = "open_position_lots"
     __table_args__ = (
         Index(None, "account_id", "symbol"),
+        Index(None, "organization_id"),
         # A3 amendment 2026-05-25: extended natural key with
         # originating_transaction_id (IBKR's per-lot id) because multi-fill
         # orders produce multiple distinct LOT rows for the same
@@ -206,6 +224,9 @@ class OpenPositionLot(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
     flex_import_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )
@@ -233,6 +254,7 @@ class Transfer(Base):
             "(dst_account_id IS NOT NULL) <> (dst_counterparty_id IS NOT NULL)",
             name="dst_arc",
         ),
+        Index(None, "organization_id"),
         {
             "comment": (
                 "Account-scoped. Visibilidad vía participations; sin user_id. "
@@ -243,6 +265,9 @@ class Transfer(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
     flex_import_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )
@@ -270,6 +295,7 @@ class CashTransaction(Base):
     __tablename__ = "cash_transactions"
     __table_args__ = (
         Index(None, "date"),
+        Index(None, "organization_id"),
         {
             "comment": (
                 "Account-scoped. Visibilidad vía participations; sin user_id. "
@@ -280,6 +306,9 @@ class CashTransaction(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
     flex_import_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )
@@ -298,6 +327,7 @@ class ChangeInDividendAccrual(Base):
     __table_args__ = (
         Index(None, "report_date"),
         Index(None, "account_id", "symbol"),
+        Index(None, "organization_id"),
         # A3 amendment #2 (2026-05-25): extended natural key with
         # (report_date, action_id, code). Real IBKR data emits multiple accrual
         # lifecycle events (Posted/Reversal) for the same dividend payment that
@@ -325,6 +355,9 @@ class ChangeInDividendAccrual(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
     flex_import_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )
@@ -359,6 +392,7 @@ class OpenDividendAccrual(Base):
     __table_args__ = (
         Index(None, "report_date"),
         Index(None, "account_id", "symbol"),
+        Index(None, "organization_id"),
         # A3 amendment #2 preemptive mirror (2026-05-25): extended natural key
         # with (action_id, code). The 2025 fixture has only 1 open accrual row
         # so no collision is observed, but the same IBKR Po/Re lifecycle
@@ -383,6 +417,9 @@ class OpenDividendAccrual(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
     flex_import_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )

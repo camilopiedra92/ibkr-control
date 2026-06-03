@@ -1,4 +1,4 @@
-"""Tests del advisory lock por (source, user_id)."""
+"""Tests del advisory lock por (source, scope_id)."""
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,7 +7,7 @@ from ibkr_control.ingest.lock import advisory_lock, LockHeldError
 
 
 def test_advisory_lock_key_is_deterministic_across_processes():
-    """The lock key must be the same for the same (source, user_id) regardless of process.
+    """The lock key must be the same for the same (source, scope_id) regardless of process.
 
     Python's built-in hash() uses PYTHONHASHSEED randomization which would produce
     different keys per process. This test pins the value to confirm we don't regress.
@@ -28,7 +28,7 @@ def test_advisory_lock_key_is_deterministic_across_processes():
 
 @pytest.mark.asyncio
 async def test_advisory_lock_acquires_and_releases(db_session: AsyncSession):
-    async with advisory_lock(db_session, user_id=1, source="flex"):
+    async with advisory_lock(db_session, scope_id=1, source="flex"):
         pass  # se libera en __aexit__
 
 
@@ -36,11 +36,11 @@ async def test_advisory_lock_acquires_and_releases(db_session: AsyncSession):
 async def test_advisory_lock_releases_on_exception(db_session: AsyncSession):
     """Si el block lanza, el lock se libera y se puede re-acquirir."""
     with pytest.raises(ValueError):
-        async with advisory_lock(db_session, user_id=2, source="flex"):
+        async with advisory_lock(db_session, scope_id=2, source="flex"):
             raise ValueError("boom")
 
     # Re-acquire en la misma session debe funcionar
-    async with advisory_lock(db_session, user_id=2, source="flex"):
+    async with advisory_lock(db_session, scope_id=2, source="flex"):
         pass
 
 
@@ -52,12 +52,12 @@ async def test_advisory_lock_blocks_concurrent(db_engine):
     SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
 
     async with SessionLocal() as s1, SessionLocal() as s2:
-        async with advisory_lock(s1, user_id=99, source="flex"):
+        async with advisory_lock(s1, scope_id=99, source="flex"):
             with pytest.raises(LockHeldError) as exc_info:
-                async with advisory_lock(s2, user_id=99, source="flex"):
+                async with advisory_lock(s2, scope_id=99, source="flex"):
                     pass
             assert exc_info.value.source == "flex"
-            assert exc_info.value.user_id == 99
+            assert exc_info.value.scope_id == 99
 
 
 @pytest.mark.asyncio
@@ -68,6 +68,6 @@ async def test_advisory_lock_different_sources_independent(db_engine):
     SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
 
     async with SessionLocal() as s1, SessionLocal() as s2:
-        async with advisory_lock(s1, user_id=100, source="flex"):
-            async with advisory_lock(s2, user_id=100, source="trm"):
+        async with advisory_lock(s1, scope_id=100, source="flex"):
+            async with advisory_lock(s2, scope_id=100, source="trm"):
                 pass  # ambos OK

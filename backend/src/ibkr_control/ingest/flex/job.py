@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ibkr_control.db.models.flex_credentials import FlexCredentials
 from ibkr_control.db.models.flex_raw import FlexImport
 from ibkr_control.db.models.ingest_log import IngestLog
+from ibkr_control.db.rls import apply_org_context
 from ibkr_control.ingest.flex import client as flex_client_mod
 from ibkr_control.ingest.flex import crypto as flex_crypto_mod
 from ibkr_control.ingest.flex import parser as flex_parser_mod
@@ -37,7 +38,7 @@ logger = logging.getLogger(__name__)
 async def _insert_poison_row(
     session: AsyncSession,
     *,
-    user_id: int,
+    organization_id: int,
     xml_hash: str,
     xml_bytes: bytes,
     source: str,
@@ -50,6 +51,9 @@ async def _insert_poison_row(
     poison INSERT happens on the outer session — which then gets commited by
     ingest_log_entry's finally clause.
 
+    organization_id is the dedup scope (uq_flex_imports_org_xml_hash). The org
+    is the unit of tenancy — flex_imports carries no user_id (D-CONV-3).
+
     ON CONFLICT DO NOTHING because the same poison XML may be retried before
     the first poison row is committed (race between concurrent uploads).
     """
@@ -57,7 +61,7 @@ async def _insert_poison_row(
     stmt = (
         pg_insert(FlexImport)
         .values(
-            user_id=user_id,
+            organization_id=organization_id,
             xml_hash=xml_hash,
             xml_bytes=xml_bytes,
             xml_size_bytes=len(xml_bytes),
@@ -70,7 +74,7 @@ async def _insert_poison_row(
             poison_reason=reason,
             fetched_at=datetime.now(timezone.utc),
         )
-        .on_conflict_do_nothing(index_elements=["user_id", "xml_hash"])
+        .on_conflict_do_nothing(index_elements=["organization_id", "xml_hash"])
     )
     await session.execute(stmt)
 
@@ -78,7 +82,7 @@ async def _insert_poison_row(
 async def ingest_xml(
     session: AsyncSession,
     *,
-    user_id: int,
+    organization_id: int,
     xml_bytes: bytes,
     source: str,  # 'manual_upload' | 'web_service'
     trigger: str,  # 'cron' | 'manual' | 'wizard'
@@ -97,18 +101,20 @@ async def ingest_xml(
     """
     log_kind = "manual_upload" if source == "manual_upload" else "flex"
 
-    async with ingest_log_entry(session, log_kind, user_id, trigger) as log_id:
+    async with ingest_log_entry(
+        session, log_kind, organization_id=organization_id, trigger=trigger
+    ) as log_id:
         # Fast-path: check hash before entering SAVEPOINT so poison rows are
         # short-circuited without any parse/persist work.
         h = xml_hash(xml_bytes)
-        status = await check_hash_status(session, user_id, h)
+        status = await check_hash_status(session, organization_id, h)
         if status == "ok":
             logger.info("flex: duplicate hash %s..., skipped", h[:12])
             log_row = await session.scalar(select(IngestLog).where(IngestLog.id == log_id))
             log_row.items_processed = 0
             existing_id = await session.scalar(
                 select(FlexImport.id).where(
-                    FlexImport.user_id == user_id,
+                    FlexImport.organization_id == organization_id,
                     FlexImport.xml_hash == h,
                 )
             )
@@ -116,16 +122,16 @@ async def ingest_xml(
         if status == "poison":
             logger.warning(
                 "flex: previously poisoned hash %s..., skipped. "
-                "Run scripts/poison_reset.py --user-id %d --xml-hash %s to retry.",
+                "Run scripts/poison_reset.py --org-id %d --xml-hash %s to retry.",
                 h[:12],
-                user_id,
+                organization_id,
                 h,
             )
             log_row = await session.scalar(select(IngestLog).where(IngestLog.id == log_id))
             log_row.items_processed = 0
             existing_id = await session.scalar(
                 select(FlexImport.id).where(
-                    FlexImport.user_id == user_id,
+                    FlexImport.organization_id == organization_id,
                     FlexImport.xml_hash == h,
                 )
             )
@@ -140,7 +146,7 @@ async def ingest_xml(
             flex_import_id, _counters = await flex_persister_mod.persist(
                 session,
                 parsed=parsed,
-                user_id=user_id,
+                organization_id=organization_id,
                 xml_bytes=xml_bytes,
                 source=source,
             )
@@ -155,7 +161,7 @@ async def ingest_xml(
             # the rollback and gets commited by ingest_log_entry's finally.
             await _insert_poison_row(
                 session,
-                user_id=user_id,
+                organization_id=organization_id,
                 xml_hash=h,
                 xml_bytes=xml_bytes,
                 source=source,
@@ -186,22 +192,35 @@ async def ingest_xml(
 async def run(
     session_factory: async_sessionmaker,
     *,
-    user_id: int,
+    organization_id: int,
     trigger: str,  # 'cron' | 'manual' | 'wizard'
 ) -> int | None:
     """Hace fetch al Flex WS + ingiere. Devuelve flex_import_id o None si no hubo cambios.
 
-    Toma advisory_lock por (source='flex', user_id) — bloquea concurrent runs
-    para el mismo user. Si esta tomado, lanza LockHeldError (caller decide que hacer).
+    Toma advisory_lock por (source='flex', scope_id=organization_id) — bloquea
+    concurrent runs para el mismo org (flex es per-org). Si esta tomado, lanza
+    LockHeldError (caller decide que hacer). El org es la unidad de operación —
+    las creds, el dedup y el ingest son todos per-org (D-CONV-3).
     """
     async with session_factory() as session:
-        async with advisory_lock(session, user_id=user_id, source="flex"):
-            async with ingest_log_entry(session, "flex", user_id, trigger) as log_id:
+        # run() opens its OWN session outside any request, so nothing set the RLS
+        # context for it. In prod the app connects as the non-bypass app_rls role,
+        # so every org-scoped read/write below (creds lookup, flex_imports dedup,
+        # ingest_log, persister) would default-deny without this. SET LOCAL is
+        # transaction-scoped; the session's autobegin opened the tx, so this
+        # applies to all subsequent statements. No user_id: this is a system job.
+        await apply_org_context(session, org_id=organization_id)
+        async with advisory_lock(session, scope_id=organization_id, source="flex"):
+            async with ingest_log_entry(
+                session, "flex", organization_id=organization_id, trigger=trigger
+            ) as log_id:
                 creds = await session.scalar(
-                    select(FlexCredentials).where(FlexCredentials.user_id == user_id)
+                    select(FlexCredentials).where(
+                        FlexCredentials.organization_id == organization_id
+                    )
                 )
                 if creds is None:
-                    raise RuntimeError(f"No flex_credentials for user_id={user_id}")
+                    raise RuntimeError(f"No flex_credentials for organization_id={organization_id}")
 
                 token = flex_crypto_mod.decrypt_token(creds.token_encrypted)
                 client = flex_client_mod.FlexClient(token=token)
@@ -209,7 +228,7 @@ async def run(
                 xml_bytes = await client.poll_statement(reference_code=reference)
 
                 h = xml_hash(xml_bytes)
-                status = await check_hash_status(session, user_id, h)
+                status = await check_hash_status(session, organization_id, h)
                 if status == "ok":
                     logger.info("flex: duplicate hash %s..., skipped (items_processed=0)", h[:12])
                     log_row = await session.scalar(select(IngestLog).where(IngestLog.id == log_id))
@@ -218,9 +237,9 @@ async def run(
                 if status == "poison":
                     logger.warning(
                         "flex: previously poisoned hash %s..., skipped. "
-                        "Run scripts/poison_reset.py --user-id %d --xml-hash %s to retry.",
+                        "Run scripts/poison_reset.py --org-id %d --xml-hash %s to retry.",
                         h[:12],
-                        user_id,
+                        organization_id,
                         h,
                     )
                     log_row = await session.scalar(select(IngestLog).where(IngestLog.id == log_id))
@@ -235,7 +254,7 @@ async def run(
                     flex_import_id, _counters = await flex_persister_mod.persist(
                         session,
                         parsed=parsed,
-                        user_id=user_id,
+                        organization_id=organization_id,
                         xml_bytes=xml_bytes,
                         source="web_service",
                     )
@@ -250,7 +269,7 @@ async def run(
                     # finally.
                     await _insert_poison_row(
                         session,
-                        user_id=user_id,
+                        organization_id=organization_id,
                         xml_hash=h,
                         xml_bytes=xml_bytes,
                         source="web_service",

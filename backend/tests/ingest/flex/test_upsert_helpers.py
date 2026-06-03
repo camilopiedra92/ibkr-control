@@ -22,10 +22,11 @@ def test_chunks_splits_iterable():
 
 @pytest.mark.asyncio
 async def test_upsert_immutable_inserts_then_noop(
-    db_session: AsyncSession, sample_user, sample_account, sample_flex_import
+    db_session: AsyncSession, sample_account, sample_flex_import
 ):
     """Primera ronda inserta N rows, segunda devuelve 0 (DO NOTHING)."""
     base_row = dict(
+        organization_id=sample_account.organization_id,
         flex_import_id=sample_flex_import.id,
         account_id=sample_account.id,
         symbol="AAPL",
@@ -55,6 +56,7 @@ async def test_upsert_snapshot_inserts_then_updates(
 ):
     """Snapshot UPSERT: insert nuevo, update si conflicto, mantiene n_touched."""
     base_row = dict(
+        organization_id=sample_account.organization_id,
         flex_import_id=sample_flex_import.id,
         account_id=sample_account.id,
         symbol="AAPL",
@@ -121,6 +123,7 @@ async def test_upsert_immutable_returning_inserted_filters_noop(
     # src_account_id must be non-NULL (exclusive arc: exactly one of
     # src_account_id / src_counterparty_id required per ck_transfers_src_arc).
     base = dict(
+        organization_id=sample_account.organization_id,
         flex_import_id=sample_flex_import.id,
         transfer_date=date(2025, 3, 1),
         direction="IN",
@@ -154,7 +157,6 @@ async def test_upsert_immutable_returning_inserted_filters_noop(
 @pytest.mark.asyncio
 async def test_upsert_immutable_batches_large_input(
     db_session: AsyncSession,
-    sample_user,
     sample_account,
     sample_flex_import,
     monkeypatch,
@@ -164,6 +166,7 @@ async def test_upsert_immutable_batches_large_input(
 
     monkeypatch.setattr(mod, "_BATCH_SIZE", 4)
     base_row = dict(
+        organization_id=sample_account.organization_id,
         flex_import_id=sample_flex_import.id,
         account_id=sample_account.id,
         symbol="AAPL",

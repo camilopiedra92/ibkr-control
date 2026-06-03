@@ -15,7 +15,7 @@ def _utcnow() -> datetime:
 async def ingest_log_entry(
     session: AsyncSession,
     job_kind: str,
-    user_id: int | None,
+    organization_id: int,
     trigger: str,
 ):
     """Crea un row en ingest_log con status='running' y lo cierra al salir.
@@ -26,12 +26,18 @@ async def ingest_log_entry(
 
     Args:
         job_kind: 'flex' | 'trm' | 'manual_refresh' | 'manual_upload' | 'setup_initial'
-        user_id: None para jobs globales (e.g. TRM cron sin user especifico)
+        organization_id: tenant dueño del run (NOT NULL + RLS en ingest_log).
+                 El org es la unidad de tenancy/operación — sin user_id (D-CONV-3).
         trigger: 'cron' | 'manual' | 'wizard'
     """
     from ibkr_control.db.models.ingest_log import IngestLog
 
-    row = IngestLog(job_kind=job_kind, user_id=user_id, trigger=trigger, status="running")
+    row = IngestLog(
+        job_kind=job_kind,
+        organization_id=organization_id,
+        trigger=trigger,
+        status="running",
+    )
     session.add(row)
     await session.flush()
     log_id = row.id

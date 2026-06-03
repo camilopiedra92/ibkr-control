@@ -30,11 +30,11 @@ _XML_NEW_ACCT = b"""<?xml version="1.0"?>
 
 
 async def test_step3_upload_stashes_xml_and_returns_new_accounts(
-    client: AsyncClient, auth_headers: dict
+    client: AsyncClient, auth_headers_with_org: dict
 ):
     """Upload returns a fresh temp_id, the parsed year, and the new-account list."""
     files = {"file": ("h.xml", _XML_NEW_ACCT, "application/xml")}
-    r = await client.post("/api/setup/step3/upload", headers=auth_headers, files=files)
+    r = await client.post("/api/setup/step3/upload", headers=auth_headers_with_org, files=files)
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["flex_import_temp_id"]
@@ -46,57 +46,63 @@ async def test_step3_upload_stashes_xml_and_returns_new_accounts(
     assert body["period"]["to"] == "2024-12-31"
 
 
-async def test_step3_upload_409_on_duplicate_in_stash(client: AsyncClient, auth_headers: dict):
+async def test_step3_upload_409_on_duplicate_in_stash(
+    client: AsyncClient, auth_headers_with_org: dict
+):
     """Same bytes uploaded twice → second upload returns 409 DUPLICATE_XML_STASHED.
 
-    Both posts use the same auth_headers value (function-scoped fixture
+    Both posts use the same auth_headers_with_org value (function-scoped fixture
     resolved once per test), so the stash sees the same user_id for both
     requests.
     """
     files = {"file": ("h.xml", _XML_NEW_ACCT, "application/xml")}
-    r1 = await client.post("/api/setup/step3/upload", headers=auth_headers, files=files)
+    r1 = await client.post("/api/setup/step3/upload", headers=auth_headers_with_org, files=files)
     assert r1.status_code == 200, r1.text
     # Re-create the multipart dict because httpx consumes the iterator.
     files2 = {"file": ("h.xml", _XML_NEW_ACCT, "application/xml")}
-    r2 = await client.post("/api/setup/step3/upload", headers=auth_headers, files=files2)
+    r2 = await client.post("/api/setup/step3/upload", headers=auth_headers_with_org, files=files2)
     assert r2.status_code == 409
     assert r2.json()["detail"]["code"] == "DUPLICATE_XML_STASHED"
 
 
-async def test_step3_commit_empty_marks_step3_xmls(client: AsyncClient, auth_headers: dict):
+async def test_step3_commit_empty_marks_step3_xmls(
+    client: AsyncClient, auth_headers_with_org: dict
+):
     """Empty temp_ids list = explicit `skip historicos`. Sets the step3_xmls flag.
 
     Returns 0 ids/rows since nothing was persisted; the side effect we care
     about is the user.setup_progress["step3_xmls"] flag flipping to True,
     visible through GET /api/setup/state.
     """
-    r = await client.post("/api/setup/step3/commit", headers=auth_headers, json={"temp_ids": []})
+    r = await client.post(
+        "/api/setup/step3/commit", headers=auth_headers_with_org, json={"temp_ids": []}
+    )
     assert r.status_code == 200, r.text
     assert r.json() == {"flex_import_ids": [], "total_rows_inserted": 0}
-    state = await client.get("/api/setup/state", headers=auth_headers)
+    state = await client.get("/api/setup/state", headers=auth_headers_with_org)
     assert state.status_code == 200
     assert state.json()["step3_xmls"] is True
 
 
 async def test_step3_commit_rejects_unresolved_new_accounts(
-    client: AsyncClient, auth_headers: dict
+    client: AsyncClient, auth_headers_with_org: dict
 ):
     """Stashed XML references U88888888 but it was never saved → 400."""
     files = {"file": ("h.xml", _XML_NEW_ACCT, "application/xml")}
-    r = await client.post("/api/setup/step3/upload", headers=auth_headers, files=files)
+    r = await client.post("/api/setup/step3/upload", headers=auth_headers_with_org, files=files)
     assert r.status_code == 200, r.text
     temp_id = r.json()["flex_import_temp_id"]
 
     r2 = await client.post(
         "/api/setup/step3/commit",
-        headers=auth_headers,
+        headers=auth_headers_with_org,
         json={"temp_ids": [temp_id]},
     )
     assert r2.status_code == 400
     assert r2.json()["detail"]["code"] == "UNRESOLVED_NEW_ACCOUNTS"
 
 
-async def test_step3_save_new_accounts_happy_path(client: AsyncClient, auth_headers: dict):
+async def test_step3_save_new_accounts_happy_path(client: AsyncClient, auth_headers_with_org: dict):
     """An account present in the user's own upload can be saved: row created
     + participation granted."""
     from decimal import Decimal
@@ -109,12 +115,12 @@ async def test_step3_save_new_accounts_happy_path(client: AsyncClient, auth_head
     from ibkr_control.db.models.participations import Participation
 
     files = {"file": ("h.xml", _XML_NEW_ACCT, "application/xml")}
-    r = await client.post("/api/setup/step3/upload", headers=auth_headers, files=files)
+    r = await client.post("/api/setup/step3/upload", headers=auth_headers_with_org, files=files)
     assert r.status_code == 200, r.text
 
     r = await client.post(
         "/api/setup/step3/save_new_accounts",
-        headers=auth_headers,
+        headers=auth_headers_with_org,
         json={"accounts": [{"ibkr_account_id": "U88888888", "alias": "Hist", "pct": "1.0000"}]},
     )
     assert r.status_code == 200, r.text
@@ -136,7 +142,7 @@ async def test_step3_save_new_accounts_happy_path(client: AsyncClient, auth_head
 
 
 async def test_step3_save_new_accounts_idor_rejects_id_not_in_upload(
-    client: AsyncClient, auth_headers: dict
+    client: AsyncClient, auth_headers_with_org: dict
 ):
     """H1: a user cannot grant themselves participation on an account_id they
     never uploaded — even a guessable/existing one. The user uploads an XML
@@ -151,12 +157,12 @@ async def test_step3_save_new_accounts_idor_rejects_id_not_in_upload(
     from ibkr_control.db.models.participations import Participation
 
     files = {"file": ("h.xml", _XML_NEW_ACCT, "application/xml")}
-    r = await client.post("/api/setup/step3/upload", headers=auth_headers, files=files)
+    r = await client.post("/api/setup/step3/upload", headers=auth_headers_with_org, files=files)
     assert r.status_code == 200, r.text
 
     r = await client.post(
         "/api/setup/step3/save_new_accounts",
-        headers=auth_headers,
+        headers=auth_headers_with_org,
         json={"accounts": [{"ibkr_account_id": "U99999001", "alias": "pwn", "pct": "1.0000"}]},
     )
     assert r.status_code == 400, r.text
@@ -186,49 +192,64 @@ _XML_OWNER_ACCT = b"""<?xml version="1.0"?>
 
 
 async def test_step3_commit_rejects_account_user_never_configured(
-    client: AsyncClient, auth_headers: dict
+    client: AsyncClient, auth_headers_with_org: dict
 ):
-    """H1: commit must reject a stashed XML referencing an account the user
-    never configured (no participation) — even if that account already exists
-    globally because ANOTHER user imported it. 'Configured' means the current
-    user has a participation, not merely that the row exists in `accounts`.
+    """Cross-tenant: commit must reject a stashed XML referencing an account
+    this org never configured (no participation) — even if that account row
+    already exists because ANOTHER org imported it. 'Configured' means the
+    current org has a participation, not merely that the row exists in
+    `accounts`.
     """
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from ibkr_control.config import get_settings
     from ibkr_control.db.models.accounts import Account
+    from ibkr_control.db.models.organizations import Organization
 
-    # Another user already created U99999001 in the shared table (no
-    # participation for the current user).
+    # Another org already created U99999001 in the shared table (no
+    # participation for the current org). It lives under a distinct org so the
+    # NOT NULL organization_id holds and isolation is exercised honestly.
     settings = get_settings()
     engine = create_async_engine(settings.database_url, echo=False)
     Session = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with Session() as s:
-            s.add(Account(ibkr_account_id="U99999001", alias="Owner", currency="USD"))
+            other_org = Organization(type="personal", name="Other Org")
+            s.add(other_org)
+            await s.flush()
+            s.add(
+                Account(
+                    organization_id=other_org.id,
+                    ibkr_account_id="U99999001",
+                    alias="Owner",
+                    currency="USD",
+                )
+            )
             await s.commit()
     finally:
         await engine.dispose()
 
     files = {"file": ("h.xml", _XML_OWNER_ACCT, "application/xml")}
-    r = await client.post("/api/setup/step3/upload", headers=auth_headers, files=files)
+    r = await client.post("/api/setup/step3/upload", headers=auth_headers_with_org, files=files)
     assert r.status_code == 200, r.text
     temp_id = r.json()["flex_import_temp_id"]
 
     r2 = await client.post(
         "/api/setup/step3/commit",
-        headers=auth_headers,
+        headers=auth_headers_with_org,
         json={"temp_ids": [temp_id]},
     )
     assert r2.status_code == 400, r2.text
     assert r2.json()["detail"]["code"] == "UNRESOLVED_NEW_ACCOUNTS"
 
 
-async def test_step3_commit_expired_temp_id_returns_410(client: AsyncClient, auth_headers: dict):
+async def test_step3_commit_expired_temp_id_returns_410(
+    client: AsyncClient, auth_headers_with_org: dict
+):
     """temp_id absent from stash (expired or invented) → 410 TEMP_ID_EXPIRED."""
     r = await client.post(
         "/api/setup/step3/commit",
-        headers=auth_headers,
+        headers=auth_headers_with_org,
         json={"temp_ids": ["nonexistent-uuid"]},
     )
     assert r.status_code == 410

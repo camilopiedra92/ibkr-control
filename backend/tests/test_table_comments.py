@@ -16,8 +16,34 @@ def test_accounts_comment_marks_shared_identity():
     assert "participations" in c
 
 
-def test_counterparties_comment_marks_shared_identity():
-    assert "compartida" in (_comment("counterparties") or "").lower()
+def test_counterparties_comment_org_scoped():
+    c = _comment("counterparties")
+    assert c is not None
+    assert len(c) > 0
+
+
+def test_organizations_comment_tenant_boundary():
+    c = _comment("organizations")
+    assert c is not None
+    assert "tenant" in c.lower() or "boundary" in c.lower() or "personal" in c.lower()
+
+
+def test_memberships_comment_exists():
+    c = _comment("memberships")
+    assert c is not None
+    assert len(c) > 0
+
+
+def test_parties_comment_exists():
+    c = _comment("parties")
+    assert c is not None
+    assert "fiscal" in c.lower() or "contribuyente" in c.lower()
+
+
+def test_access_grants_comment_exists():
+    c = _comment("access_grants")
+    assert c is not None
+    assert len(c) > 0
 
 
 def test_fact_tables_comment_account_scoped():
