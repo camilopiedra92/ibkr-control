@@ -2,11 +2,11 @@
 
 ## ⏯ Cómo continuar (próxima sesión)
 
-**Phase 2.x + Phase 2.7 (persister cleanup) + Phase 2.8 (schema hardening + multi-user RBAC) TODOS completos y mergeados a `main` (HEAD `b83a9fa`). Tags `v0.2.0`→`v0.2.6`. Próximo: Phase 3.**
+**Phase 2.x + Phase 2.7 (persister cleanup) + Phase 2.8 (schema hardening + multi-user RBAC) TODOS completos, mergeados a `main` y pusheados a `origin` (tag `v0.2.6-schema-hardening` @ `b83a9fa`). Tags `v0.2.0`→`v0.2.6` en remote. Próximo: Phase 3.**
 
 > Verificado contra git/tests el 2026-06-02 (cierre de sesión Phase 2.8): `main` en `b83a9fa`, working tree limpio, branch `phase28/schema-hardening` mergeada (fast-forward) y borrada. `cd backend && uv run pytest -q` → **304 passed**. `ruff check .` → clean, `ruff format --check .` → 0 drift. DB dev wipeada + recreada desde el baseline único `cbeaac94933d` (el usuario recarga XMLs cuando quiera). Phase 2.8 cerró los 3 items de auditoría de schema + construyó la primitiva de autorización multi-user (`data_access_grants` + `visible_account_ids` + `require_account_scope` + CRUD `/api/grants`) que Phase 3 consumirá. Ver Retrospectiva §"Phase 2.8".
 
-> ⚠️ **PENDIENTE DE PUSH (acción del usuario):** `main` está **34 commits ahead de `origin/main`** y los tags `v0.2.5-persister-cleanup` + `v0.2.6-schema-hardening` son **locales** (sin push). Todo está commiteado local (nada se pierde), pero para respaldar en remote: `git push origin main && git push origin v0.2.5-persister-cleanup v0.2.6-schema-hardening`. Tags `v0.2.0`→`v0.2.4` ya están en `origin`.
+> ✅ **Pusheado a `origin` (2026-06-02):** `main` sincronizado con `origin/main` y los **7 tags `v0.2.0`→`v0.2.6` en remote** (verificado con `git ls-remote --tags origin`). Repo `github.com/owner/ibkr-control`. No quedan acciones de respaldo pendientes.
 
 Todas las branches de Phase 2.x ya mergeadas a `main`: `phase2/ingestion` + `feat/wizard-redesign` + `phase25/flex-persister-idempotent` + `phase26/flex-hardening` (esta última via PR #2, merge `0e576f3`). Smoke tests en dev completados (wizard 2026-05-24; persister idempotente 2026-05-25).
 
@@ -67,9 +67,9 @@ Smoke test en dev + push a remote YA están hechos (2026-05-24/25, ver §"Wizard
 
 ### Pre-Phase-3 checklist (TODO verificado verde el 2026-06-02)
 
-- [x] `git status` limpio en `main` (HEAD `e363d3f`; ⚠️ 19 commits ahead de `origin/main` — push pendiente, ver arriba)
-- [x] `git tag -l "v0.2*"` muestra `v0.2.0`→`v0.2.5` (6 tags). `v0.2.0`→`v0.2.4` en remote; `v0.2.5-persister-cleanup` local sin push
-- [x] `cd backend && uv run pytest -q` → 299 passed (era 290 al cierre de Phase 2.6; +9 por Phase 2.7 — counterparties model + migración + persister + integración)
+- [x] `git status` limpio en `main`, sincronizado con `origin/main` (post-Phase-2.8; tag `v0.2.6-schema-hardening` @ `b83a9fa`)
+- [x] `git ls-remote --tags origin` muestra los **7 tags `v0.2.0`→`v0.2.6`** en remote (todos pusheados 2026-06-02)
+- [x] `cd backend && uv run pytest -q` → **304 passed** (era 299 al cierre de Phase 2.7; +5 por Phase 2.8 — naming_convention + grant model + resolver + dependency + CRUD/isolation; ver §"Phase 2.8")
 - [x] `cd backend && uv run ruff check .` → clean · `ruff format --check .` → 0 drift (lint/format adoptados en toda la base esta sesión)
 - [x] `cd frontend && pnpm lint` → 0 errores (ESLint flat config nuevo) · `pnpm build` → exit 0 · vitest 7 passed
 - [ ] Leer `docs/plans/2026-05-24-phase2-polish-backlog.md` § "Deuda conocida" (D1-D13; D13 [BUG-FIXED] documenta el incidente del persister + lecciones)
@@ -94,7 +94,7 @@ Smoke test en dev + push a remote YA están hechos (2026-05-24/25, ver §"Wizard
 
 | Item | Quién | Bloquea? |
 |---|---|---|
-| **Push main + tags a remote** ✅ completado — repo privado `owner/ibkr-control`, `main` up-to-date con `origin/main` + los **5 tags `v0.2*` pusheados** (verificado 2026-06-02: `git ls-remote --tags origin` lista los 5, SHAs locales == remotos). v0.2.3 y v0.2.4 ya en remote | — | — |
+| **Push main + tags a remote** ✅ completado — repo privado `owner/ibkr-control`, `main` sincronizado con `origin/main` + los **7 tags `v0.2.0`→`v0.2.6` pusheados** (verificado 2026-06-02 post-Phase-2.8: `git ls-remote --tags origin` lista los 7, SHAs locales == remotos) | — | — |
 | **Deploy a Coolify + setear `TOKEN_ENCRYPTION_KEY` + verificar DNS público** | Usuario | No bloquea Phase 3 dev local |
 | **Smoke test end-to-end en dev — Phase 2 wizard original** ✅ completado 2026-05-24 | — | — |
 | **Smoke test end-to-end en dev — Phase 2.5 persister idempotente** ✅ completado 2026-05-25: 3 imports cargados, 154 closed_lots / 302 trades / 327 open_lots persistidos correctamente, segundo refresh `items_processed=0` confirma D13 fix | — | — |
