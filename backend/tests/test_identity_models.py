@@ -46,3 +46,34 @@ async def test_party_optionally_links_to_user(db_session):
     assert got.user_id is None
     assert got.display_name == "Conyuge"
     assert got.organization_id == org.id
+
+
+@pytest.mark.asyncio
+async def test_access_grant_exclusive_grantee_arc(db_session):
+    from datetime import date
+
+    from sqlalchemy.exc import IntegrityError
+
+    from ibkr_control.db.models.access_grants import AccessGrant
+    from ibkr_control.db.models.organizations import Organization
+    from ibkr_control.db.models.parties import Party
+
+    org = Organization(type="personal", name="H")
+    firm = Organization(type="firm", name="Estudio")
+    db_session.add_all([org, firm])
+    await db_session.flush()
+    p = Party(organization_id=org.id, display_name="Owner")
+    db_session.add(p)
+    await db_session.flush()
+    db_session.add(
+        AccessGrant(
+            grantor_party_id=p.id,
+            grantee_organization_id=None,
+            grantee_user_id=None,
+            organization_id=org.id,
+            role="read_only",
+            valid_from=date(2026, 1, 1),
+        )
+    )
+    with pytest.raises(IntegrityError):
+        await db_session.flush()

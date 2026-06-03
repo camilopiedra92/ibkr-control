@@ -9,8 +9,11 @@ from datetime import date
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ibkr_control.db.models.grants import DataAccessGrant
 from ibkr_control.db.models.participations import Participation
+
+# TODO(sp1-cleanup): DataAccessGrant removed; scope.py is rewritten in the SP1
+# cleanup task. Stub to avoid collection-time failure.
+DataAccessGrant = None  # type: ignore[assignment]
 
 
 class GrantRequiredError(Exception):

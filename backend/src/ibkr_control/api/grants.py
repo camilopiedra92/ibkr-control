@@ -10,8 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ibkr_control.api._schemas import GrantCreate, GrantListResponse, GrantRead
 from ibkr_control.auth.backend import current_active_user
 from ibkr_control.auth.models import User
-from ibkr_control.db.models.grants import DataAccessGrant
 from ibkr_control.db.session import get_async_session
+
+# TODO(sp1-cleanup): DataAccessGrant removed; this entire file is dropped in the
+# SP1 cleanup task. Stub to avoid collection-time failure while this router has
+# not yet been removed from main.py.
+DataAccessGrant = None  # type: ignore[assignment]
 
 router = APIRouter(prefix="/grants", tags=["grants"])
 
