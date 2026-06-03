@@ -35,6 +35,9 @@ class ParsedTrade:
 class ParsedClosedLot:
     ibkr_account_id: str
     symbol: str
+    asset_class: (
+        str  # XML assetCategory (STK/FUT/OPT...); raw fact, fiscal regime derived in Phase 3 domain
+    )
     open_date: date
     close_date: date
     close_datetime: (
@@ -51,6 +54,9 @@ class ParsedClosedLot:
 class ParsedOpenPositionLot:
     ibkr_account_id: str
     symbol: str
+    asset_class: (
+        str  # XML assetCategory (STK/FUT/OPT...); raw fact, fiscal regime derived in Phase 3 domain
+    )
     open_date: date
     qty: Decimal
     cost_basis_usd: Decimal

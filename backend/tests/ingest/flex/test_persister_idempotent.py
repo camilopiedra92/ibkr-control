@@ -143,6 +143,7 @@ async def test_snapshot_lot_mark_price_updates_in_place(
     base_args = dict(
         ibkr_account_id=sample_account.ibkr_account_id,
         symbol="MSFT",
+        asset_class="STK",
         open_date=date(2026, 1, 15),
         qty=Decimal("50"),
         cost_basis_usd=Decimal("15000"),
@@ -201,6 +202,7 @@ async def test_snapshot_lot_different_snapshot_date_creates_new_row(
     base_args = dict(
         ibkr_account_id=sample_account.ibkr_account_id,
         symbol="MSFT",
+        asset_class="STK",
         open_date=date(2026, 1, 15),
         qty=Decimal("50"),
         cost_basis_usd=Decimal("15000"),

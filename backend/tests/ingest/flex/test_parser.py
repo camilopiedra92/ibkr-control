@@ -258,3 +258,30 @@ def test_parse_transfer_captures_transaction_id():
     parsed = parse(xml)
     assert len(parsed.transfers) == 1
     assert parsed.transfers[0].transaction_id == "TXN-XFER-99"
+
+
+def test_parse_closed_lots_carry_asset_class():
+    xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
+    parsed = parse(xml)
+    assert parsed.closed_lots, "fixture should yield closed lots"
+    classes = {cl.asset_class for cl in parsed.closed_lots}
+    assert "STK" in classes
+    assert "FUT" in classes
+    assert all(cl.asset_class for cl in parsed.closed_lots)
+
+
+def test_parse_open_lots_carry_asset_class():
+    xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
+    parsed = parse(xml)
+    assert parsed.open_position_lots, "fixture should yield open lots"
+    assert all(op.asset_class == "STK" for op in parsed.open_position_lots)
+
+
+def test_require_asset_class_fails_loud_when_missing():
+    from lxml import etree
+
+    from ibkr_control.ingest.flex.parser import _require_asset_class
+
+    elem = etree.fromstring(b'<Lot symbol="GLOB" quantity="10"/>')
+    with pytest.raises(ValueError, match="assetCategory"):
+        _require_asset_class(elem, "<Lot CLOSED_LOT>")

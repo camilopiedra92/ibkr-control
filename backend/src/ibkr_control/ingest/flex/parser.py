@@ -283,6 +283,20 @@ def _parse_trade(elem, trades: list[ParsedTrade]) -> None:
     )
 
 
+def _require_asset_class(elem, context: str) -> str:
+    """Extract assetCategory, failing loud if absent.
+
+    asset_class is the fiscal-regime discriminator (STK -> Art.288 + 730d;
+    FUT/OPT -> Decreto 1797). It must never be silently empty. Verified 100%
+    present on real <Lot CLOSED_LOT>/<OpenPosition> rows; this guard catches
+    future drift (consistent with the _known_tags fail-loud philosophy).
+    """
+    asset_class = elem.get("assetCategory")
+    if not asset_class:
+        raise ValueError(f"{context} missing required assetCategory attribute")
+    return asset_class
+
+
 def _parse_lot_as_closed_lot(elem) -> ParsedClosedLot | None:
     """Convert a <Lot levelOfDetail="CLOSED_LOT"> into a ParsedClosedLot.
 
@@ -317,6 +331,7 @@ def _parse_lot_as_closed_lot(elem) -> ParsedClosedLot | None:
     return ParsedClosedLot(
         ibkr_account_id=elem.get("accountId") or "",
         symbol=elem.get("symbol") or "",
+        asset_class=_require_asset_class(elem, "<Lot CLOSED_LOT>"),
         open_date=open_date,
         close_date=close_date,
         close_datetime=close_datetime,
@@ -353,6 +368,7 @@ def _parse_closed_lots_wrapper(elem) -> list[ParsedClosedLot]:
             ParsedClosedLot(
                 ibkr_account_id=lot.get("accountId") or "",
                 symbol=lot.get("symbol") or "",
+                asset_class=_require_asset_class(lot, "<ClosedLot>"),
                 open_date=open_date,
                 close_date=close_date,
                 close_datetime=close_datetime,
@@ -384,6 +400,7 @@ def _parse_open_positions(elem) -> list[ParsedOpenPositionLot]:
             ParsedOpenPositionLot(
                 ibkr_account_id=pos.get("accountId") or "",
                 symbol=pos.get("symbol") or "",
+                asset_class=_require_asset_class(pos, "<OpenPosition>"),
                 open_date=open_date,
                 qty=_dec(pos.get("position")),
                 cost_basis_usd=_dec(pos.get("costBasisMoney") or pos.get("costBasisPrice")),
