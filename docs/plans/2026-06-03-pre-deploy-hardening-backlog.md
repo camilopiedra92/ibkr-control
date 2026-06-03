@@ -378,7 +378,7 @@
 
 - **Severidad:** LOW · **Tipo:** 🟢 core · **Effort:** S · **WS:** WS4
 - **Ubicación:** `.github/workflows/ci.yml`
-- **Estado:** ✅ **Hecho** (2026-06-03) — detectado por warnings del CI. Bumpeadas: `actions/checkout` v4→v6, `actions/setup-node` v4→v6, `actions/setup-python` v5→v6, `pnpm/action-setup` v4→v6, `astral-sh/setup-uv` v3→v8. Todas corren en Node 24. (C4/Dependabot las mantendrá frescas a futuro.)
+- **Estado:** ✅ **Hecho** (2026-06-03) — detectado por warnings del CI. Bumpeadas: `actions/checkout` v4→v6, `actions/setup-node` v4→v6, `actions/setup-python` v5→v6, `pnpm/action-setup` v4→v6, `astral-sh/setup-uv` v3→v8.2.0 (pin exacto — setup-uv no mantiene tag flotante `v8`). Todas corren en Node 24. (C4/Dependabot las mantendrá frescas a futuro.)
 
 ### [ ] C11 — Sin coverage gate en CI: el 86% es informativo, las regresiones no fallan el build
 
