@@ -72,6 +72,31 @@ class FlexImport(Base):
     poison_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class FlexImportAccount(Base):
+    __tablename__ = "flex_import_accounts"
+    __table_args__ = {
+        "comment": (
+            "Procedencia cuenta<->import: cada cuenta observada en un FlexImport "
+            "(incluidas las AccountInformation-only sin hechos). Hecho de primera "
+            "clase, no inferido. El wizard lo usa para scopear la validacion "
+            "anti-IDOR de step2/save: un usuario solo reclama participacion en "
+            "cuentas que aparecen en SUS imports (join via flex_imports.user_id), "
+            "no en toda la tabla compartida accounts. Ver hardening H1."
+        )
+    }
+
+    flex_import_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("flex_imports.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    account_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+
 class Trade(Base):
     __tablename__ = "trades"
     __table_args__ = (

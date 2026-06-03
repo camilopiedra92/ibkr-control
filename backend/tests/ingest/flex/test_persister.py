@@ -733,3 +733,75 @@ async def test_fop_closed_lot_gets_asset_class_without_source_trade(
     assert row is not None
     assert row[0] == "STK"
     assert row[1] is None
+
+
+@pytest.mark.asyncio
+async def test_persist_records_account_provenance_including_factless(
+    db_session: AsyncSession, sample_user
+):
+    """persist() must record a flex_import_accounts row for every non-shadow
+    account observed in the XML — INCLUDING accounts that appear only in
+    <AccountInformation> with no trades/lots/cash (the fact-less case the
+    wizard happy-path relies on). F-shadow accounts must NOT get provenance.
+
+    This is the durable account<->user link the anti-IDOR scoping of
+    step2/save depends on (hardening H1): without it, a fact-less detected
+    account leaves no trace of which user imported it.
+    """
+    parsed = ParsedXML(
+        anyo=2026,
+        period_from=date(2026, 1, 1),
+        period_to=date(2026, 5, 24),
+        accounts=[
+            # Has a trade below → would be reachable via facts anyway.
+            ParsedAccount(ibkr_account_id="U99999001", currency="USD"),
+            # Fact-less: only AccountInformation, no facts anywhere.
+            ParsedAccount(ibkr_account_id="U99999002", currency="USD"),
+            # F-shadow: must be filtered, never gets provenance.
+            ParsedAccount(ibkr_account_id="U99999001F", currency="USD"),
+        ],
+        trades=[
+            ParsedTrade(
+                transaction_id="TXN-prov-1",
+                ibkr_account_id="U99999001",
+                symbol="AAPL",
+                asset_class="STK",
+                trade_date=date(2026, 1, 15),
+                settle_date=date(2026, 1, 17),
+                qty=Decimal("10"),
+                price_usd=Decimal("150.00"),
+                proceeds_usd=Decimal("-1500.00"),
+                commission_usd=Decimal("1.00"),
+                open_close="O",
+                buy_sell="BUY",
+                raw_attrs={},
+            )
+        ],
+        closed_lots=[],
+        open_position_lots=[],
+        cash_transactions=[],
+        transfers=[],
+        change_in_dividend_accruals=[],
+        open_dividend_accruals=[],
+    )
+
+    fi_id, _ = await persist(
+        db_session,
+        parsed=parsed,
+        user_id=sample_user.id,
+        xml_bytes=b"<xml>provenance</xml>",
+        source="manual_upload",
+    )
+
+    from ibkr_control.db.models.accounts import Account
+    from ibkr_control.db.models.flex_raw import FlexImportAccount
+
+    rows = (
+        await db_session.execute(
+            select(Account.ibkr_account_id)
+            .join(FlexImportAccount, FlexImportAccount.account_id == Account.id)
+            .where(FlexImportAccount.flex_import_id == fi_id)
+        )
+    ).all()
+    ids = {r[0] for r in rows}
+    assert ids == {"U99999001", "U99999002"}, ids

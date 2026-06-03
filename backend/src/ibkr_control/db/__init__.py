@@ -9,6 +9,7 @@ from ibkr_control.db.models.counterparties import Counterparty  # noqa: F401
 from ibkr_control.db.models.grants import DataAccessGrant  # noqa: F401
 from ibkr_control.db.models.flex_raw import (  # noqa: F401
     FlexImport,
+    FlexImportAccount,
     Trade,
     ClosedLot,
     OpenPositionLot,
@@ -31,6 +32,7 @@ __all__ = [
     "Counterparty",
     "DataAccessGrant",
     "FlexImport",
+    "FlexImportAccount",
     "Trade",
     "ClosedLot",
     "OpenPositionLot",

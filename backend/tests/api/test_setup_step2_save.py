@@ -54,6 +54,87 @@ async def _seed_detect(client: AsyncClient, auth_headers: dict, monkeypatch) -> 
     assert r.status_code == 200, r.text
 
 
+async def _seed_detect_with_xml(
+    client: AsyncClient, headers: dict, monkeypatch, *, token: str, xml: bytes
+) -> None:
+    """step1/save + step2/detect for an arbitrary user/headers, returning a
+    statement that contains the given XML. Lets two users detect disjoint
+    accounts in the same test."""
+    r = await client.post(
+        "/api/setup/step1/save",
+        headers=headers,
+        json={"token": token, "query_id": "999"},
+    )
+    assert r.status_code == 200, r.text
+    monkeypatch.setattr(flex_client_mod.FlexClient, "send_request", AsyncMock(return_value="ref"))
+    monkeypatch.setattr(flex_client_mod.FlexClient, "get_statement", AsyncMock(return_value=xml))
+    r = await client.post("/api/setup/step2/detect", headers=headers)
+    assert r.status_code == 200, r.text
+
+
+_XML_OWNER = b"""<?xml version="1.0"?>
+<FlexQueryResponse><FlexStatements>
+  <FlexStatement accountId="U99999001" fromDate="20260101" toDate="20260524">
+    <AccountInformation accountId="U99999001" accountAlias="Owner" accountType="Joint" name="X" currency="USD"/>
+  </FlexStatement>
+</FlexStatements></FlexQueryResponse>
+"""
+
+_XML_ATTACKER = b"""<?xml version="1.0"?>
+<FlexQueryResponse><FlexStatements>
+  <FlexStatement accountId="U99999002" fromDate="20260101" toDate="20260524">
+    <AccountInformation accountId="U99999002" accountAlias="Mine" accountType="Individual" name="Y" currency="USD"/>
+  </FlexStatement>
+</FlexStatements></FlexQueryResponse>
+"""
+
+
+async def test_step2_save_idor_cannot_claim_other_users_account(
+    client: AsyncClient, auth_headers: dict, second_auth_headers: dict, monkeypatch
+):
+    """H1: an authenticated second user must NOT be able to grant themselves
+    participation on an account that only appears in ANOTHER user's import.
+
+    User A detects U99999001 (their own). User B detects U99999002 (their own),
+    then tries step2/save against U99999001 — guessable, exists in the shared
+    `accounts` table, but never imported by B. Must 400 ACCOUNT_NOT_DETECTED
+    and create NO participation for B.
+    """
+    monkeypatch.setattr("ibkr_control.api.setup._trm_backfill_background", AsyncMock())
+
+    # User A imports the owner account.
+    await _seed_detect_with_xml(
+        client, auth_headers, monkeypatch, token="tok_owner_aaaaa", xml=_XML_OWNER
+    )
+    # User B imports a different account of their own.
+    await _seed_detect_with_xml(
+        client, second_auth_headers, monkeypatch, token="tok_attacker_bbb", xml=_XML_ATTACKER
+    )
+
+    # B attacks: claim 100% of A's account.
+    r = await client.post(
+        "/api/setup/step2/save",
+        headers=second_auth_headers,
+        json={"accounts": [{"ibkr_account_id": "U99999001", "alias": "pwn", "pct": "1.0000"}]},
+    )
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"]["code"] == "ACCOUNT_NOT_DETECTED"
+
+    # No participation leaked to B.
+    settings = get_settings()
+    engine = create_async_engine(settings.database_url, echo=False)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            acc = await s.scalar(select(Account).where(Account.ibkr_account_id == "U99999001"))
+            parts = (
+                await s.scalars(select(Participation).where(Participation.account_id == acc.id))
+            ).all()
+            assert parts == []
+    finally:
+        await engine.dispose()
+
+
 async def test_step2_save_persists_accounts_and_participations(
     client: AsyncClient, auth_headers: dict, monkeypatch
 ):

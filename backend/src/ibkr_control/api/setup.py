@@ -46,7 +46,7 @@ from ibkr_control.auth.models import User
 from ibkr_control.config import get_settings
 from ibkr_control.db.models.accounts import Account
 from ibkr_control.db.models.flex_credentials import FlexCredentials
-from ibkr_control.db.models.flex_raw import FlexImport
+from ibkr_control.db.models.flex_raw import FlexImport, FlexImportAccount
 from ibkr_control.db.models.participations import Participation
 from ibkr_control.db.session import get_async_session, get_engine
 from ibkr_control.ingest.flex import client as flex_client_mod
@@ -84,6 +84,55 @@ def _to_detected_account(account: ParsedAccount) -> DetectedAccount:
 def _is_shadow(ibkr_account_id: str) -> bool:
     """F-suffix accounts (IB-UK Limited shadow). Filtered everywhere user-facing."""
     return ibkr_account_id.endswith("F")
+
+
+async def _user_imported_account_ids(session: AsyncSession, user_id: int) -> set[str]:
+    """ibkr_account_ids that appear in the given user's own Flex imports.
+
+    Anti-IDOR scope (hardening H1): ownership of an account is proven by the
+    account appearing in a FlexImport belonging to this user — recorded in the
+    flex_import_accounts provenance table (includes AccountInformation-only
+    accounts with no facts). A user may only claim participation on, or mutate
+    the alias of, accounts in this set — never the whole shared `accounts`
+    table, which would let any authenticated user grab another user's accounts.
+    """
+    rows = await session.scalars(
+        select(Account.ibkr_account_id)
+        .join(FlexImportAccount, FlexImportAccount.account_id == Account.id)
+        .join(FlexImport, FlexImport.id == FlexImportAccount.flex_import_id)
+        .where(FlexImport.user_id == user_id)
+    )
+    return set(rows.all())
+
+
+async def _user_configured_account_ids(session: AsyncSession, user_id: int) -> set[str]:
+    """ibkr_account_ids the user has an open participation on ('configured').
+
+    Used by step3/commit (H1): an XML may only be committed once every
+    non-shadow account it references has been resolved BY THIS USER (alias +
+    pct via step2/save or step3/save_new_accounts). Scopes the completeness
+    gate to the user's own participations instead of the shared `accounts`
+    table, where an account another user created would pass falsely."""
+    rows = await session.scalars(
+        select(Account.ibkr_account_id)
+        .join(Participation, Participation.account_id == Account.id)
+        .where(Participation.user_id == user_id, Participation.valid_to.is_(None))
+    )
+    return set(rows.all())
+
+
+def _user_stashed_account_ids(user_id: int) -> set[str]:
+    """Non-shadow ibkr_account_ids across the user's own Step 3 stash uploads.
+
+    Anti-IDOR scope (H1) for step3/save_new_accounts: a user may only create /
+    claim participation on accounts that appear in an XML THEY uploaded — never
+    an arbitrary id they POST. The stash is already per-user (list_for_user)."""
+    ids: set[str] = set()
+    for entry in get_stash().list_for_user(user_id=user_id):
+        for a in entry.data["parsed"].accounts:
+            if not _is_shadow(a.ibkr_account_id):
+                ids.add(a.ibkr_account_id)
+    return ids
 
 
 def _detected_from_parsed(parsed) -> list[DetectedAccount]:
@@ -351,9 +400,9 @@ async def step2_save(
     if not flex_imports_count:
         raise HTTPException(status_code=400, detail="NO_DETECT_YET")
 
-    existing_account_ids = {
-        a.ibkr_account_id for a in (await session.scalars(select(Account))).all()
-    }
+    # Anti-IDOR (H1): only accounts that appear in THIS user's imports are
+    # claimable — not the whole shared `accounts` table.
+    existing_account_ids = await _user_imported_account_ids(session, user.id)
 
     for item in payload.accounts:
         if _is_shadow(item.ibkr_account_id):
@@ -491,6 +540,10 @@ async def step3_save_new_accounts(
     session: AsyncSession = Depends(get_async_session),
 ) -> dict:
     """Persist accounts + participations for newly-detected IDs from Step 3 uploads."""
+    # Anti-IDOR (H1): only ids the user actually uploaded in Step 3 are
+    # claimable — guard before any create/mutate so a guessed id can neither
+    # fabricate an account nor grant participation.
+    stashed_ids = _user_stashed_account_ids(user.id)
     today = date.today()
     for item in payload.accounts:
         if _is_shadow(item.ibkr_account_id):
@@ -498,6 +551,14 @@ async def step3_save_new_accounts(
                 status_code=400,
                 detail={
                     "code": "SHADOW_ACCOUNT_REJECTED",
+                    "ibkr_account_id": item.ibkr_account_id,
+                },
+            )
+        if item.ibkr_account_id not in stashed_ids:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "ACCOUNT_NOT_DETECTED",
                     "ibkr_account_id": item.ibkr_account_id,
                 },
             )
@@ -555,8 +616,10 @@ async def step3_commit(
     flex_import_ids: list[int] = []
     total_rows = 0
 
-    # Validate first pass: all temp_ids exist + no unresolved new accounts
-    existing_accounts = {a.ibkr_account_id for a in (await session.scalars(select(Account))).all()}
+    # Validate first pass: all temp_ids exist + every referenced account was
+    # resolved BY THIS USER (has a participation) — anti-IDOR scope (H1), not
+    # mere global existence.
+    configured_accounts = await _user_configured_account_ids(session, user.id)
     for temp_id in payload.temp_ids:
         entry = stash.get(user_id=user.id, temp_id=temp_id)
         if entry is None:
@@ -567,7 +630,7 @@ async def step3_commit(
         for a in entry.data["parsed"].accounts:
             if _is_shadow(a.ibkr_account_id):
                 continue
-            if a.ibkr_account_id not in existing_accounts:
+            if a.ibkr_account_id not in configured_accounts:
                 raise HTTPException(
                     status_code=400,
                     detail={
