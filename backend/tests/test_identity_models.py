@@ -125,3 +125,16 @@ async def test_flex_credentials_are_org_scoped(db_session):
     got = await db_session.scalar(select(FlexCredentials).where(FlexCredentials.id == c.id))
     assert got.organization_id == org.id
     assert not hasattr(got, "user_id")
+
+
+@pytest.mark.asyncio
+async def test_all_tenant_tables_have_organization_id(db_session):
+    from ibkr_control.db.base import Base
+    from ibkr_control.db.rls import ORG_SCOPED_TABLES
+
+    for table_name in ORG_SCOPED_TABLES:
+        table = Base.metadata.tables[table_name]
+        assert "organization_id" in table.columns, f"{table_name} missing organization_id"
+        assert not table.columns["organization_id"].nullable, (
+            f"{table_name}.organization_id nullable"
+        )
