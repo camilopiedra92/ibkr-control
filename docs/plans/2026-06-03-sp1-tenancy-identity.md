@@ -26,13 +26,13 @@
 - **Task 15** — persister stamps `organization_id` on FlexImport + all facts + flex_import_accounts + ensure_accounts/counterparties; dedup + R1 cleanup scope by org. Follow-up fix: `flex_imports` dedup UNIQUE → `(organization_id, xml_hash)`, `user_id` nullable audit (per-org idempotency); `flex_import_accounts` comment de-staled.
 - **Task 17** — `scripts/provision_org.py` (`provision_org()` + CLI): org + user (PasswordHelper hash) + UserSettings + Membership(owner) + Party.
 
-**Remaining (⏳ — the convergence; suite is 197 pass / 106 fail / 22 err, all app-layer user-centric):**
-- **Task 18** — rebuild `conftest.py` fixtures around org/party: `sample_user` creates org+membership+party; `sample_org`, `sample_party`, `auth_headers_with_org` (use `provision_org`); `sample_account`/`sample_flex_import` take `organization_id`.
-- **Task 16** — wizard (`api/setup.py`, ~9 endpoints): `org_context` dependency + party-anchored participations (SP1 minimal: founding user↔party; multi-party UI is SP3). Persist calls pass `organization_id`. Drop the H1 `_user_*` scoping helpers (RLS + ownership supersede).
-- **Task 19** — green-up: adapt every remaining user-centric test (persister 16 tests pass `user_id=`→`organization_id=`; credentials/ingest/scheduler/job/isolation/replay/poison; api/setup_* tests). **DELETE** the migration-mechanics tests targeting squashed-away revisions: `test_phase2_*_migration.py`, `test_counterparties_migration.py`, `test_phase25_persister_migration.py` (the 22 errors). Full suite green + ruff clean.
-- **Task 14** — switch `app_with_db` from `Base.metadata.create_all` to `alembic upgrade head` + connect as `app_rls` + auto-set org context, so the endpoint suite runs UNDER RLS (world-class). **Do this LAST** (after 16/18/19 make endpoints+tests org-aware) — the `create_all` fixture has no RLS, so endpoint tests can go green on the model change first, then RLS hardening surfaces any missing-context bugs.
+**Convergence progress (updated 2026-06-03):**
+- ✅ **Task 18** (`676f552`) — `conftest.py` fixtures rebuilt around org/party (`sample_org`/`sample_party`/`auth_headers_with_org`, `sample_user` = faithful identity incl. UserSettings; DRY DSN/alembic helpers extracted). Spec+quality reviewed. 22 fixture errors → 0; 197→213 pass.
+- ✅ **Task 16** (`f5b56b3`) — wizard (`api/setup.py`, 9 endpoints) org-context + party-anchored participations; setup-state moved User→Organization; `_founding_party_id` helper; H1 helpers org-scoped. Whole `tests/api/test_setup_*` suite green (35). Spec+quality reviewed.
+- ⏳ **Task 19 (RE-SCOPED)** — convergence is an org-aware conversion of ~11 source modules + 2 decisions (D-CONV-1 TRM control-plane, D-CONV-2 cron org-loop — see spec). Split into 19a (ingest write-path: log/hash_dedup/flex.job) → 19b (jobs/cron: trm.job drops ingest_log + scheduler org-loop) → 19c (endpoints credentials/imports/ingest/health) → 19d (delete obsolete migration tests + full green + boot smoke). Details below under Task 19.
+- ⏳ **Task 14** — switch `app_with_db` from `create_all` to `alembic upgrade head` + connect as `app_rls` + auto-set org context (endpoint suite UNDER RLS). **LAST** — `create_all` has no RLS, so endpoints go green on the model change first; then RLS hardening surfaces missing-context bugs.
 
-**Resume order:** 18 → 16 → 19 (green under `create_all`) → 14 (RLS hardening) → final code review → `superpowers:finishing-a-development-branch`. Container is bind-mounted; generate/verify migrations via `docker compose exec backend`. Run tests from host: `cd backend && uv run pytest`.
+**Resume order:** 19a → 19b → 19c → 19d (green under `create_all`) → 14 (RLS hardening) → final code review → `superpowers:finishing-a-development-branch`. Container is bind-mounted; generate/verify migrations via `docker compose exec backend`. Run tests from host: `cd backend && uv run pytest`.
 
 ---
 
@@ -1302,42 +1302,34 @@ git add backend/tests/conftest.py
 git commit -m "test(sp1): shared fixtures rebuilt around org/party/membership"
 ```
 
-### Task 19: Adapt remaining tests; delete obsolete; full green
+### Task 19 (RE-SCOPED 2026-06-03): App-layer org-aware convergence — full green
 
-**Files:**
-- Delete: `backend/src/ibkr_control/authz/` (package), `backend/tests/test_authz_scope.py`, `test_authz_dependency.py`, `test_grants_api.py`, `test_grants_model.py`, and any `test_phase2*_migration.py` / `test_counterparties_migration.py` / `test_phase25_persister_migration.py` that assert against the deleted revisions
-- Modify: every remaining test that constructs `user_id`-scoped participations / flex_imports / facts, plus `api/grants.py` + router wiring (remove old grants CRUD; new grants API is SP2)
+> **Why re-scoped:** investigating the 106 failures showed the remaining work is an org-aware conversion of ~11 source modules (not "adapt tests"), plus the two convergence decisions D-CONV-1 (TRM control-plane) + D-CONV-2 (cron org-loop) now in the spec. The old `authz/`/`grants` layer was **already removed** earlier (see Execution status), so that step is done. Split into 4 reviewed sub-tasks, executed 19a → 19b → 19c → 19d (19b/19c depend on 19a's job signatures).
 
-- [ ] **Step 1: Remove the superseded authz/grants layer**
+#### Task 19a — Ingest write-path core org-aware
+**Source:** `ingest/log.py` (`ingest_log_entry` gains `organization_id`, stamps it on the row), `ingest/hash_dedup.py` (`check_hash_status(session, organization_id, hash)` — dedup key `(organization_id, xml_hash)`), `ingest/flex/job.py` (`run`/`ingest_xml`/`_insert_poison_row` take `organization_id`; `FlexImport` write + poison row stamp org; `on_conflict` index → `(organization_id, xml_hash)`; `persist(organization_id=...)`; `FlexCredentials`/`FlexImport` queries org-scoped). Legitimate-unchanged: advisory `lock.py` granularity, `job_tracker` ownership.
+**Tests:** `tests/ingest/flex/test_job.py`, `tests/ingest/test_hash_dedup.py`, `tests/ingest/test_log.py`, poison/isolation/replay suites → pass `organization_id=sample_org.id`.
 
-Delete the `authz/` package, `db/models/grants.py` references, `api/grants.py`, their tests, and the routes mounting them in `main.py`. (The party-scoped grant CRUD + enforcement is SP2.)
+#### Task 19b — Jobs/cron layer (D-CONV-1 + D-CONV-2)
+**Source:** `ingest/trm/job.py` — TRM stops calling `ingest_log_entry` entirely (control plane; its record is `trm_imports`). `scheduler/jobs.py` — `_run_flex_for_all_users` → `_run_flex_for_all_orgs` iterating `distinct FlexCredentials.organization_id`, `flex_job.run(organization_id=...)`, `SET LOCAL app.current_org` per iteration; TRM cron unchanged (global).
+**Tests:** `tests/ingest/trm/*`, scheduler tests adapted; assert TRM writes `trm_imports` not `ingest_log`.
 
-- [ ] **Step 2: Run the full suite, triage failures**
+#### Task 19c — Endpoints org-aware
+**Source:** `api/credentials.py`, `api/imports.py`, `api/ingest.py`, `api/health.py` take `org_id = Depends(org_context)`; all `FlexCredentials`/`FlexImport`/`IngestLog` queries org-scoped; `_launch_manual_job`/`flex_job.run`/`ingest_xml` calls pass `organization_id`. `health.py`: **Flex** freshness ← `ingest_log` (org-scoped), **TRM** freshness ← `trm_imports` (global, D-CONV-1). `api/ingest.py` `_run_manual` TRM path keeps SSE via JobTracker but no `ingest_log` for TRM. Legitimate-unchanged: `users.last_ingest_trigger_at` rate-limit, `job_tracker.create_job(user_id=...)`.
+**Tests:** `tests/api/test_credentials.py`, `test_imports.py`, `test_ingest.py`, `test_health_endpoint.py` → `auth_headers_with_org` + org assertions.
 
-Run: `cd backend && uv run pytest -q 2>&1 | tail -40`
-Expected: a list of failures in tests still using the old user-centric model. Fix each: provide org context, switch participations to party-anchored, pass `organization_id` to persist/fixtures. Delete migration-mechanics tests that target the squashed-away revisions (structure now covered by Task 10 + the RLS suite; behavior by the fact tests).
-
-- [ ] **Step 3: Iterate to green**
-
-Run: `cd backend && uv run pytest -q`
-Expected: PASS (all). Then `uv run ruff check . && uv run ruff format --check .` → clean.
-
-- [ ] **Step 4: Container boot smoke**
-
-Run:
+#### Task 19d — Cleanup + full green + boot smoke
+- Delete obsolete migration-mechanics tests targeting squashed-away revisions: `test_phase2_*_migration.py`, `test_counterparties_migration.py`, `test_phase25_persister_migration.py` (structure now covered by Task 10 drift test + RLS suite; behavior by fact tests).
+- Fix any residual user-centric test usages across the suite.
+- `cd backend && uv run pytest -q` → all green; `uv run ruff check . && uv run ruff format --check .` → clean.
+- Container boot smoke:
 ```bash
 docker compose -f compose.yaml -f compose.dev.yaml up -d --build backend
 docker compose logs backend --since 30s | grep -iE "upgrade|startup complete|error|traceback"
 curl -s localhost:8000/health
 ```
 Expected: baseline applied, `Application startup complete`, `{"status":"ok"}`, no tracebacks.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add -A
-git commit -m "test(sp1): adapt suite to org/party model; remove superseded authz/grants; full green"
-```
+- Commit per sub-task (`feat(sp1): ...`); final `test(sp1): app-layer org-aware convergence — full green`.
 
 ---
 

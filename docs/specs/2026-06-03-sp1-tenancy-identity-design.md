@@ -99,14 +99,32 @@ created_at                     │                       created_at
 3. **Rol de DB sin bypass.** El app corre como rol NO-superuser, NO-owner (esos bypassean RLS). `FORCE ROW LEVEL SECURITY` en cada tabla org-scoped (ni el owner se salta la policy). Migraciones corren con un rol privilegiado aparte (DDL). `current_org` sin setear → la policy no matchea → **0 filas (default-deny)**.
 4. **Policy estándar** (toda tabla org-scoped salvo `access_grants`): `USING (organization_id = current_setting('app.current_org')::bigint) WITH CHECK (organization_id = current_setting('app.current_org')::bigint)`.
 5. **Policy especial de `access_grants`** (es el puente cross-org; no puede ocultarse por single-org RLS o el grantee nunca descubriría sus grants): `USING (organization_id = current_org OR grantee_organization_id = current_org OR grantee_user_id = current_user)`. Por eso el contexto setea **también** `app.current_user`.
-6. **Tablas globales** (`trm_days`, `trm_imports`): sin `organization_id`, sin RLS, lectura libre. El persister TRM no setea org.
-7. **Path de ingest/cron** (fuera de request, sin JWT): itera por org, `SET LOCAL app.current_org = org.id` por iteración. (La iteración org-aware del cron es SP7; SP1 entrega el persister que acepta y estampa org.)
+6. **Tablas globales** (`trm_days`, `trm_imports`): sin `organization_id`, sin RLS, lectura libre. El persister TRM no setea org. La TRM **no** escribe `ingest_log` (control plane, no data plane — ver D-CONV-1); su observabilidad es `trm_imports`.
+7. **Path de ingest/cron** (fuera de request, sin JWT): itera por org, `SET LOCAL app.current_org = org.id` por iteración. SP1 entrega el persister org-aware **y** el cron Flex iterando por org (D-CONV-2); la sofisticación (cola durable + rate-limit por org) la construyen SP5/SP7 *encima* del loop.
 
 ## Cambios en write-paths (SP1, data-level)
 
 - **Persister** (`ingest/flex/persister.py`): recibe `organization_id` del contexto del import y lo estampa en `flex_imports`, todos los hechos, `flex_import_accounts`, `counterparties`. (El stamping reemplaza al `user_id`-only scoping previo.)
 - **Wizard** (`api/setup.py`): opera dentro del contexto de un org; `participations` pasan a party-anchored. SP1 usa un **default mínimo**: el founding user ↔ su Party auto-creado; capturar al cónyuge co-titular como segundo Party en la UI se difiere a SP3.
 - **Session context plumbing**: la dependency que setea `SET LOCAL app.current_org`/`app.current_user`, consumida por todas las rutas autenticadas.
+
+## Decisiones de convergencia (2026-06-03 — descubiertas implementando, locked)
+
+El green-up del app-layer (originalmente "Task 19: adaptar tests") resultó ser una conversión org-aware de ~11 módulos source, no solo de tests. Dos decisiones arquitectónicas que el plan original no había resuelto:
+
+### D-CONV-1: TRM es control plane — fuera de `ingest_log`
+
+Principio rector: **data plane (org-scoped, RLS) vs control/reference plane (global, sin RLS)**. `ingest_log` es data-plane (`organization_id` NOT NULL + RLS): registra corridas de ingest *de un tenant* (flex, upload manual, acciones del wizard — todas tienen org). La TRM es **control plane** (reference data que todo el sistema comparte, una sola verdad). El bug latente era que el job TRM escribía su fila en `ingest_log` con `user_id=None` — un evento de sistema en una tabla de tenant, ahora imposible (`organization_id` NOT NULL).
+
+**Decisión:** TRM **nunca** toca `ingest_log`. Su única fuente de verdad + observabilidad es **`trm_imports`** (global, ya registra `date_from`/`date_to`/conteos/timestamp). `api/health.py` lee frescura TRM de `trm_imports` (global, igual para todo org) y frescura Flex de `ingest_log` (per-org). `ingest_log` queda **100% org-scoped NOT NULL** — sin nullable (se rechazó: un `organization_id` NULL sería invisible bajo RLS `USING(organization_id=current_org)` y rompería el invariante). El refresh manual/wizard de TRM mantiene feedback SSE vía JobTracker (in-memory, UX), pero su registro persistente es `trm_imports`. Un `system_job_log` genérico (para futuros system-jobs no-TRM) se difiere a **SP8**; no se gold-platea ahora.
+
+### D-CONV-2: Cron Flex itera por org (mínimo, no stub)
+
+El cron Flex iteraba `FlexCredentials.user_id` — columna eliminada. **Decisión:** `_run_flex_for_all_orgs` itera `distinct FlexCredentials.organization_id` → `flex_job.run(organization_id=...)`, con `SET LOCAL app.current_org` por iteración. TRM cron sigue siendo una corrida global única. No es deuda: es la implementación correcta *pre-cola*; SP5 (durable jobs) + SP7 evolucionan el **cuerpo** del loop de `run inline` a `enqueue(org)` + rate-limit por org. Se rechazó stub/defer (dejaría un agujero funcional — sin auto-fetch diario — + tests skipped = "issues").
+
+### Alcance real de la conversión org-aware
+
+Además de persister (hecho) + wizard (hecho), la convergencia convierte: `ingest/log.py` (`+organization_id`), `ingest/hash_dedup.py` (`check_hash_status` keyed en org), `ingest/flex/job.py` (`run`/`ingest_xml`/`_insert_poison_row` toman `organization_id`; dedup `on_conflict` → `(organization_id, xml_hash)`), `api/credentials.py` · `api/imports.py` · `api/health.py` · `api/ingest.py` (org-context vía la dependency), `scheduler/jobs.py` (D-CONV-2). Legítimamente per-user (sin cambio): `job_tracker` (ownership SSE, D1), el rate-limit en `users.last_ingest_trigger_at`, `ingest/lock.py` (granularidad de lock).
 
 ## Provisioning & bootstrap
 
@@ -133,7 +151,8 @@ created_at                     │                       created_at
 |---|---|
 | Baseline migration (orgs/parties/memberships/access_grants + org_id everywhere + RLS policies + rol sin bypass) | Onboarding self-service, MFA, IdP, wizard multi-party → **SP3** |
 | Plumbing de contexto RLS (`SET LOCAL` por request/tx; `current_org` + `current_user`) | Enforcement de grants, `require_*_scope`, ReBAC engine → **SP2** |
-| Write-paths org/party-aware (persister + wizard, data-level) | Cron org-iterante + rate-limit por org → **SP7** |
+| Write-paths org/party-aware (persister + wizard + ingest jobs + endpoints credentials/imports/health/ingest) | Cola durable + rate-limit por org → **SP5/SP7** (SP1 hace el cron-loop por org mínimo, D-CONV-2) |
+| TRM como control plane (fuera de `ingest_log`; observabilidad vía `trm_imports`, D-CONV-1) | `system_job_log` genérico → **SP8** |
 | `provision_org.py` + refactor de fixtures + RLS smoke tests | KMS envelope encryption → **SP4** · Billing → **SP6** · Audit log → **SP8** |
 | Modelos ORM + `db/__init__` + naming + drift + table comments | — |
 
