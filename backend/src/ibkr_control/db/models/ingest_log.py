@@ -27,7 +27,7 @@ class IngestLog(Base):
             f"trigger IN {_TRIGGER_VALUES}",
             name="trigger",
         ),
-        Index("ix_ingest_log_user_id_started_at", "user_id", text("started_at DESC")),
+        Index("ix_ingest_log_org_started_at", "organization_id", text("started_at DESC")),
         Index(None, "organization_id"),
     )
 
@@ -36,11 +36,6 @@ class IngestLog(Base):
         BigInteger, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
     )
     job_kind: Mapped[str] = mapped_column(Text, nullable=False)
-    user_id: Mapped[int | None] = mapped_column(
-        BigInteger,
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
-    )
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("NOW()")
     )

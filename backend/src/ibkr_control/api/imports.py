@@ -6,8 +6,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ibkr_control.api._context import org_context
-from ibkr_control.auth.backend import current_active_user
-from ibkr_control.auth.models import User
 from ibkr_control.config import get_settings
 from ibkr_control.db.models.flex_raw import FlexImport
 from ibkr_control.db.session import get_async_session
@@ -24,7 +22,6 @@ _CHUNK_SIZE = 64 * 1024  # 64 KB streaming chunks
 @router.post("/upload")
 async def upload_xml(
     file: UploadFile = File(...),
-    user: User = Depends(current_active_user),
     org_id: int = Depends(org_context),
     session: AsyncSession = Depends(get_async_session),
 ) -> dict:
@@ -95,7 +92,6 @@ async def upload_xml(
     flex_import_id = await flex_job_mod.ingest_xml(
         session,
         organization_id=org_id,
-        user_id=user.id,
         xml_bytes=xml_bytes,
         source="manual_upload",
         trigger="wizard",

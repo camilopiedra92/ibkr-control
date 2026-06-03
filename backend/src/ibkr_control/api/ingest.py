@@ -31,14 +31,15 @@ async def trigger_manual_refresh(
 ) -> IngestJobStarted:
     """Trigger manual del ingest. Rate-limited via UPDATE atomico condicional.
 
-    El UPDATE solo afecta una fila si el cooldown ya pasó; rowcount=0 indica
-    rate-limited y devolvemos 429 con el tiempo restante. Esto elimina el
-    race condition TOCTOU del patron check-then-set y persiste el estado en
-    DB (sobrevive container restart, multi-replica safe).
+    El throttle es PER-ORG (D-CONV-3): el ingest es la unidad de operación del
+    tenant, no del usuario. El UPDATE solo afecta una fila si el cooldown ya
+    pasó; rowcount=0 indica rate-limited y devolvemos 429 con el tiempo
+    restante. Esto elimina el race condition TOCTOU del patron check-then-set y
+    persiste el estado en DB (sobrevive container restart, multi-replica safe).
     """
     from sqlalchemy import or_, select, update
 
-    from ibkr_control.auth.models import User as UserModel
+    from ibkr_control.db.models.organizations import Organization
 
     settings = get_settings()
     cooldown = timedelta(seconds=settings.ingest_trigger_cooldown_seconds)
@@ -46,12 +47,12 @@ async def trigger_manual_refresh(
     cutoff = now - cooldown
 
     result = await session.execute(
-        update(UserModel)
-        .where(UserModel.id == user.id)
+        update(Organization)
+        .where(Organization.id == org_id)
         .where(
             or_(
-                UserModel.last_ingest_trigger_at.is_(None),
-                UserModel.last_ingest_trigger_at < cutoff,
+                Organization.last_ingest_trigger_at.is_(None),
+                Organization.last_ingest_trigger_at < cutoff,
             )
         )
         .values(last_ingest_trigger_at=now)
@@ -60,7 +61,7 @@ async def trigger_manual_refresh(
 
     if result.rowcount == 0:
         current = await session.scalar(
-            select(UserModel.last_ingest_trigger_at).where(UserModel.id == user.id)
+            select(Organization.last_ingest_trigger_at).where(Organization.id == org_id)
         )
         wait_seconds = (
             int((cooldown - (now - current)).total_seconds())
@@ -85,11 +86,11 @@ async def _launch_manual_job(
     sigue siendo per-user (D1): lo dueña quien lo dispara."""
     tracker = get_tracker()
     job_id = tracker.create_job(user_id=user_id)
-    background.add_task(_run_manual, kind=kind, user_id=user_id, org_id=org_id, job_id=job_id)
+    background.add_task(_run_manual, kind=kind, org_id=org_id, job_id=job_id)
     return job_id
 
 
-async def _run_manual(kind: str, user_id: int, org_id: int, job_id: int) -> None:
+async def _run_manual(kind: str, org_id: int, job_id: int) -> None:
     from ibkr_control.ingest.flex import job as flex_job_mod
     from ibkr_control.ingest.trm import job as trm_job_mod
 
@@ -113,9 +114,7 @@ async def _run_manual(kind: str, user_id: int, org_id: int, job_id: int) -> None
         if kind in ("flex", "both"):
             current_step = "flex_ytd"
             tracker.emit(job_id, {"step": current_step, "status": "running"})
-            await flex_job_mod.run(
-                session_local, organization_id=org_id, user_id=user_id, trigger="manual"
-            )
+            await flex_job_mod.run(session_local, organization_id=org_id, trigger="manual")
             tracker.emit(job_id, {"step": current_step, "status": "ok"})
 
         current_step = None

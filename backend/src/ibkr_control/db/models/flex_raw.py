@@ -36,9 +36,9 @@ class FlexImport(Base):
         CheckConstraint("source IN ('web_service', 'manual_upload')", name="source"),
         CheckConstraint("year_status IN ('rolling', 'sealed')", name="year_status"),
         CheckConstraint("status IN ('ok', 'poison')", name="status"),
-        # Dedup is per-ORG now (the persister scopes by organization_id). user_id
-        # is nullable audit metadata (which user triggered the import), NOT the
-        # idempotency key — a NULL user_id must never allow a duplicate import.
+        # Dedup is per-ORG: the persister scopes by organization_id. The org is
+        # the unit of tenancy and operation — there is no user_id on operational
+        # tables (D-CONV-3).
         UniqueConstraint("organization_id", "xml_hash", name="uq_flex_imports_org_xml_hash"),
         Index(None, "organization_id"),
     )
@@ -46,9 +46,6 @@ class FlexImport(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     organization_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
-    )
-    user_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     anyo: Mapped[int] = mapped_column(Integer, nullable=False)
     xml_hash: Mapped[str] = mapped_column(String, nullable=False)

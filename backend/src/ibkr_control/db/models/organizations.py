@@ -27,6 +27,11 @@ class Organization(Base):
     setup_progress: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
+    # Per-org throttle for the manual ingest trigger (D-CONV-3): the rate limit
+    # is per tenant, not per user.
+    last_ingest_trigger_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("NOW()")
     )

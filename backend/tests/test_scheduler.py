@@ -41,8 +41,8 @@ async def test_run_flex_for_all_orgs_iterates_distinct_orgs(
     db_session, sample_org, sample_user, monkeypatch
 ):
     """The Flex cron iterates distinct flex_credentials.organization_id and calls
-    flex_job.run(organization_id=<org>, user_id=None, trigger='cron') for each —
-    user_id=None because a cron org-batch has no triggering user (audit)."""
+    flex_job.run(organization_id=<org>, trigger='cron') for each — the ingest is
+    purely org-scoped (D-CONV-3), no triggering user."""
     from ibkr_control.db.models.flex_credentials import FlexCredentials
     from ibkr_control.db.models.organizations import Organization
     from ibkr_control.ingest.flex import job as flex_job
@@ -63,8 +63,8 @@ async def test_run_flex_for_all_orgs_iterates_distinct_orgs(
 
     calls: list[dict] = []
 
-    async def fake_run(session_factory, *, organization_id, user_id, trigger):
-        calls.append({"organization_id": organization_id, "user_id": user_id, "trigger": trigger})
+    async def fake_run(session_factory, *, organization_id, trigger):
+        calls.append({"organization_id": organization_id, "trigger": trigger})
 
     monkeypatch.setattr(flex_job, "run", fake_run)
 
@@ -72,7 +72,6 @@ async def test_run_flex_for_all_orgs_iterates_distinct_orgs(
 
     called_orgs = {c["organization_id"] for c in calls}
     assert called_orgs == {sample_org.id, org2.id}
-    assert all(c["user_id"] is None for c in calls)
     assert all(c["trigger"] == "cron" for c in calls)
 
 

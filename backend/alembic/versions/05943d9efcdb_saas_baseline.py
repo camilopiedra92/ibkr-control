@@ -34,6 +34,7 @@ def upgrade() -> None:
             server_default=sa.text("'{}'::jsonb"),
             nullable=False,
         ),
+        sa.Column("last_ingest_trigger_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -91,7 +92,6 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
             nullable=False,
         ),
-        sa.Column("last_ingest_trigger_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("email", sa.String(length=320), nullable=False),
         sa.Column("hashed_password", sa.String(length=1024), nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False),
@@ -187,7 +187,6 @@ def upgrade() -> None:
         "flex_imports",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
         sa.Column("organization_id", sa.BigInteger(), nullable=False),
-        sa.Column("user_id", sa.BigInteger(), nullable=True),
         sa.Column("anyo", sa.Integer(), nullable=False),
         sa.Column("xml_hash", sa.String(), nullable=False),
         sa.Column("xml_size_bytes", sa.Integer(), nullable=False),
@@ -229,16 +228,8 @@ def upgrade() -> None:
             name=op.f("fk_flex_imports_organization_id_organizations"),
             ondelete="CASCADE",
         ),
-        sa.ForeignKeyConstraint(
-            ["user_id"],
-            ["users.id"],
-            name=op.f("fk_flex_imports_user_id_users"),
-            ondelete="SET NULL",
-        ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_flex_imports")),
-        sa.UniqueConstraint(
-            "organization_id", "xml_hash", name="uq_flex_imports_org_xml_hash"
-        ),
+        sa.UniqueConstraint("organization_id", "xml_hash", name="uq_flex_imports_org_xml_hash"),
     )
     op.create_index(
         op.f("ix_flex_imports_organization_id"), "flex_imports", ["organization_id"], unique=False
@@ -248,7 +239,6 @@ def upgrade() -> None:
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
         sa.Column("organization_id", sa.BigInteger(), nullable=False),
         sa.Column("job_kind", sa.Text(), nullable=False),
-        sa.Column("user_id", sa.BigInteger(), nullable=True),
         sa.Column(
             "started_at",
             sa.DateTime(timezone=True),
@@ -276,19 +266,16 @@ def upgrade() -> None:
             name=op.f("fk_ingest_log_organization_id_organizations"),
             ondelete="CASCADE",
         ),
-        sa.ForeignKeyConstraint(
-            ["user_id"], ["users.id"], name=op.f("fk_ingest_log_user_id_users"), ondelete="SET NULL"
-        ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_ingest_log")),
     )
     op.create_index(
-        op.f("ix_ingest_log_organization_id"), "ingest_log", ["organization_id"], unique=False
+        "ix_ingest_log_org_started_at",
+        "ingest_log",
+        ["organization_id", sa.literal_column("started_at DESC")],
+        unique=False,
     )
     op.create_index(
-        "ix_ingest_log_user_id_started_at",
-        "ingest_log",
-        ["user_id", sa.literal_column("started_at DESC")],
-        unique=False,
+        op.f("ix_ingest_log_organization_id"), "ingest_log", ["organization_id"], unique=False
     )
     op.create_table(
         "memberships",
@@ -982,8 +969,8 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_parties_organization_id"), table_name="parties")
     op.drop_table("parties")
     op.drop_table("memberships")
-    op.drop_index("ix_ingest_log_user_id_started_at", table_name="ingest_log")
     op.drop_index(op.f("ix_ingest_log_organization_id"), table_name="ingest_log")
+    op.drop_index("ix_ingest_log_org_started_at", table_name="ingest_log")
     op.drop_table("ingest_log")
     op.drop_index(op.f("ix_flex_imports_organization_id"), table_name="flex_imports")
     op.drop_table("flex_imports")

@@ -10,12 +10,11 @@ from scripts.poison_reset import reset_poison
 
 
 @pytest.mark.asyncio
-async def test_reset_deletes_poison_row(db_session: AsyncSession, sample_org, sample_user):
+async def test_reset_deletes_poison_row(db_session: AsyncSession, sample_org):
     h = "abc123" * 10  # 60 chars (not 64, but fine for the test)
     db_session.add(
         FlexImport(
             organization_id=sample_org.id,
-            user_id=sample_user.id,
             xml_hash=h,
             xml_bytes=b"x",
             xml_size_bytes=1,
@@ -38,13 +37,12 @@ async def test_reset_deletes_poison_row(db_session: AsyncSession, sample_org, sa
 
 
 @pytest.mark.asyncio
-async def test_reset_does_not_delete_ok_rows(db_session: AsyncSession, sample_org, sample_user):
+async def test_reset_does_not_delete_ok_rows(db_session: AsyncSession, sample_org):
     """Safety: never delete a status='ok' row."""
     h = "def456" * 10
     db_session.add(
         FlexImport(
             organization_id=sample_org.id,
-            user_id=sample_user.id,
             xml_hash=h,
             xml_bytes=b"x",
             xml_size_bytes=1,

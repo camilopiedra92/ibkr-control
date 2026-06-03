@@ -29,9 +29,18 @@ async def apply_org_context(session: AsyncSession, *, org_id: int, user_id: int)
 async def resolve_current_org_id(
     session: AsyncSession, *, user_id: int, requested_org_id: int | None
 ) -> int:
-    """The org the request acts in. Default: the user's (first) membership. A
-    requested org must be one the user is a member of. Cross-org access via
-    grants is SP2 — here we honor only the user's own memberships."""
+    """The org the request acts in. Org selection is EXPLICIT (D-CONV-3): there
+    is no silent first-pick "common case".
+
+    - exactly one membership + no requested org → resolve it.
+    - multiple memberships + no requested org → 400 ORG_SELECTION_REQUIRED
+      (the caller must pick; we never guess).
+    - requested org not in memberships → 403 NOT_A_MEMBER.
+    - no memberships → 403 NO_ORG_MEMBERSHIP.
+
+    Cross-org access via grants is SP2 — here we honor only the user's own
+    memberships.
+    """
     rows = (
         await session.scalars(
             select(Membership.organization_id).where(Membership.user_id == user_id)
@@ -40,6 +49,8 @@ async def resolve_current_org_id(
     if not rows:
         raise HTTPException(status_code=403, detail="NO_ORG_MEMBERSHIP")
     if requested_org_id is None:
+        if len(rows) > 1:
+            raise HTTPException(status_code=400, detail="ORG_SELECTION_REQUIRED")
         return rows[0]
     if requested_org_id not in rows:
         raise HTTPException(status_code=403, detail="NOT_A_MEMBER")

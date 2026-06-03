@@ -31,7 +31,6 @@ async def test_parser_failure_creates_poison_row(
         await flex_job.ingest_xml(
             db_session,
             organization_id=sample_org.id,
-            user_id=sample_user.id,
             xml_bytes=bad_xml,
             source="manual_upload",
             trigger="manual",
@@ -71,7 +70,6 @@ async def test_second_attempt_of_poison_xml_short_circuits(
         await flex_job.ingest_xml(
             db_session,
             organization_id=sample_org.id,
-            user_id=sample_user.id,
             xml_bytes=bad_xml,
             source="manual_upload",
             trigger="manual",
@@ -95,7 +93,6 @@ async def test_second_attempt_of_poison_xml_short_circuits(
         result_id = await flex_job.ingest_xml(
             s2,
             organization_id=sample_org.id,
-            user_id=sample_user.id,
             xml_bytes=bad_xml,
             source="manual_upload",
             trigger="manual",
@@ -127,7 +124,6 @@ async def test_recovery_via_delete_allows_retry(
         await flex_job.ingest_xml(
             db_session,
             organization_id=sample_org.id,
-            user_id=sample_user.id,
             xml_bytes=bad_xml,
             source="manual_upload",
             trigger="manual",

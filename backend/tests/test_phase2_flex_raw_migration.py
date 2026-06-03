@@ -28,7 +28,6 @@ async def test_flex_imports_xml_hash_unique(db_session: AsyncSession, sample_use
     from ibkr_control.db.models.flex_raw import FlexImport
 
     fi1 = FlexImport(
-        user_id=sample_user.id,
         anyo=2025,
         xml_hash="deadbeef",
         xml_size_bytes=1000,
@@ -42,7 +41,6 @@ async def test_flex_imports_xml_hash_unique(db_session: AsyncSession, sample_use
     await db_session.commit()
     db_session.add(
         FlexImport(
-            user_id=sample_user.id,
             anyo=2025,
             xml_hash="deadbeef",  # dup
             xml_size_bytes=2000,
@@ -63,7 +61,6 @@ async def test_trades_transaction_id_unique(db_session: AsyncSession, sample_use
     from ibkr_control.db.models.flex_raw import FlexImport, Trade
 
     fi = FlexImport(
-        user_id=sample_user.id,
         anyo=2025,
         xml_hash="hash-trades-test",
         xml_size_bytes=100,
@@ -115,7 +112,6 @@ async def test_trades_buy_sell_check(db_session: AsyncSession, sample_user, samp
     from ibkr_control.db.models.flex_raw import FlexImport, Trade
 
     fi = FlexImport(
-        user_id=sample_user.id,
         anyo=2025,
         xml_hash="hash-bs-test",
         xml_size_bytes=100,
@@ -160,7 +156,6 @@ async def test_delete_flex_import_sets_children_null(
     from ibkr_control.db.models.flex_raw import FlexImport, Trade
 
     fi = FlexImport(
-        user_id=sample_user.id,
         anyo=2025,
         xml_hash="hash-set-null-test",
         xml_size_bytes=100,

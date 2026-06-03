@@ -201,7 +201,7 @@ async def persist(
     await session.flush()
 
     # R1 latest-1 cleanup. For year_status='rolling' rows of the same
-    # (user_id, anyo, source), retain only the row just persisted (fi.id).
+    # (organization_id, anyo, source), retain only the row just persisted (fi.id).
     # Sealed rows are pinned. Poison rows are forensic evidence — preserved.
     #
     # H1 provenance interaction: deleting an evicted rolling import CASCADE-deletes
@@ -209,7 +209,7 @@ async def persist(
     # import. The current import's provenance was just written above (same
     # transaction, before this DELETE, against a different fi.id), so it survives;
     # any account still present in the new XML is re-covered. Consequence: if a
-    # later rolling import for the same (user, anyo, source) drops an account
+    # later rolling import for the same (org, anyo, source) drops an account
     # (not in the new XML), that account's provenance is gone — step2/save would
     # then return ACCOUNT_NOT_DETECTED for it. That is the correct outcome: the
     # most recent statement is authoritative about which accounts exist.

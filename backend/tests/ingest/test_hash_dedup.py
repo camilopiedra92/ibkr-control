@@ -51,7 +51,6 @@ async def test_check_hash_status_ok_when_hash_exists_for_org(
     db_session.add(
         FlexImport(
             organization_id=sample_org.id,
-            user_id=sample_user.id,
             anyo=2026,
             xml_hash=h,
             xml_size_bytes=6,
@@ -80,7 +79,6 @@ async def test_check_hash_status_poison_when_hash_marked_poison(
     db_session.add(
         FlexImport(
             organization_id=sample_org.id,
-            user_id=sample_user.id,
             anyo=2026,
             xml_hash=h,
             xml_size_bytes=13,
@@ -125,7 +123,6 @@ async def test_check_hash_status_absent_when_hash_exists_for_different_org(
     db_session.add(
         FlexImport(
             organization_id=sample_org.id,
-            user_id=sample_user.id,
             anyo=2026,
             xml_hash=h,
             xml_size_bytes=13,

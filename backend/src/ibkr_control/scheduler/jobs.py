@@ -17,7 +17,7 @@ async def _run_flex_for_all_orgs() -> None:
     """Itera sobre cada org con flex_credentials y corre flex_job.run.
 
     flex_credentials es per-org (no per-user) → el cron itera organizaciones.
-    user_id=None: un batch del cron por-org no tiene usuario disparador (audit).
+    El ingest es puramente org-scoped (D-CONV-3): no hay usuario disparador.
 
     Cada run crea su propio engine + SessionLocal y lo dispone al final.
     LockHeldError  -> skip org con warning (manual trigger ya corriendo).
@@ -47,9 +47,7 @@ async def _run_flex_for_all_orgs() -> None:
 
         for org_id in org_ids:
             try:
-                await flex_job.run(
-                    session_local, organization_id=org_id, user_id=None, trigger="cron"
-                )
+                await flex_job.run(session_local, organization_id=org_id, trigger="cron")
             except LockHeldError:
                 logger.warning("flex_daily skipped org_id=%s — lock held", org_id)
             except FlexAuthError as e:

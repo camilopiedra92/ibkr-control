@@ -18,13 +18,12 @@ FIXTURE_DIR = Path(__file__).parent.parent.parent / "fixtures" / "xml"
 
 
 @pytest.mark.asyncio
-async def test_ingest_xml_happy_path(db_session: AsyncSession, sample_org, sample_user):
+async def test_ingest_xml_happy_path(db_session: AsyncSession, sample_org):
     """ingest_xml recibe bytes, parsea, persiste, loggea."""
     xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
     flex_import_id = await flex_job.ingest_xml(
         db_session,
         organization_id=sample_org.id,
-        user_id=sample_user.id,
         xml_bytes=xml,
         source="manual_upload",
         trigger="wizard",
@@ -40,7 +39,6 @@ async def test_ingest_xml_happy_path(db_session: AsyncSession, sample_org, sampl
         select(func.count(IngestLog.id)).where(
             IngestLog.job_kind == "manual_upload",
             IngestLog.organization_id == sample_org.id,
-            IngestLog.user_id == sample_user.id,
             IngestLog.status == "ok",
         )
     )
@@ -48,15 +46,12 @@ async def test_ingest_xml_happy_path(db_session: AsyncSession, sample_org, sampl
 
 
 @pytest.mark.asyncio
-async def test_ingest_xml_duplicate_returns_existing(
-    db_session: AsyncSession, sample_org, sample_user
-):
+async def test_ingest_xml_duplicate_returns_existing(db_session: AsyncSession, sample_org):
     """Re-upload del mismo XML devuelve el flex_import_id existente."""
     xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
     id_1 = await flex_job.ingest_xml(
         db_session,
         organization_id=sample_org.id,
-        user_id=sample_user.id,
         xml_bytes=xml,
         source="manual_upload",
         trigger="wizard",
@@ -64,7 +59,6 @@ async def test_ingest_xml_duplicate_returns_existing(
     id_2 = await flex_job.ingest_xml(
         db_session,
         organization_id=sample_org.id,
-        user_id=sample_user.id,
         xml_bytes=xml,
         source="manual_upload",
         trigger="wizard",
@@ -74,7 +68,7 @@ async def test_ingest_xml_duplicate_returns_existing(
 
 @pytest.mark.asyncio
 async def test_ingest_xml_logs_failure_on_parse_error(
-    db_session: AsyncSession, db_engine, sample_org, sample_user
+    db_session: AsyncSession, db_engine, sample_org
 ):
     """Si el parser lanza XMLSyntaxError, ingest_log queda en 'failed' con error_message."""
     bad_xml = (FIXTURE_DIR / "malformed_xml.xml").read_bytes()
@@ -82,7 +76,6 @@ async def test_ingest_xml_logs_failure_on_parse_error(
         await flex_job.ingest_xml(
             db_session,
             organization_id=sample_org.id,
-            user_id=sample_user.id,
             xml_bytes=bad_xml,
             source="manual_upload",
             trigger="wizard",
@@ -100,7 +93,7 @@ async def test_ingest_xml_logs_failure_on_parse_error(
         row = await s2.scalar(
             select(IngestLog)
             .where(
-                IngestLog.user_id == sample_user.id,
+                IngestLog.organization_id == sample_org.id,
                 IngestLog.status == "failed",
             )
             .order_by(IngestLog.id.desc())
@@ -113,7 +106,7 @@ async def test_ingest_xml_logs_failure_on_parse_error(
 
 @pytest.mark.asyncio
 async def test_ingest_xml_rolls_back_persister_on_failure(
-    db_session: AsyncSession, db_engine, sample_org, sample_user
+    db_session: AsyncSession, db_engine, sample_org
 ):
     """Si persist() falla, el SAVEPOINT del job revierte writes parciales del
     persister pero el ingest_log 'failed' persiste.
@@ -181,7 +174,6 @@ async def test_ingest_xml_rolls_back_persister_on_failure(
             await flex_job.ingest_xml(
                 db_session,
                 organization_id=sample_org.id,
-                user_id=sample_user.id,
                 xml_bytes=b"<xml>bad-fk</xml>",
                 source="manual_upload",
                 trigger="wizard",
@@ -212,7 +204,7 @@ async def test_ingest_xml_rolls_back_persister_on_failure(
         log_row = await s2.scalar(
             select(IngestLog)
             .where(
-                IngestLog.user_id == sample_user.id,
+                IngestLog.organization_id == sample_org.id,
                 IngestLog.status == "failed",
             )
             .order_by(IngestLog.id.desc())
@@ -228,7 +220,7 @@ async def test_ingest_xml_rolls_back_persister_on_failure(
 
 @pytest.mark.asyncio
 async def test_run_happy_path_with_mocked_flex_client(
-    monkeypatch, db_session: AsyncSession, db_engine, sample_org, sample_user
+    monkeypatch, db_session: AsyncSession, db_engine, sample_org
 ):
     """run() fetches from Flex WS (mocked), persists XML, marks log ok."""
     import base64
@@ -273,7 +265,7 @@ async def test_run_happy_path_with_mocked_flex_client(
     from ibkr_control.ingest.flex import job as flex_job_mod
 
     flex_import_id = await flex_job_mod.run(
-        SessionLocal, organization_id=sample_org.id, user_id=sample_user.id, trigger="cron"
+        SessionLocal, organization_id=sample_org.id, trigger="cron"
     )
     assert flex_import_id is not None
 
@@ -281,18 +273,17 @@ async def test_run_happy_path_with_mocked_flex_client(
     async with SessionLocal() as s2:
         fi = await s2.get(FlexImport, flex_import_id)
         assert fi is not None
-        # The persister stamps organization_id on the FlexImport (not user_id —
-        # user_id is audit-only and only stamped on poison rows).
+        # The persister stamps organization_id on the FlexImport. The ingest path
+        # is purely org-scoped (D-CONV-3) — no user_id on operational tables.
         assert fi.organization_id == sample_org.id
         assert fi.source == "web_service"
         assert fi.status == "ok"
 
-        # Verify ingest_log row was created with correct metadata (org + audit user)
+        # Verify ingest_log row was created with correct metadata (org-scoped)
         n_logs = await s2.scalar(
             select(func.count(IngestLog.id)).where(
                 IngestLog.job_kind == "flex",
                 IngestLog.organization_id == sample_org.id,
-                IngestLog.user_id == sample_user.id,
                 IngestLog.status == "ok",
                 IngestLog.trigger == "cron",
             )
@@ -302,7 +293,7 @@ async def test_run_happy_path_with_mocked_flex_client(
 
 @pytest.mark.asyncio
 async def test_run_idempotent_across_different_xmls_with_overlapping_trades(
-    monkeypatch, db_session: AsyncSession, db_engine, sample_org, sample_user
+    monkeypatch, db_session: AsyncSession, db_engine, sample_org
 ):
     """Regression test para D13 [BUG-FIXED] (2026-05-25).
 
@@ -360,18 +351,14 @@ async def test_run_idempotent_across_different_xmls_with_overlapping_trades(
     SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
 
     # First run: fresh insert, must succeed
-    fi_id_1 = await flex_job_mod.run(
-        SessionLocal, organization_id=sample_org.id, user_id=sample_user.id, trigger="cron"
-    )
+    fi_id_1 = await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
     assert fi_id_1 is not None
 
     # Second run with a DIFFERENT XML (different hash) but overlapping trades.
     # Pre-D13-fix this would crash with UniqueViolationError on trades_transaction_id_key.
     # Post-fix it must succeed and return a new flex_import_id (new XML = new row),
     # but children get DO NOTHING / DO UPDATE per entity type.
-    fi_id_2 = await flex_job_mod.run(
-        SessionLocal, organization_id=sample_org.id, user_id=sample_user.id, trigger="cron"
-    )
+    fi_id_2 = await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
     assert fi_id_2 is not None
     assert fi_id_2 != fi_id_1, "Different XML bytes should create a new FlexImport"
 
@@ -380,7 +367,7 @@ async def test_run_idempotent_across_different_xmls_with_overlapping_trades(
         n_ok = await s2.scalar(
             select(func.count(IngestLog.id)).where(
                 IngestLog.job_kind == "flex",
-                IngestLog.user_id == sample_user.id,
+                IngestLog.organization_id == sample_org.id,
                 IngestLog.status == "ok",
                 IngestLog.trigger == "cron",
             )
@@ -391,7 +378,7 @@ async def test_run_idempotent_across_different_xmls_with_overlapping_trades(
         n_failed = await s2.scalar(
             select(func.count(IngestLog.id)).where(
                 IngestLog.job_kind == "flex",
-                IngestLog.user_id == sample_user.id,
+                IngestLog.organization_id == sample_org.id,
                 IngestLog.status == "failed",
             )
         )
@@ -422,7 +409,7 @@ async def test_run_idempotent_across_different_xmls_with_overlapping_trades(
 
 @pytest.mark.asyncio
 async def test_run_returns_none_if_hash_already_known(
-    monkeypatch, db_session: AsyncSession, db_engine, sample_org, sample_user
+    monkeypatch, db_session: AsyncSession, db_engine, sample_org
 ):
     """If is_known_hash(fetched_xml) == True, run() returns None and items_processed=0."""
     import base64
@@ -461,15 +448,11 @@ async def test_run_returns_none_if_hash_already_known(
     SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
 
     # First run: persists XML, returns a valid ID
-    fi_id_1 = await flex_job_mod.run(
-        SessionLocal, organization_id=sample_org.id, user_id=sample_user.id, trigger="cron"
-    )
+    fi_id_1 = await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
     assert fi_id_1 is not None
 
     # Second run: same XML hash → early exit, returns None
-    fi_id_2 = await flex_job_mod.run(
-        SessionLocal, organization_id=sample_org.id, user_id=sample_user.id, trigger="cron"
-    )
+    fi_id_2 = await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
     assert fi_id_2 is None
 
     async with SessionLocal() as s2:
@@ -502,7 +485,6 @@ async def test_run_logs_info_on_ok_hash_skip(
     db_session,
     db_engine,
     sample_org,
-    sample_user,
 ):
     """run() encuentra hash con status='ok' -> skip + info log."""
     from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -532,7 +514,6 @@ async def test_run_logs_info_on_ok_hash_skip(
     db_session.add(
         FI(
             organization_id=sample_org.id,
-            user_id=sample_user.id,
             xml_hash=h,
             xml_bytes=xml,
             xml_size_bytes=len(xml),
@@ -555,9 +536,7 @@ async def test_run_logs_info_on_ok_hash_skip(
 
     from ibkr_control.ingest.flex import job as flex_job_mod
 
-    result = await flex_job_mod.run(
-        session_factory, organization_id=sample_org.id, user_id=sample_user.id, trigger="cron"
-    )
+    result = await flex_job_mod.run(session_factory, organization_id=sample_org.id, trigger="cron")
 
     assert result is None
     assert "duplicate hash" in caplog.text and "skipped" in caplog.text
@@ -570,7 +549,6 @@ async def test_run_logs_warning_on_poison_hash_skip(
     db_session,
     db_engine,
     sample_org,
-    sample_user,
 ):
     """run() encuentra hash con status='poison' -> skip + warning log con recovery hint."""
     from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -600,7 +578,6 @@ async def test_run_logs_warning_on_poison_hash_skip(
     db_session.add(
         FI(
             organization_id=sample_org.id,
-            user_id=sample_user.id,
             xml_hash=h,
             xml_bytes=xml,
             xml_size_bytes=len(xml),
@@ -622,9 +599,7 @@ async def test_run_logs_warning_on_poison_hash_skip(
 
     from ibkr_control.ingest.flex import job as flex_job_mod
 
-    result = await flex_job_mod.run(
-        session_factory, organization_id=sample_org.id, user_id=sample_user.id, trigger="cron"
-    )
+    result = await flex_job_mod.run(session_factory, organization_id=sample_org.id, trigger="cron")
 
     assert result is None
     assert "previously poisoned" in caplog.text
