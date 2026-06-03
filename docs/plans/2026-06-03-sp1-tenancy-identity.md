@@ -26,13 +26,21 @@
 - **Task 15** — persister stamps `organization_id` on FlexImport + all facts + flex_import_accounts + ensure_accounts/counterparties; dedup + R1 cleanup scope by org. Follow-up fix: `flex_imports` dedup UNIQUE → `(organization_id, xml_hash)`, `user_id` nullable audit (per-org idempotency); `flex_import_accounts` comment de-staled.
 - **Task 17** — `scripts/provision_org.py` (`provision_org()` + CLI): org + user (PasswordHelper hash) + UserSettings + Membership(owner) + Party.
 
-**Convergence progress (updated 2026-06-03):**
-- ✅ **Task 18** (`676f552`) — `conftest.py` fixtures rebuilt around org/party (`sample_org`/`sample_party`/`auth_headers_with_org`, `sample_user` = faithful identity incl. UserSettings; DRY DSN/alembic helpers extracted). Spec+quality reviewed. 22 fixture errors → 0; 197→213 pass.
-- ✅ **Task 16** (`f5b56b3`) — wizard (`api/setup.py`, 9 endpoints) org-context + party-anchored participations; setup-state moved User→Organization; `_founding_party_id` helper; H1 helpers org-scoped. Whole `tests/api/test_setup_*` suite green (35). Spec+quality reviewed.
-- ⏳ **Task 19 (RE-SCOPED)** — convergence is an org-aware conversion of ~11 source modules + 2 decisions (D-CONV-1 TRM control-plane, D-CONV-2 cron org-loop — see spec). Split into 19a (ingest write-path: log/hash_dedup/flex.job) → 19b (jobs/cron: trm.job drops ingest_log + scheduler org-loop) → 19c (endpoints credentials/imports/ingest/health) → 19d (delete obsolete migration tests + full green + boot smoke). Details below under Task 19.
-- ⏳ **Task 14** — switch `app_with_db` from `create_all` to `alembic upgrade head` + connect as `app_rls` + auto-set org context (endpoint suite UNDER RLS). **LAST** — `create_all` has no RLS, so endpoints go green on the model change first; then RLS hardening surfaces missing-context bugs.
+**✅ CONVERGENCE COMPLETE (2026-06-03) — SP1 done, suite 337 green under RLS, ready to finish branch.** All convergence tasks landed + each two-stage reviewed (spec + code quality) + a final holistic review (all 6 SP1 invariants HOLD). Commits on `saas/sp1-tenancy-identity`:
+- ✅ **Task 18** (`676f552`) — `conftest.py` fixtures around org/party (`sample_org`/`sample_party`/`auth_headers_with_org`; `sample_user` faithful identity incl. UserSettings; DRY DSN/alembic helpers). 22 fixture errors → 0.
+- ✅ **Task 16** (`f5b56b3`) — wizard org-context + party-anchored participations; setup-state User→Organization; `_founding_party_id`. `tests/api/test_setup_*` green.
+- ✅ **Task 19a** (`caa1c8d`) — ingest write-path org-aware (`ingest/log.py`, `hash_dedup.py`, `flex/job.py`; lock param `user_id`→`scope_id`).
+- ✅ **Task 19b** (`51fb293`) — TRM control-plane out of `ingest_log` (D-CONV-1, plain-tx + failure-path test) + Flex cron per-org (D-CONV-2).
+- ✅ **Task 19c** (`55d582a`) — endpoints org-aware (credentials/imports/ingest/health; health TRM←`trm_imports`, Flex←`ingest_log`).
+- ✅ **Org-pure purge / 19c.1** (`9884d90`, D-CONV-3) — dropped `flex_imports.user_id` + `ingest_log.user_id`(+index); throttle `users`→`organizations`; explicit org selection (400 `ORG_SELECTION_REQUIRED`); `user_id` audit threading removed from ingest path. Baseline EDITED in place (drift-clean).
+- ✅ **Task 19d** (`e83cfb1`) — full suite green: adapted persister/ephemeral tests (+org_id), retired obsolete migration-mechanics (Phase 2.8 triage), boot smoke OK.
+- ✅ **Task 14a** (`a2e0453`) — endpoint suite runs UNDER RLS as `app_rls` (per-test migrated DB). Surfaced+fixed a real latent bug: `imports.py` re-pull after `ingest_xml`'s internal commit ran context-less → default-deny → fixed by re-applying context. `alembic/env.py` logger fix.
+- ✅ **Task 14b** (`a4ffdb5`) — `flex_job.run` self-sets org RLS context (manual-bg path was default-denied under `app_rls`); `apply_org_context` handles no-user system context (`''` not `'None'`, closes a 22P02 landmine); relocated to `db/rls.py` (fixed the only `ingest/`→`api/` import).
+- ✅ **Final-review cleanups** (`3b86ad3`) — honest doc of the cron org-enumeration RLS gap (SP7) + dropped a dead re-export.
 
-**Resume order:** 19a → 19b → 19c → 19d (green under `create_all`) → 14 (RLS hardening) → final code review → `superpowers:finishing-a-development-branch`. Container is bind-mounted; generate/verify migrations via `docker compose exec backend`. Run tests from host: `cd backend && uv run pytest`.
+**Known documented gaps (NOT bugs — explicit SP boundaries):** (1) the cron's cross-tenant org-enumeration default-denies under `app_rls` → needs a system/bypass connection = **SP7** (the per-org `flex_job.run` IS RLS-correct, proven by `test_job_rls.py`); (2) `accounts.ibkr_account_id` global-unique → a broker account is single-org by design (cross-org ingest fails on integrity without existence leak; graceful generic error = SP7); (3) grant enforcement = SP2. Per-test migrated containers make the RLS endpoint suite ~210s (correctness over speed; optional future optimization).
+
+**Next:** `superpowers:finishing-a-development-branch`.
 
 ---
 
