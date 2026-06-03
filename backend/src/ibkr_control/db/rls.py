@@ -25,14 +25,23 @@ ORG_SCOPED_TABLES = [
 
 APP_ROLE = "app_rls"
 
+# Read a session GUC as bigint. NULLIF(..., '') is load-bearing: current_setting
+# with missing_ok=true returns '' (empty string) when the GUC is unset, and
+# ''::bigint RAISES (22P02) rather than yielding NULL. Without NULLIF an unset
+# context would 500 instead of cleanly matching nothing. With it, an unset
+# context yields NULL → `organization_id = NULL` is never true → default-deny,
+# no error. Fail-closed AND clean.
+_CURRENT_ORG = "NULLIF(current_setting('app.current_org', true), '')::bigint"
+_CURRENT_USER = "NULLIF(current_setting('app.current_user', true), '')::bigint"
+
 
 def standard_policy_sql(table: str) -> list[str]:
     return [
         f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY",
         f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY",
         f"""CREATE POLICY org_isolation ON {table}
-            USING (organization_id = current_setting('app.current_org', true)::bigint)
-            WITH CHECK (organization_id = current_setting('app.current_org', true)::bigint)""",
+            USING (organization_id = {_CURRENT_ORG})
+            WITH CHECK (organization_id = {_CURRENT_ORG})""",
     ]
 
 
@@ -40,12 +49,13 @@ def access_grants_policy_sql() -> list[str]:
     return [
         "ALTER TABLE access_grants ENABLE ROW LEVEL SECURITY",
         "ALTER TABLE access_grants FORCE ROW LEVEL SECURITY",
-        """CREATE POLICY grant_visibility ON access_grants
+        f"""CREATE POLICY grant_visibility ON access_grants
             USING (
-              organization_id = current_setting('app.current_org', true)::bigint
-              OR grantee_organization_id = current_setting('app.current_org', true)::bigint
-              OR grantee_user_id = current_setting('app.current_user', true)::bigint
-            )""",
+              organization_id = {_CURRENT_ORG}
+              OR grantee_organization_id = {_CURRENT_ORG}
+              OR grantee_user_id = {_CURRENT_USER}
+            )
+            WITH CHECK (organization_id = {_CURRENT_ORG})""",
     ]
 
 
