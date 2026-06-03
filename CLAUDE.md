@@ -2,7 +2,15 @@
 
 ## ⏯ Cómo continuar (próxima sesión)
 
-**Phase 2.x + 2.7 + 2.8 + 2.9 (lot `asset_class` cleanup) TODOS completos, mergeados a `main` y pusheados a `origin` (2026-06-02). Tags `v0.2.0`→`v0.2.7` en remote; `main` == `origin/main` en `0b61a9b` (un commit de cleanup pre-Phase-3 por encima del tag `v0.2.7`). Próximo: Phase 3.**
+**PRE-DEPLOY HARDENING EN CURSO (iniciado 2026-06-03). Phase 2.x está cerrada; Phase 3 va DESPUÉS del hardening.**
+
+> **⚠️ El repo ahora es PÚBLICO y `main` está PROTEGIDO — NO se commitea directo a `main`. TODO va por branch → PR → CI verde (`backend` + `frontend`) → merge.** El owner puede bypassear en emergencia (`enforce_admins=false`). Ver memoria [[repo-must-be-generic-product]].
+>
+> **Backlog del hardening (tracker con checkboxes): `docs/plans/2026-06-03-pre-deploy-hardening-backlog.md`** — 34 accionables, derivados de una auditoría multi-agente (seguridad / CI-CD / observabilidad / arquitectura / testing). **Hecho (3/34):** G1 (genericización del repo + público + historia limpia), C3 (branch protection), C12 (actions Node 24). **PRÓXIMO: Ola 1 — seguridad (WS1), empezando por H1 (IDOR del wizard, `api/setup.py`) + S1 (cerrar el registro abierto).** Olas, orden y método (subagent-driven + TDD, branch+PR por item/ola) en el backlog §"Notas de implementación".
+>
+> **PII / producto genérico:** cero datos reales en el repo (cuentas → `U99999001/2/3`, nombres → `Test Owner`/`Joint Holder`). El mapping real→genérico vive en `backend/scripts/.sanitize_mapping.local.json` (**gitignored, untracked**); `sanitize_xml.py` + el guard `test_fixtures_smoke.py` lo leen. **No reintroducir datos reales** — verificar con grep antes de commitear.
+>
+> _Phase 2.x (contexto histórico): completa, tags `v0.2.0`→`v0.2.7` en remote. La numeración de SHAs/commits cambió tras el scrub de historial de G1 (filter-repo); los tags fueron re-creados sobre la historia limpia._
 
 > Verificado contra git/tests el 2026-06-02 (cierre Phase 2.9): `main` en el tag `v0.2.7-lot-asset-class` (código mergeado ff en `8197c5d` + este doc), working tree limpio, branch `fix/lot-asset-class` mergeada (fast-forward) y borrada. `cd backend && uv run pytest -q` → **310 passed**. `ruff check .` → clean, `ruff format --check .` → 0 drift. DB dev wipeada + recargada sobre el schema nuevo (migración `eb5ef6d36e06`) + verificada con datos reales: lotes GLOB (bono RSU Globant, FOP) = `asset_class='STK'` con `source_trade_id` NULL, futuro MES = `asset_class='FUT'`, 0 nulos. Ver Retrospectiva §"Phase 2.9".
 
