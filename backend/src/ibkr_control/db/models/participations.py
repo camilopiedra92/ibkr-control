@@ -3,7 +3,15 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, CheckConstraint, Date, ForeignKey, Numeric, PrimaryKeyConstraint
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    Date,
+    ForeignKey,
+    Index,
+    Numeric,
+    PrimaryKeyConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ibkr_control.db.base import Base
@@ -15,6 +23,7 @@ class Participation(Base):
         PrimaryKeyConstraint("party_id", "account_id", "valid_from"),
         CheckConstraint("pct >= 0 AND pct <= 1", name="pct_range"),
         CheckConstraint("valid_to IS NULL OR valid_to > valid_from", name="valid_range"),
+        Index(None, "organization_id"),
         {"comment": "Propiedad fiscal: Party posee Account con pct (SCD-2). Org-scoped."},
     )
 

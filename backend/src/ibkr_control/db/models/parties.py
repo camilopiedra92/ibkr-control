@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String, text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ibkr_control.db.base import Base
@@ -10,13 +10,16 @@ from ibkr_control.db.base import Base
 
 class Party(Base):
     __tablename__ = "parties"
-    __table_args__ = {
-        "comment": (
-            "Persona fiscal (contribuyente). Duena de cuentas via participations. "
-            "Separada de User: puede no tener login (conyuge, cliente del estudio). "
-            "Org-scoped (organization_id, RLS)."
-        )
-    }
+    __table_args__ = (
+        Index(None, "organization_id"),
+        {
+            "comment": (
+                "Persona fiscal (contribuyente). Duena de cuentas via participations. "
+                "Separada de User: puede no tener login (conyuge, cliente del estudio). "
+                "Org-scoped (organization_id, RLS)."
+            )
+        },
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     organization_id: Mapped[int] = mapped_column(
