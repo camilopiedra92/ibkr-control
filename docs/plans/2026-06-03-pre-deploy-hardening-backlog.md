@@ -40,9 +40,9 @@
 
 | Estado | Count |
 |---|---|
-| ✅ Hecho | 2 / 34 |
+| ✅ Hecho | 3 / 34 |
 | 🔨 En progreso | 0 |
-| ⏳ Pendiente | 32 |
+| ⏳ Pendiente | 31 |
 | ⚖️ Aceptado V1 | 11 |
 | 🟦 Diferido | 1 |
 
@@ -51,7 +51,7 @@
 | WS | Workstream | Accionables | Hechos |
 |---|---|---|---|
 | WS0 | Genericización del repo (prerequisito) | 1 | ✅ 1 |
-| WS1 | Seguridad de la aplicación (incl. H1, S14) | 11 | 0 |
+| WS1 | Seguridad de la aplicación (incl. H1, S14) | 11 | 1 (H1) |
 | WS2 | Config de deploy / secrets | 2 | 0 |
 | WS3 | Observabilidad / resiliencia | 3 | 0 |
 | WS4 | CI/CD & automatización | 10 | 1 (C3) |
@@ -93,11 +93,11 @@
 
 ## 🔴 HIGH — el bug que importa (gate absoluto antes de deploy)
 
-### [ ] H1 — IDOR en el setup wizard: cualquier usuario se auto-asigna participación a cualquier cuenta
+### [x] H1 — IDOR en el setup wizard: cualquier usuario se auto-asigna participación a cualquier cuenta
 
 - **Severidad:** HIGH (verificada — **el verificador la MANTUVO en high**, no la bajó) · **Tipo:** 🟢 core · **Effort:** M · **WS:** WS1
 - **Ubicación:** `backend/src/ibkr_control/api/setup.py:354-405` (step2/save), `:487-540` (step3/save_new_accounts), `:543-612` (step3/commit)
-- **Estado:** ⏳ Pendiente
+- **Estado:** ✅ **Hecho** (2026-06-03, commit `9b15822`). Cerrado en las 3 superficies vía scoping al conocimiento legítimo del usuario, no a la tabla global `accounts`. Nueva tabla de procedencia `flex_import_accounts(flex_import_id, account_id)` que el persister puebla con TODAS las cuentas no-shadow observadas en cada import (incluidas las AccountInformation-only sin hechos — el caso del happy-path del wizard): la propiedad cuenta↔usuario pasa a ser **hecho de primera clase registrado**, no inferido vía FK opcional (espeja la lección de Phase 2.9 `asset_class`). Scoping por endpoint: `step2/save` → cuentas en los imports del usuario (join de procedencia vía `flex_imports.user_id`); `step3/save_new_accounts` → cuentas en los uploads del stash del propio usuario; `step3/commit` → cuentas donde el usuario tiene participación abierta ("configurado por él"), no mera existencia global. Migración `8d69e795a517` (down_revision `eb5ef6d36e06`), generada canónicamente en el container; FKs `ondelete=CASCADE` (R1 evicta procedencia con su import, reconstruida en la misma tx). TDD subagent-reviewed: 5 tests nuevos (procedencia incl. fact-less + exclusión F-shadow; 1 test de IDOR por endpoint). Backend 314 → **319 passed**, ruff/format limpios, container bootea con la migración aplicada.
 
 **Problema:** `step2/save`, `step3/save_new_accounts` y `step3/commit` validan los `ibkr_account_id` entrantes contra `select(Account)` **de toda la tabla compartida, sin filtro de ownership/participación**. El único gate per-user es `flex_imports_count > 0` (cualquier import del usuario sirve, no que *ese* account_id venga de *su* import). Luego `step2/save` hace `acc.alias = item.alias` (sobre la fila compartida) e inserta `Participation(user_id=current_user, account_id=acc.id, pct=item.pct)` para cualquier cuenta que exista globalmente.
 
