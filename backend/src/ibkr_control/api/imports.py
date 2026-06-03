@@ -5,7 +5,9 @@ from lxml.etree import XMLSyntaxError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ibkr_control.api._context import org_context
+from ibkr_control.api._context import apply_org_context, org_context
+from ibkr_control.auth.backend import current_active_user
+from ibkr_control.auth.models import User
 from ibkr_control.config import get_settings
 from ibkr_control.db.models.flex_raw import FlexImport
 from ibkr_control.db.session import get_async_session
@@ -22,6 +24,7 @@ _CHUNK_SIZE = 64 * 1024  # 64 KB streaming chunks
 @router.post("/upload")
 async def upload_xml(
     file: UploadFile = File(...),
+    user: User = Depends(current_active_user),
     org_id: int = Depends(org_context),
     session: AsyncSession = Depends(get_async_session),
 ) -> dict:
@@ -96,6 +99,13 @@ async def upload_xml(
         source="manual_upload",
         trigger="wizard",
     )
+
+    # ingest_xml commits internally (via ingest_log_entry), which ends the
+    # transaction the org_context dependency SET LOCAL'd into. Under RLS the
+    # follow-up read below runs in a fresh transaction with no context →
+    # default-deny → fi is None. Re-apply the org context so the re-pull of the
+    # just-written FlexImport is visible (org-scoped). Owner/create_all hid this.
+    await apply_org_context(session, org_id=org_id, user_id=user.id)
 
     fi = await session.scalar(select(FlexImport).where(FlexImport.id == flex_import_id))
     return {

@@ -10,7 +10,13 @@ from ibkr_control.db.base import Base
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False: fileConfig defaults to True, which would
+    # DISABLE every logger not declared in alembic.ini — including the app's
+    # (ibkr_control.*). That silences app logging after any in-process
+    # `alembic upgrade` (tests run migrations via fixtures), which broke caplog
+    # assertions on app loggers. We only want to ADD alembic's logging config,
+    # not tear down the app's.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 settings = get_settings()
 config.set_main_option("sqlalchemy.url", settings.database_url)

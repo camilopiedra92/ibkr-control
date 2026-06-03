@@ -9,7 +9,10 @@ import os
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET", "test-secret-32-chars-minimum-please-ok")
 
+import asyncio
+
 import pytest
+from alembic import command
 from httpx import ASGITransport, AsyncClient
 from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -24,6 +27,8 @@ from tests.conftest_ephemeral_db import (  # noqa: F401
     ephemeral_db_url,
     ephemeral_session_factory,
     rls_session_factory,
+    build_alembic_config,
+    swap_dsn_credentials,
 )
 
 
@@ -43,21 +48,56 @@ def postgres_container():
 
 
 @pytest.fixture
-async def app_with_db(postgres_container, monkeypatch):
-    url = postgres_container.get_connection_url()
-    monkeypatch.setenv("DATABASE_URL", url)
-    monkeypatch.setenv("JWT_SECRET", "test-secret-32-chars-minimum-please-ok")
-    monkeypatch.setenv("JWT_LIFETIME_SECONDS", "3600")
-    monkeypatch.setenv("BACKEND_CORS_ORIGINS", "")
+async def _migrated_app_db(monkeypatch):
+    """A fresh, MIGRATED postgres for the endpoint app — own per-test container.
 
-    from ibkr_control.config import get_settings
+    This is the world-class RLS path: the schema is built via ``alembic upgrade
+    head`` (NOT ``Base.metadata.create_all``), so the FORCE'd RLS policies + the
+    non-superuser ``app_rls`` login role created by the baseline migration exist.
+    The app (``app_with_db``) then connects as ``app_rls``, so every request is
+    exercised under RLS instead of as the bypass owner.
 
-    get_settings.cache_clear()
+    It is its OWN container, fully isolated from ``postgres_container`` (which
+    ``db_session`` + the ``sample_*`` model fixtures keep on owner +
+    ``create_all``). That isolation is what avoids the ``create_all`` /
+    ``alembic`` collision on a shared session-scoped container.
 
-    engine = create_async_engine(url)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    Yields the OWNER async DSN of the migrated DB. ``app_with_db`` derives the
+    ``app_rls`` DSN from it; ``db_engine`` / seeding fixtures connect with it as
+    OWNER (the container superuser bypasses RLS, and identity tables have no
+    org-RLS anyway) to seed users/orgs/memberships/parties.
+    """
+    with PostgresContainer("postgres:16-alpine", driver="asyncpg") as pg:
+        owner_url = pg.get_connection_url()
+        monkeypatch.setenv("DATABASE_URL", owner_url)
+        monkeypatch.setenv("JWT_SECRET", "test-secret-32-chars-minimum-please-ok")
+        monkeypatch.setenv("JWT_LIFETIME_SECONDS", "3600")
+        monkeypatch.setenv("BACKEND_CORS_ORIGINS", "")
 
+        from ibkr_control.config import get_settings
+
+        get_settings.cache_clear()
+
+        cfg = build_alembic_config()
+        # alembic command.upgrade is sync — run in thread to not block event loop.
+        await asyncio.to_thread(command.upgrade, cfg, "head")
+
+        yield owner_url
+
+
+@pytest.fixture
+async def app_with_db(_migrated_app_db, monkeypatch):
+    """The endpoint app, wired to a MIGRATED DB and connecting as ``app_rls``.
+
+    The app's ``get_async_session`` is overridden to yield sessions on an engine
+    that authenticates as the non-bypass ``app_rls`` role. Each request's
+    ``org_context`` dependency ``SET LOCAL``s ``app.current_org`` / ``current_user``
+    on that session, so RLS scopes every org-scoped query to the request's org.
+    """
+    owner_url = _migrated_app_db
+    app_dsn = swap_dsn_credentials(owner_url, "app_rls", "app_rls_pw")
+
+    engine = create_async_engine(app_dsn)
     session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
     async def override_get_session():
@@ -67,11 +107,10 @@ async def app_with_db(postgres_container, monkeypatch):
     app = create_app()
     app.dependency_overrides[get_async_session] = override_get_session
 
-    yield app
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-    await engine.dispose()
+    try:
+        yield app
+    finally:
+        await engine.dispose()
 
 
 @pytest.fixture
@@ -116,7 +155,8 @@ async def db_session(postgres_container, monkeypatch):
 @pytest.fixture
 async def db_engine(postgres_container):
     """Engine sharing the testcontainer with db_session; used by tests that need to
-    open multiple concurrent sessions (e.g. advisory lock contention).
+    open multiple concurrent sessions (e.g. advisory lock contention) on the
+    owner + create_all world.
 
     Function-scoped (not session-scoped) so it does not outlive per-test DB state.
     Uses the same postgres_container URL as db_session (asyncpg driver included).
@@ -125,6 +165,43 @@ async def db_engine(postgres_container):
     engine = create_async_engine(url, echo=False)
     try:
         yield engine
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture
+async def app_owner_engine(_migrated_app_db):
+    """OWNER engine on the SAME migrated DB the endpoint app (``app_with_db``) uses.
+
+    Used by the endpoint seeding fixtures (``auth_headers_with_org`` &c.) to
+    insert users/orgs/memberships/parties against the very DB ``app_with_db``
+    serves requests from. Connects as the container OWNER (superuser → bypasses
+    RLS; identity tables have no org-RLS anyway), so the seed is unconstrained.
+
+    Distinct from ``db_engine`` (which stays on ``postgres_container`` with the
+    owner/create_all ``db_session`` world). Endpoint seeding targets the migrated
+    DB; model-level tests stay on the create_all DB.
+    """
+    engine = create_async_engine(_migrated_app_db, echo=False)
+    try:
+        yield engine
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture
+async def app_rls_db_session(_migrated_app_db):
+    """A direct session on the migrated app DB, connecting as ``app_rls``.
+
+    For assertions about the role the endpoint app runs under (e.g. it is NOT
+    the bypass owner). Same non-superuser role + DB as ``app_with_db``.
+    """
+    app_dsn = swap_dsn_credentials(_migrated_app_db, "app_rls", "app_rls_pw")
+    engine = create_async_engine(app_dsn, echo=False)
+    session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    try:
+        async with session_maker() as session:
+            yield session
     finally:
         await engine.dispose()
 
@@ -258,7 +335,7 @@ async def second_auth_headers(client: AsyncClient) -> dict:
 
 
 @pytest.fixture
-async def auth_headers_with_org(client: AsyncClient, db_engine) -> dict:
+async def auth_headers_with_org(client: AsyncClient, app_owner_engine) -> dict:
     """Registra un usuario via API, le provisiona un org + membership(owner) +
     party, y devuelve headers JWT.
 
@@ -268,11 +345,12 @@ async def auth_headers_with_org(client: AsyncClient, db_engine) -> dict:
     via la API (dispara on_after_register → UserSettings) y luego inserta el
     org/membership/party PARA ese usuario ya registrado.
 
-    Comparte el testcontainer del app vía db_engine (mismo URL que app_with_db,
-    cuyo create_all ya corrió porque dependemos de `client`). No abre un segundo
-    lifecycle create_all/drop_all que choque con app_with_db.
+    Comparte la DB migrada del app vía app_owner_engine (mismo `_migrated_app_db` que
+    app_with_db). Seedea como OWNER (superuser → bypassa RLS); `parties` está bajo
+    FORCE RLS, así que setea `app.current_org` antes de insertar el Party para que
+    pase el WITH CHECK (mismo patrón que rls_session_factory.seed).
     """
-    from sqlalchemy import select
+    from sqlalchemy import select, text
     from ibkr_control.auth.models import User
     from ibkr_control.db.models.memberships import Membership
     from ibkr_control.db.models.organizations import Organization
@@ -284,13 +362,19 @@ async def auth_headers_with_org(client: AsyncClient, db_engine) -> dict:
         json={"email": email, "password": "supersecret123", "name": "Org Owner"},
     )
 
-    session_maker = async_sessionmaker(db_engine, expire_on_commit=False, class_=AsyncSession)
+    session_maker = async_sessionmaker(
+        app_owner_engine, expire_on_commit=False, class_=AsyncSession
+    )
     async with session_maker() as session:
         user = await session.scalar(select(User).where(User.email == email))
         org = Organization(type="personal", name="Org Owner Household")
         session.add(org)
         await session.flush()
         session.add(Membership(user_id=user.id, organization_id=org.id, role="owner"))
+        # parties is org-scoped under FORCE RLS → set context so its WITH CHECK passes.
+        await session.execute(
+            text("SELECT set_config('app.current_org', :o, true)").bindparams(o=str(org.id))
+        )
         session.add(Party(organization_id=org.id, display_name="Org Owner", user_id=user.id))
         await session.commit()
 
@@ -303,14 +387,14 @@ async def auth_headers_with_org(client: AsyncClient, db_engine) -> dict:
 
 
 @pytest.fixture
-async def second_auth_headers_with_org(client: AsyncClient, db_engine) -> dict:
+async def second_auth_headers_with_org(client: AsyncClient, app_owner_engine) -> dict:
     """A second org-having user for cross-tenant isolation tests.
 
     Mirrors auth_headers_with_org but with a distinct email/org so the two
     can detect disjoint accounts and assert that one org cannot claim the
-    other's. Shares the app testcontainer via db_engine (same lifecycle as
+    other's. Shares the migrated app DB via app_owner_engine (same lifecycle as
     auth_headers_with_org)."""
-    from sqlalchemy import select
+    from sqlalchemy import select, text
     from ibkr_control.auth.models import User
     from ibkr_control.db.models.memberships import Membership
     from ibkr_control.db.models.organizations import Organization
@@ -322,13 +406,19 @@ async def second_auth_headers_with_org(client: AsyncClient, db_engine) -> dict:
         json={"email": email, "password": "supersecret123", "name": "Org Owner 2"},
     )
 
-    session_maker = async_sessionmaker(db_engine, expire_on_commit=False, class_=AsyncSession)
+    session_maker = async_sessionmaker(
+        app_owner_engine, expire_on_commit=False, class_=AsyncSession
+    )
     async with session_maker() as session:
         user = await session.scalar(select(User).where(User.email == email))
         org = Organization(type="personal", name="Org Owner 2 Household")
         session.add(org)
         await session.flush()
         session.add(Membership(user_id=user.id, organization_id=org.id, role="owner"))
+        # parties is org-scoped under FORCE RLS → set context so its WITH CHECK passes.
+        await session.execute(
+            text("SELECT set_config('app.current_org', :o, true)").bindparams(o=str(org.id))
+        )
         session.add(Party(organization_id=org.id, display_name="Org Owner 2", user_id=user.id))
         await session.commit()
 
