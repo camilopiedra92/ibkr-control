@@ -482,6 +482,41 @@ Rev5 y Rev6 (replay desde xml_bytes via A0, sin re-upload del usuario). Tests:
 
 ---
 
+## Hallazgos menores de review (2026-06-02, pre-Phase-3)
+
+Dos observaciones de un review de `api/grants.py` (Phase 2.8), evaluadas antes de Phase 3:
+
+### G-N+1 — N+1 de emails en `list_grants` — RESUELTO (commit `9e9b96f`)
+
+**Issue:** `list_grants` serializaba cada grant con dos lookups de email por fila
+(`_email(grantor)` + `_email(grantee)`) → `2N` queries.
+
+**Resolución:** reemplazado por un solo `SELECT id, email FROM users WHERE id IN (...)`
+→ dict → serialización síncrona; helper `_email` eliminado (único consumidor).
+Behavior-preserving: `test_grants_api` (granted + received + emails correctos en
+ambas direcciones) quedó verde sin cambios. O(1) round-trips sin importar la
+cardinalidad de grants.
+
+**Por qué se arregló pese a ser inerte:** la cardinalidad de grants es chica por
+diseño (app personal, 2-3 usuarios) → el N+1 no escala y YAGNI permitía dejarlo.
+Se cerró igual a pedido del usuario para no dejar un anti-pattern documentable en
+el codebase. La lección de criterio: un N+1 solo es deuda si la "N" puede crecer;
+acá está acotada por el dominio.
+
+### G-DELETE-PATH — PK compuesta en el path del DELETE — EVALUADO, NO ES DEUDA
+
+**Observación:** `DELETE /grants/{grantee_user_id}/{valid_from}` expone dos
+segmentos de la PK compuesta `(grantor, grantee, valid_from)` en el path (el
+grantor se toma de `user.id`, owner-only).
+
+**Decisión:** no se toca. Es REST correcto — la PK compuesta **es** la identidad
+natural del grant; exponerla en el path es legítimo. Cambiarlo (id surrogate /
+query params) sería churn y podría ser peor (esconder la clave natural). Sin
+correctness concern. No es deuda; es una elección de diseño levemente inusual
+pero correcta.
+
+---
+
 ## Verificación final
 
 ```bash
