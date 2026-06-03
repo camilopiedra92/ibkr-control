@@ -39,12 +39,12 @@ async def test_party_optionally_links_to_user(db_session):
     org = Organization(type="personal", name="H")
     db_session.add(org)
     await db_session.flush()
-    p = Party(organization_id=org.id, display_name="Conyuge", tax_id="999", user_id=None)
+    p = Party(organization_id=org.id, display_name="Cónyuge", tax_id="999", user_id=None)
     db_session.add(p)
     await db_session.flush()
     got = await db_session.scalar(select(Party).where(Party.id == p.id))
     assert got.user_id is None
-    assert got.display_name == "Conyuge"
+    assert got.display_name == "Cónyuge"
     assert got.organization_id == org.id
 
 
