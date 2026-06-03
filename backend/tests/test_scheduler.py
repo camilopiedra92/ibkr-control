@@ -1,5 +1,6 @@
 """Tests de registro de cron jobs."""
 
+import pytest
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from ibkr_control.scheduler.jobs import register_jobs
@@ -20,6 +21,59 @@ def test_register_creates_three_jobs():
     register_jobs(scheduler)
     ids = {j.id for j in scheduler.get_jobs()}
     assert ids == {"flex_daily", "trm_daily", "cleanup_job_tracker"}
+
+
+def test_flex_daily_references_per_org_runner():
+    """register_jobs wires the per-ORG runner (not the old per-user one)."""
+    from ibkr_control.scheduler import jobs as jobs_mod
+
+    assert hasattr(jobs_mod, "_run_flex_for_all_orgs")
+    assert not hasattr(jobs_mod, "_run_flex_for_all_users")
+
+    scheduler = AsyncIOScheduler()
+    register_jobs(scheduler)
+    flex = next(j for j in scheduler.get_jobs() if j.id == "flex_daily")
+    assert flex.func is jobs_mod._run_flex_for_all_orgs
+
+
+@pytest.mark.asyncio
+async def test_run_flex_for_all_orgs_iterates_distinct_orgs(
+    db_session, sample_org, sample_user, monkeypatch
+):
+    """The Flex cron iterates distinct flex_credentials.organization_id and calls
+    flex_job.run(organization_id=<org>, user_id=None, trigger='cron') for each —
+    user_id=None because a cron org-batch has no triggering user (audit)."""
+    from ibkr_control.db.models.flex_credentials import FlexCredentials
+    from ibkr_control.db.models.organizations import Organization
+    from ibkr_control.ingest.flex import job as flex_job
+    from ibkr_control.scheduler import jobs as jobs_mod
+
+    # Second tenant with its own creds.
+    org2 = Organization(type="personal", name="Org Two")
+    db_session.add(org2)
+    await db_session.flush()
+
+    db_session.add(
+        FlexCredentials(organization_id=sample_org.id, token_encrypted=b"x", ytd_query_id="q1")
+    )
+    db_session.add(
+        FlexCredentials(organization_id=org2.id, token_encrypted=b"y", ytd_query_id="q2")
+    )
+    await db_session.commit()
+
+    calls: list[dict] = []
+
+    async def fake_run(session_factory, *, organization_id, user_id, trigger):
+        calls.append({"organization_id": organization_id, "user_id": user_id, "trigger": trigger})
+
+    monkeypatch.setattr(flex_job, "run", fake_run)
+
+    await jobs_mod._run_flex_for_all_orgs()
+
+    called_orgs = {c["organization_id"] for c in calls}
+    assert called_orgs == {sample_org.id, org2.id}
+    assert all(c["user_id"] is None for c in calls)
+    assert all(c["trigger"] == "cron" for c in calls)
 
 
 def test_flex_daily_runs_at_12utc():

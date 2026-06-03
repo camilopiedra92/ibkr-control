@@ -5,7 +5,7 @@ from datetime import timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ibkr_control.config import get_settings
@@ -13,12 +13,15 @@ from ibkr_control.config import get_settings
 logger = logging.getLogger(__name__)
 
 
-async def _run_flex_for_all_users() -> None:
-    """Itera sobre cada user con flex_credentials y corre flex_job.run.
+async def _run_flex_for_all_orgs() -> None:
+    """Itera sobre cada org con flex_credentials y corre flex_job.run.
+
+    flex_credentials es per-org (no per-user) → el cron itera organizaciones.
+    user_id=None: un batch del cron por-org no tiene usuario disparador (audit).
 
     Cada run crea su propio engine + SessionLocal y lo dispone al final.
-    LockHeldError  -> skip user con warning (manual trigger ya corriendo).
-    FlexAuthError  -> log + continuar (credenciales invalidas para este user).
+    LockHeldError  -> skip org con warning (manual trigger ya corriendo).
+    FlexAuthError  -> log + continuar (credenciales invalidas para este org).
     httpx.HTTPError -> log + continuar (red / IBKR down).
     Exception (outer) -> log con traceback completo; no propaga para no matar
                          el scheduler. Se mantiene broad porque este es el
@@ -38,31 +41,36 @@ async def _run_flex_for_all_users() -> None:
 
     try:
         async with session_local() as s:
-            user_ids = (await s.scalars(select(FlexCredentials.user_id))).all()
+            org_ids = (
+                await s.scalars(select(func.distinct(FlexCredentials.organization_id)))
+            ).all()
 
-        for uid in user_ids:
+        for org_id in org_ids:
             try:
-                await flex_job.run(session_local, user_id=uid, trigger="cron")
+                await flex_job.run(
+                    session_local, organization_id=org_id, user_id=None, trigger="cron"
+                )
             except LockHeldError:
-                logger.warning("flex_daily skipped user_id=%s — lock held", uid)
+                logger.warning("flex_daily skipped org_id=%s — lock held", org_id)
             except FlexAuthError as e:
-                logger.error("flex_daily auth error for user_id=%s — %s", uid, e.error_message)
+                logger.error("flex_daily auth error for org_id=%s — %s", org_id, e.error_message)
             except httpx.HTTPError as e:
-                logger.error("flex_daily network error for user_id=%s — %s", uid, e)
+                logger.error("flex_daily network error for org_id=%s — %s", org_id, e)
             except Exception:
                 # Outer catch-all: must stay broad to log unexpected failures without
-                # crashing the per-user loop or the scheduler.
-                logger.exception("flex_daily unexpected failure for user_id=%s — continuing", uid)
+                # crashing the per-org loop or the scheduler.
+                logger.exception("flex_daily unexpected failure for org_id=%s — continuing", org_id)
     finally:
         await engine.dispose()
 
 
 async def _run_trm_global() -> None:
-    """Cron TRM — un job global, no per-user.
+    """Cron TRM — un job global de control plane (no per-org).
 
     Crea su propio engine + SessionLocal y lo dispone al final.
-    Exception -> log completo (ingest_log row ya tiene el error);
-    se mantiene broad porque es el catch-all de ultimo recurso del job TRM.
+    Exception -> log completo (TRM no escribe ingest_log; su registro es
+    trm_imports). Se mantiene broad porque es el catch-all de ultimo recurso
+    del job TRM.
     """
     from ibkr_control.ingest.trm import job as trm_job
 
@@ -104,7 +112,7 @@ def register_jobs(scheduler: AsyncIOScheduler) -> None:
     del cron diario recupere el run perdido al boot (jobs son idempotentes).
     """
     scheduler.add_job(
-        _run_flex_for_all_users,
+        _run_flex_for_all_orgs,
         CronTrigger(hour=12, minute=0, timezone="UTC"),
         id="flex_daily",
         max_instances=1,
