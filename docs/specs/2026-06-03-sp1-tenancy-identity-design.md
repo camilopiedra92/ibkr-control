@@ -122,6 +122,17 @@ Principio rector: **data plane (org-scoped, RLS) vs control/reference plane (glo
 
 El cron Flex iteraba `FlexCredentials.user_id` — columna eliminada. **Decisión:** `_run_flex_for_all_orgs` itera `distinct FlexCredentials.organization_id` → `flex_job.run(organization_id=...)`, con `SET LOCAL app.current_org` por iteración. TRM cron sigue siendo una corrida global única. No es deuda: es la implementación correcta *pre-cola*; SP5 (durable jobs) + SP7 evolucionan el **cuerpo** del loop de `run inline` a `enqueue(org)` + rate-limit por org. Se rechazó stub/defer (dejaría un agujero funcional — sin auto-fetch diario — + tests skipped = "issues").
 
+### D-CONV-3: Org-pure — purga del scaffolding user-céntrico legacy (2026-06-03, directiva usuario)
+
+El org es la **unidad de tenancy y operación**. No se preserva el "caso común legacy" (single-user resuelto implícitamente) ni se arrastran campos `user_id` vestigiales en la capa operacional/dato. Purga:
+
+1. **`resolve_current_org_id` deja de devolver `rows[0]` silenciosamente.** Exactamente una membership → se resuelve (inequívoco). Varias memberships sin org pedida explícita → **400 `ORG_SELECTION_REQUIRED`** (sin pick silencioso). No rompe al user single-org; elimina la asunción legacy. El selector multi-org explícito (UI) es SP3.
+2. **Throttle del manual-trigger pasa de per-user a per-org.** `users.last_ingest_trigger_at` → `organizations.last_ingest_trigger_at`. La relación con IBKR es per-org (credenciales per-org; pacing 1/día por cuenta = por org); un throttle per-user dejaba que dos miembros doble-dispararan a IBKR.
+3. **`flex_imports.user_id` se DROPEA.** Solo se estampaba en filas poison; el scope/dedup es org. Las poison rows ya son org-scoped.
+4. **`ingest_log.user_id` (+ su índice) se DROPEA.** `ingest_log` es observabilidad operacional org-scoped; el actor ("qué miembro disparó") es auditoría que pertenece al audit log dedicado de **SP8** (Habeas Data/GDPR), no a un FK nullable medio-poblado. Índice reemplazado por `(organization_id, started_at DESC)`.
+
+**Efecto:** todo el threading de `user_id` audit en el ingest path desaparece — `flex_job.run`/`ingest_xml`/`ingest_log_entry`/`_insert_poison_row` quedan puramente org-scoped (sin parámetro `user_id`). Legítimamente user-level (NO se tocan): `job_tracker` ownership (D1, in-memory, UX del SSE), `parties.user_id`/`memberships.user_id`/`access_grants.grantee_user_id` (núcleo del modelo), auth. El baseline squasheado se **edita** para reflejar el schema final (no se apila migración — DB wipe autorizado).
+
 ### Alcance real de la conversión org-aware
 
 Además de persister (hecho) + wizard (hecho), la convergencia convierte: `ingest/log.py` (`+organization_id`), `ingest/hash_dedup.py` (`check_hash_status` keyed en org), `ingest/flex/job.py` (`run`/`ingest_xml`/`_insert_poison_row` toman `organization_id`; dedup `on_conflict` → `(organization_id, xml_hash)`), `api/credentials.py` · `api/imports.py` · `api/health.py` · `api/ingest.py` (org-context vía la dependency), `scheduler/jobs.py` (D-CONV-2). Legítimamente per-user (sin cambio): `job_tracker` (ownership SSE, D1), el rate-limit en `users.last_ingest_trigger_at`, `ingest/lock.py` (granularidad de lock).
