@@ -1,8 +1,42 @@
 """Single source of truth for RLS: which tables are org-scoped.
 
 Reused by the baseline migration (to create policies) and by tests (to assert
-coverage). Provides the org-scoped table list plus the policy/role SQL builders.
+coverage). Provides the org-scoped table list plus the policy/role SQL builders,
+and ``apply_org_context`` — the GUC WRITER that pairs with the policy READERS
+below (``_CURRENT_ORG`` / ``_CURRENT_USER``). Co-located so the SET LOCAL writer
+and its NULLIF(...,'')::bigint reader convention live in one cohesive module.
+
+This module imports nothing from the project (only sqlalchemy), so it sits at
+the bottom of the dependency graph — the web layer (``api/_context``) and the
+ingest layer (``ingest/flex/job``) both import ``apply_org_context`` from here
+without inverting the inner→outer direction.
 """
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+
+async def apply_org_context(
+    session: AsyncSession, *, org_id: int, user_id: int | None = None
+) -> None:
+    """SET LOCAL the RLS GUCs for this transaction.
+
+    ``user_id`` is optional: a system/cron job (e.g. flex_job.run) has NO current
+    user. We map ``None -> ''`` (empty string), NOT ``'None'``: the RLS policies
+    read the user GUC as ``NULLIF(current_setting('app.current_user', true),
+    '')::bigint`` (``_CURRENT_USER`` below) — an empty string yields NULL (clean
+    default-deny), whereas the literal string ``'None'`` would raise 22P02
+    (invalid bigint) on any access_grants query. So a no-user context must set ''
+    here.
+    """
+    # set_config(key, value, is_local=true) == SET LOCAL; parameterized (no injection).
+    await session.execute(
+        text(
+            "SELECT set_config('app.current_org', :o, true), "
+            "set_config('app.current_user', :u, true)"
+        ).bindparams(o=str(org_id), u="" if user_id is None else str(user_id))
+    )
+
 
 # Tenant tables: organization_id NOT NULL + (later) standard single-org RLS policy.
 ORG_SCOPED_TABLES = [

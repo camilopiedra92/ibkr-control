@@ -5,11 +5,12 @@ from lxml.etree import XMLSyntaxError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ibkr_control.api._context import apply_org_context, org_context
+from ibkr_control.api._context import org_context
 from ibkr_control.auth.backend import current_active_user
 from ibkr_control.auth.models import User
 from ibkr_control.config import get_settings
 from ibkr_control.db.models.flex_raw import FlexImport
+from ibkr_control.db.rls import apply_org_context
 from ibkr_control.db.session import get_async_session
 from ibkr_control.ingest.flex import job as flex_job_mod
 from ibkr_control.ingest.flex import parser as flex_parser_mod

@@ -1,7 +1,7 @@
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import text
-from ibkr_control.api._context import apply_org_context
+from ibkr_control.db.rls import apply_org_context
 
 
 @pytest.mark.asyncio

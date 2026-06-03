@@ -1,29 +1,26 @@
 """Per-request RLS context. SET LOCAL (transaction-scoped, pooling-safe).
 
 Public surface:
-- apply_org_context  — low-level: SET LOCAL two GUCs (org_id, user_id).
 - resolve_current_org_id — pure logic: pick org from memberships.
 - org_context        — FastAPI Depends: resolve + SET LOCAL + return org_id.
+
+The low-level GUC writer ``apply_org_context`` now lives in ``db/rls.py`` (the
+DB-layer SSOT for the RLS GUC contract). It is re-exported here for backward
+compatibility, but the inner ingest layer imports it from ``db/rls.py`` directly
+so it never depends on this web-layer module.
 """
 
 from fastapi import Depends, HTTPException
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ibkr_control.auth.backend import current_active_user
 from ibkr_control.auth.models import User
 from ibkr_control.db.models.memberships import Membership
+from ibkr_control.db.rls import apply_org_context
 from ibkr_control.db.session import get_async_session
 
-
-async def apply_org_context(session: AsyncSession, *, org_id: int, user_id: int) -> None:
-    # set_config(key, value, is_local=true) == SET LOCAL; parameterized (no injection).
-    await session.execute(
-        text(
-            "SELECT set_config('app.current_org', :o, true), "
-            "set_config('app.current_user', :u, true)"
-        ).bindparams(o=str(org_id), u=str(user_id))
-    )
+__all__ = ["apply_org_context", "resolve_current_org_id", "org_context"]
 
 
 async def resolve_current_org_id(

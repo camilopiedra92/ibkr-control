@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ibkr_control.db.models.flex_credentials import FlexCredentials
 from ibkr_control.db.models.flex_raw import FlexImport
 from ibkr_control.db.models.ingest_log import IngestLog
+from ibkr_control.db.rls import apply_org_context
 from ibkr_control.ingest.flex import client as flex_client_mod
 from ibkr_control.ingest.flex import crypto as flex_crypto_mod
 from ibkr_control.ingest.flex import parser as flex_parser_mod
@@ -202,6 +203,13 @@ async def run(
     las creds, el dedup y el ingest son todos per-org (D-CONV-3).
     """
     async with session_factory() as session:
+        # run() opens its OWN session outside any request, so nothing set the RLS
+        # context for it. In prod the app connects as the non-bypass app_rls role,
+        # so every org-scoped read/write below (creds lookup, flex_imports dedup,
+        # ingest_log, persister) would default-deny without this. SET LOCAL is
+        # transaction-scoped; the session's autobegin opened the tx, so this
+        # applies to all subsequent statements. No user_id: this is a system job.
+        await apply_org_context(session, org_id=organization_id)
         async with advisory_lock(session, scope_id=organization_id, source="flex"):
             async with ingest_log_entry(
                 session, "flex", organization_id=organization_id, trigger=trigger
