@@ -21,6 +21,7 @@ from ibkr_control.db.models.flex_raw import (  # noqa: F401
 from ibkr_control.db.models.ingest_log import IngestLog  # noqa: F401
 from ibkr_control.db.models.organizations import Organization  # noqa: F401
 from ibkr_control.db.models.memberships import Membership  # noqa: F401
+from ibkr_control.db.models.parties import Party  # noqa: F401
 from ibkr_control.db.base import Base  # noqa: F401
 
 __all__ = [
@@ -45,5 +46,6 @@ __all__ = [
     "IngestLog",
     "Organization",
     "Membership",
+    "Party",
     "Base",
 ]

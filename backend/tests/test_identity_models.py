@@ -29,3 +29,20 @@ async def test_membership_links_user_to_org(db_session):
         select(Membership).where(Membership.user_id == u.id, Membership.organization_id == org.id)
     )
     assert got.role == "owner"
+
+
+@pytest.mark.asyncio
+async def test_party_optionally_links_to_user(db_session):
+    from ibkr_control.db.models.organizations import Organization
+    from ibkr_control.db.models.parties import Party
+
+    org = Organization(type="personal", name="H")
+    db_session.add(org)
+    await db_session.flush()
+    p = Party(organization_id=org.id, display_name="Conyuge", tax_id="999", user_id=None)
+    db_session.add(p)
+    await db_session.flush()
+    got = await db_session.scalar(select(Party).where(Party.id == p.id))
+    assert got.user_id is None
+    assert got.display_name == "Conyuge"
+    assert got.organization_id == org.id
