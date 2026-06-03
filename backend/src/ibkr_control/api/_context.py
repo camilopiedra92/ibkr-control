@@ -4,10 +4,10 @@ Public surface:
 - resolve_current_org_id — pure logic: pick org from memberships.
 - org_context        — FastAPI Depends: resolve + SET LOCAL + return org_id.
 
-The low-level GUC writer ``apply_org_context`` now lives in ``db/rls.py`` (the
-DB-layer SSOT for the RLS GUC contract). It is re-exported here for backward
-compatibility, but the inner ingest layer imports it from ``db/rls.py`` directly
-so it never depends on this web-layer module.
+The low-level GUC writer ``apply_org_context`` lives in ``db/rls.py`` (the
+DB-layer SSOT for the RLS GUC contract); ``org_context`` below uses it. Other
+callers (e.g. the inner ingest layer) import it from ``db/rls.py`` directly so
+they never depend on this web-layer module.
 """
 
 from fastapi import Depends, HTTPException
@@ -20,7 +20,7 @@ from ibkr_control.db.models.memberships import Membership
 from ibkr_control.db.rls import apply_org_context
 from ibkr_control.db.session import get_async_session
 
-__all__ = ["apply_org_context", "resolve_current_org_id", "org_context"]
+__all__ = ["resolve_current_org_id", "org_context"]
 
 
 async def resolve_current_org_id(

@@ -19,6 +19,17 @@ async def _run_flex_for_all_orgs() -> None:
     flex_credentials es per-org (no per-user) → el cron itera organizaciones.
     El ingest es puramente org-scoped (D-CONV-3): no hay usuario disparador.
 
+    LIMITACION RLS (gap documentado, diferido a SP7): la enumeracion de orgs
+    (SELECT DISTINCT organization_id FROM flex_credentials) es una lectura
+    CROSS-TENANT de sistema. Si el app corre como el rol sin-bypass `app_rls`
+    (FORCE RLS) sin `app.current_org` seteado, esta query default-deny → 0 orgs
+    → el cron no fetchea nada en prod. El `flex_job.run` per-org SI es
+    RLS-correcto (se auto-setea contexto). Lo que falta es darle a la
+    enumeracion una conexion de SISTEMA (rol owner/bypass o contexto bootstrap):
+    eso es SP7 (cron tenant-aware) + SP5 (durable jobs). Hasta entonces el
+    auto-fetch diario requiere que el scheduler conecte con un rol que vea
+    cross-tenant. NO es un bug oculto: es un corte de alcance explicito.
+
     Cada run crea su propio engine + SessionLocal y lo dispone al final.
     LockHeldError  -> skip org con warning (manual trigger ya corriendo).
     FlexAuthError  -> log + continuar (credenciales invalidas para este org).
