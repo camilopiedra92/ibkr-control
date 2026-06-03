@@ -1,4 +1,10 @@
-"""Per-request RLS context. SET LOCAL (transaction-scoped, pooling-safe)."""
+"""Per-request RLS context. SET LOCAL (transaction-scoped, pooling-safe).
+
+Public surface:
+- apply_org_context  — low-level: SET LOCAL two GUCs (org_id, user_id).
+- resolve_current_org_id — pure logic: pick org from memberships.
+- org_context        — FastAPI Depends: resolve + SET LOCAL + return org_id.
+"""
 
 from fastapi import Depends, HTTPException
 from sqlalchemy import select, text
