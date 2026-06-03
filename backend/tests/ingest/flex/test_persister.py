@@ -805,3 +805,27 @@ async def test_persist_records_account_provenance_including_factless(
     ).all()
     ids = {r[0] for r in rows}
     assert ids == {"U99999001", "U99999002"}, ids
+
+
+@pytest.mark.asyncio
+async def test_persist_stamps_organization_id_on_all_rows(db_session):
+    from sqlalchemy import select
+
+    from ibkr_control.db.models.organizations import Organization
+    from ibkr_control.db.models.flex_raw import FlexImport, Trade
+
+    org = Organization(type="personal", name="H")
+    db_session.add(org)
+    await db_session.flush()
+    parsed = _make_parsed(account_id="U99999001", n_trades=2)
+    fi_id, _ = await persist(
+        db_session,
+        parsed=parsed,
+        organization_id=org.id,
+        xml_bytes=b"<x/>",
+        source="manual_upload",
+    )
+    fi = await db_session.scalar(select(FlexImport).where(FlexImport.id == fi_id))
+    assert fi.organization_id == org.id
+    t = await db_session.scalar(select(Trade).where(Trade.flex_import_id == fi_id))
+    assert t.organization_id == org.id

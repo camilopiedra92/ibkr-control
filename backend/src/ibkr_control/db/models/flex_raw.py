@@ -44,8 +44,8 @@ class FlexImport(Base):
     organization_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
     )
-    user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     anyo: Mapped[int] = mapped_column(Integer, nullable=False)
     xml_hash: Mapped[str] = mapped_column(String, nullable=False)
