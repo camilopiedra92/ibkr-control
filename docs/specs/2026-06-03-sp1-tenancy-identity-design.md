@@ -8,6 +8,8 @@
 
 ## Contexto del programa (descomposición SaaS)
 
+> **SSOT del roadmap del programa** (tabla completa con las "decisiones gordas" que cada SP va a forzar, dependencias y estado): `docs/specs/2026-06-03-saas-program-roadmap.md`. La tabla de abajo es el resumen que SP1 necesita.
+
 | SP | Sub-proyecto | Depende de |
 |---|---|---|
 | **SP1** | **Tenancy & Identity (este spec)** | — |
