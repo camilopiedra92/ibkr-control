@@ -141,6 +141,18 @@ async def db_session(postgres_container, monkeypatch):
     engine = create_async_engine(url)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # create_all builds tables but NOT roles/functions (those live only in
+        # migrations). Apply the app_rls role grants (idempotent CREATE ROLE) +
+        # the SECURITY DEFINER enum function (H1) so cron tests exercising
+        # _run_flex_for_all_orgs against this create_all world can call
+        # system_credentialed_org_ids() (its GRANT targets app_rls). SQL is the
+        # SSOT in db/rls.py.
+        from sqlalchemy import text as _text
+
+        from ibkr_control.db.rls import app_role_grants_sql, system_enum_function_sql
+
+        for _stmt in [*app_role_grants_sql(), *system_enum_function_sql()]:
+            await conn.execute(_text(_stmt))
 
     session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 

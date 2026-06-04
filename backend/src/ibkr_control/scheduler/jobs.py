@@ -5,7 +5,7 @@ from datetime import timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from sqlalchemy import func, select
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ibkr_control.config import get_settings
@@ -19,16 +19,16 @@ async def _run_flex_for_all_orgs() -> None:
     flex_credentials es per-org (no per-user) → el cron itera organizaciones.
     El ingest es puramente org-scoped (D-CONV-3): no hay usuario disparador.
 
-    LIMITACION RLS (gap documentado, diferido a SP7): la enumeracion de orgs
-    (SELECT DISTINCT organization_id FROM flex_credentials) es una lectura
-    CROSS-TENANT de sistema. Si el app corre como el rol sin-bypass `app_rls`
-    (FORCE RLS) sin `app.current_org` seteado, esta query default-deny → 0 orgs
-    → el cron no fetchea nada en prod. El `flex_job.run` per-org SI es
-    RLS-correcto (se auto-setea contexto). Lo que falta es darle a la
-    enumeracion una conexion de SISTEMA (rol owner/bypass o contexto bootstrap):
-    eso es SP7 (cron tenant-aware) + SP5 (durable jobs). Hasta entonces el
-    auto-fetch diario requiere que el scheduler conecte con un rol que vea
-    cross-tenant. NO es un bug oculto: es un corte de alcance explicito.
+    Enumeracion CROSS-TENANT (RESUELTO, H1): "que orgs tienen credenciales" es una
+    lectura de CONTROL PLANE. Bajo el rol sin-bypass `app_rls` (FORCE RLS) sin
+    `app.current_org`, un `SELECT DISTINCT organization_id FROM flex_credentials`
+    default-deny → 0 orgs → el cron no fetcheaba nada en silencio. Se cierra con la
+    funcion `system_credentialed_org_ids()` SECURITY DEFINER (least-privilege: una
+    sola capacidad cross-tenant acotada y auditada, owned por el rol de migracion
+    que bypassea RLS, EXECUTE solo para `app_rls`; ver db/rls.py). Ya NO hay no-op
+    silencioso. El trabajo per-org (`flex_job.run`) sigue 100% RLS-enforced: se
+    auto-setea `SET LOCAL app.current_org`. La cola durable + el rate-limit por org
+    siguen siendo sofisticacion de SP5/SP7 — esto solo arregla la enumeracion.
 
     Cada run crea su propio engine + SessionLocal y lo dispone al final.
     LockHeldError  -> skip org con warning (manual trigger ya corriendo).
@@ -41,7 +41,6 @@ async def _run_flex_for_all_orgs() -> None:
     """
     import httpx
 
-    from ibkr_control.db.models.flex_credentials import FlexCredentials
     from ibkr_control.ingest.flex import job as flex_job
     from ibkr_control.ingest.flex.client import FlexAuthError
     from ibkr_control.ingest.lock import LockHeldError
@@ -52,9 +51,10 @@ async def _run_flex_for_all_orgs() -> None:
 
     try:
         async with session_local() as s:
-            org_ids = (
-                await s.scalars(select(func.distinct(FlexCredentials.organization_id)))
-            ).all()
+            # Cross-tenant control-plane read via the SECURITY DEFINER function
+            # (H1): bypasses RLS for enumeration only, so this works under the
+            # non-bypass app_rls role with no app.current_org set. See db/rls.py.
+            org_ids = (await s.scalars(text("SELECT * FROM system_credentialed_org_ids()"))).all()
 
         for org_id in org_ids:
             try:
