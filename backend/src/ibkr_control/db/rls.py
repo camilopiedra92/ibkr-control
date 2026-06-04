@@ -12,6 +12,8 @@ ingest layer (``ingest/flex/job``) both import ``apply_org_context`` from here
 without inverting the inner→outer direction.
 """
 
+import os
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -137,13 +139,43 @@ def system_enum_function_sql() -> list[str]:
     ]
 
 
+def app_rls_password() -> str:
+    """The password for the ``app_rls`` login role — single source of truth.
+
+    Read from ``APP_RLS_PASSWORD`` (env), defaulting to the clearly-labeled
+    DEV/TEST literal ``"app_rls_pw"``. Prod sets ``APP_RLS_PASSWORD`` to a real
+    secret (SP4/deploy). Both the role-creation DDL (``app_role_grants_sql``) and
+    the test fixtures that build the connecting ``app_rls`` DSN call this, so the
+    role's password and the DSN that connects with it always agree.
+
+    The env is read INSIDE the function (never at module level) so tests that
+    ``monkeypatch.setenv`` see the change without a module reload.
+
+    SQL-literal safety: the returned value is interpolated into a single-quoted
+    SQL string literal in ``CREATE ROLE ... LOGIN PASSWORD '<value>'``. We
+    fail-loud REJECT any value containing a single quote (the only char that
+    could break out of the literal), rather than silently escaping — an operator
+    setting a password with a ``'`` is almost certainly a mistake, and rejecting
+    keeps the DDL provably injection-free. Any other characters are safe inside
+    the literal.
+    """
+    pw = os.environ.get("APP_RLS_PASSWORD", "app_rls_pw")
+    if "'" in pw:
+        raise ValueError(
+            "APP_RLS_PASSWORD must not contain a single quote "
+            "(it is embedded in a SQL string literal in the CREATE ROLE DDL)"
+        )
+    return pw
+
+
 def app_role_grants_sql() -> list[str]:
     # app_rls: non-superuser, non-owner login role. Migrations run as the owner;
     # the app connects as this so RLS (with FORCE) actually applies. The password
-    # is dev/test only — prod injects a real secret (SP4/deploy).
+    # comes from app_rls_password() (env APP_RLS_PASSWORD, dev/test default) — no
+    # hardcoded credential in source; prod injects a real secret (SP4/deploy).
     return [
         f"DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='{APP_ROLE}') "
-        f"THEN CREATE ROLE {APP_ROLE} LOGIN PASSWORD 'app_rls_pw'; END IF; END $$",
+        f"THEN CREATE ROLE {APP_ROLE} LOGIN PASSWORD '{app_rls_password()}'; END IF; END $$",
         f"GRANT USAGE ON SCHEMA public TO {APP_ROLE}",
         f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {APP_ROLE}",
         f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {APP_ROLE}",

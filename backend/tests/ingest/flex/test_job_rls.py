@@ -20,6 +20,7 @@ import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from ibkr_control.db.rls import app_rls_password
 from ibkr_control.ingest.flex import client as client_mod
 from ibkr_control.ingest.flex import crypto as crypto_mod
 from ibkr_control.ingest.flex import job as flex_job_mod
@@ -69,7 +70,7 @@ async def rls_job_env(ephemeral_session_factory, ephemeral_db_url, monkeypatch):
             await s.commit()
             return org.id
 
-    app_dsn = swap_dsn_credentials(ephemeral_db_url, "app_rls", "app_rls_pw")
+    app_dsn = swap_dsn_credentials(ephemeral_db_url, "app_rls", app_rls_password())
     app_engine = create_async_engine(app_dsn, echo=False)
     app_factory = async_sessionmaker(app_engine, expire_on_commit=False)
     try:
