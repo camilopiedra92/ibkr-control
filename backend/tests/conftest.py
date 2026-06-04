@@ -20,6 +20,7 @@ from testcontainers.postgres import PostgresContainer
 
 from ibkr_control.main import create_app
 from ibkr_control.db.base import Base
+from ibkr_control.db.rls import app_rls_password
 from ibkr_control.db.session import get_async_session
 
 from tests.conftest_ephemeral_db import (  # noqa: F401
@@ -95,7 +96,7 @@ async def app_with_db(_migrated_app_db, monkeypatch):
     on that session, so RLS scopes every org-scoped query to the request's org.
     """
     owner_url = _migrated_app_db
-    app_dsn = swap_dsn_credentials(owner_url, "app_rls", "app_rls_pw")
+    app_dsn = swap_dsn_credentials(owner_url, "app_rls", app_rls_password())
 
     engine = create_async_engine(app_dsn)
     session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
@@ -141,6 +142,18 @@ async def db_session(postgres_container, monkeypatch):
     engine = create_async_engine(url)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # create_all builds tables but NOT roles/functions (those live only in
+        # migrations). Apply the app_rls role grants (idempotent CREATE ROLE) +
+        # the SECURITY DEFINER enum function (H1) so cron tests exercising
+        # _run_flex_for_all_orgs against this create_all world can call
+        # system_credentialed_org_ids() (its GRANT targets app_rls). SQL is the
+        # SSOT in db/rls.py.
+        from sqlalchemy import text as _text
+
+        from ibkr_control.db.rls import app_role_grants_sql, system_enum_function_sql
+
+        for _stmt in [*app_role_grants_sql(), *system_enum_function_sql()]:
+            await conn.execute(_text(_stmt))
 
     session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
@@ -196,7 +209,7 @@ async def app_rls_db_session(_migrated_app_db):
     For assertions about the role the endpoint app runs under (e.g. it is NOT
     the bypass owner). Same non-superuser role + DB as ``app_with_db``.
     """
-    app_dsn = swap_dsn_credentials(_migrated_app_db, "app_rls", "app_rls_pw")
+    app_dsn = swap_dsn_credentials(_migrated_app_db, "app_rls", app_rls_password())
     engine = create_async_engine(app_dsn, echo=False)
     session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     try:

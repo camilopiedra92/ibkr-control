@@ -18,6 +18,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
 
+from ibkr_control.db.rls import app_rls_password
+
 
 def swap_dsn_credentials(async_dsn: str, user: str, password: str) -> str:
     """Return ``async_dsn`` with its user:password swapped for ``user:password``.
@@ -27,7 +29,8 @@ def swap_dsn_credentials(async_dsn: str, user: str, password: str) -> str:
     (Task 14) ``app_with_db`` to connect as the non-bypass ``app_rls`` role.
 
     Caveat: assumes the credentials contain no ``@`` (it splits on the FIRST
-    ``@``). Current callers (``test:test``, ``app_rls:app_rls_pw``) are fine.
+    ``@``). Current callers (``test:test``, ``app_rls:<app_rls_password()>``)
+    are fine.
     """
     scheme, after_scheme = async_dsn.split("://", 1)
     _creds, hostpart = after_scheme.split("@", 1)
@@ -133,7 +136,7 @@ async def rls_session_factory(ephemeral_session_factory, ephemeral_db_url):
             return org.id
 
     # Connect as app_rls by swapping the creds in the asyncpg DSN.
-    app_dsn = swap_dsn_credentials(ephemeral_db_url, "app_rls", "app_rls_pw")
+    app_dsn = swap_dsn_credentials(ephemeral_db_url, "app_rls", app_rls_password())
     app_engine = create_async_engine(app_dsn, echo=False)
     app_factory = async_sessionmaker(app_engine, expire_on_commit=False)
     try:

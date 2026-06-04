@@ -8,6 +8,8 @@
 
 ## Contexto del programa (descomposición SaaS)
 
+> **SSOT del roadmap del programa** (tabla completa con las "decisiones gordas" que cada SP va a forzar, dependencias y estado): `docs/specs/2026-06-03-saas-program-roadmap.md`. La tabla de abajo es el resumen que SP1 necesita.
+
 | SP | Sub-proyecto | Depende de |
 |---|---|---|
 | **SP1** | **Tenancy & Identity (este spec)** | — |
@@ -122,7 +124,7 @@ Principio rector: **data plane (org-scoped, RLS) vs control/reference plane (glo
 
 El cron Flex iteraba `FlexCredentials.user_id` — columna eliminada. **Decisión:** `_run_flex_for_all_orgs` itera `distinct FlexCredentials.organization_id` → `flex_job.run(organization_id=...)`; cada `run` se auto-setea `SET LOCAL app.current_org` (probado bajo `app_rls`, `test_job_rls.py`). TRM cron sigue siendo una corrida global única. El **cuerpo** del loop (la unidad de trabajo per-org) es RLS-correcto y SP5 (durable jobs) + SP7 lo evolucionan de `run inline` a `enqueue(org)` + rate-limit por org, sin reescribir un hack.
 
-**Gap honesto (corregido tras el review final):** la **enumeración** `SELECT DISTINCT organization_id FROM flex_credentials` es una lectura **cross-tenant de sistema**. Si el app corre como el rol sin-bypass `app_rls` (FORCE RLS) sin contexto, esa query default-deny → 0 orgs → el auto-fetch diario no fetchea nada en prod. O sea: el agujero funcional no desaparece con el loop mínimo, sólo se mueve de "stub" a "enumeración RLS-bloqueada". Cerrarlo requiere darle a la enumeración una conexión de **sistema** (rol owner/bypass o contexto bootstrap) — eso es **SP7** (cron tenant-aware) + SP5. SP1 entrega el loop + el job per-org RLS-correcto; la enumeración RLS-correcta del cron queda **documentada como gap de SP7** (no un bug oculto). El stub/defer total sí se rechazó (dejaría también tests skipped); el loop mínimo deja el código y el per-org job listos para que SP7 sólo agregue la conexión de sistema.
+**Silent-failure de la enumeración — CERRADO (SP1-hardening H1, `2026-06-03-sp1-hardening-close-gaps-design.md`).** La **enumeración** `SELECT DISTINCT organization_id FROM flex_credentials` es una lectura **cross-tenant de control plane**. Bajo `app_rls` (FORCE RLS) sin contexto, default-deny → 0 orgs → el cron corría y no fetcheaba nada **en silencio** (un hole, no un feature diferido — el proyecto prohíbe silent failures). **Cerrado** exponiéndole a `app_rls` **una** capacidad cross-tenant acotada y auditable: la función `SECURITY DEFINER` `system_credentialed_org_ids()` (search_path fijo, EXECUTE revocado a PUBLIC + sólo a `app_rls`, read-only, devuelve sólo org-ids). El scheduler enumera vía la función; el trabajo per-org sigue 100% RLS-enforced (`flex_job.run` + `SET LOCAL`). Se eligió la función sobre un rol `BYPASSRLS`/`system_database_url` por **least-privilege** (no adelanta la capa de secrets/roles de SP4). Lo que SIGUE siendo SP5/SP7 es la **sofisticación**: cola durable + rate-limit por org (la función + loop son la base sobre la que se construye, no un hack a reemplazar).
 
 ### D-CONV-3: Org-pure — purga del scaffolding user-céntrico legacy (2026-06-03, directiva usuario)
 
