@@ -14,6 +14,7 @@ from ibkr_control.db.rls import apply_org_context
 from ibkr_control.db.session import get_async_session
 from ibkr_control.ingest.flex import job as flex_job_mod
 from ibkr_control.ingest.flex import parser as flex_parser_mod
+from ibkr_control.ingest.flex import persister as flex_persister_mod
 from ibkr_control.ingest.flex._models import UnknownFlexTagError
 from ibkr_control.ingest.hash_dedup import xml_hash
 
@@ -93,13 +94,25 @@ async def upload_xml(
     # and returns only the flex_import_id; we re-pull the FlexImport row to
     # expose both n_observed_* (what the XML carried) and n_new_* (what
     # actually hit DB — 0s on dedup'd re-uploads) per spec A5.
-    flex_import_id = await flex_job_mod.ingest_xml(
-        session,
-        organization_id=org_id,
-        xml_bytes=xml_bytes,
-        source="manual_upload",
-        trigger="wizard",
-    )
+    try:
+        flex_import_id = await flex_job_mod.ingest_xml(
+            session,
+            organization_id=org_id,
+            xml_bytes=xml_bytes,
+            source="manual_upload",
+            trigger="wizard",
+        )
+    except flex_persister_mod.AccountClaimedError as exc:
+        # H2: the XML references a broker account already owned by another org
+        # (ibkr_account_id is single-org by design). Generic 409 — no org id, no
+        # which-account leak, no confirmation that the account exists elsewhere.
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "ACCOUNT_CLAIMED",
+                "message": "Una o más cuentas del XML ya pertenecen a otra organización.",
+            },
+        ) from exc
 
     # ingest_xml commits internally (via ingest_log_entry), which ends the
     # transaction the org_context dependency SET LOCAL'd into. Under RLS the

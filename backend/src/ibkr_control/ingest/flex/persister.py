@@ -28,6 +28,7 @@ from datetime import date
 
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ibkr_control.db.models.accounts import Account
@@ -50,6 +51,47 @@ from ibkr_control.ingest.flex._upsert_helpers import (
     _upsert_snapshot,
 )
 from ibkr_control.ingest.hash_dedup import xml_hash
+
+
+# The global unique constraint on accounts.ibkr_account_id. A broker account is
+# single-org by design (a shared broker identity is ONE row, owned by ONE org);
+# under RLS a second org's _ensure_accounts SELECT is RLS-blinded from the first
+# org's row → tries to INSERT → collides on this constraint. We convert ONLY this
+# specific violation to AccountClaimedError; any other IntegrityError re-raises
+# unchanged so unrelated DB errors are never masked.
+_ACCOUNT_UNIQUE_CONSTRAINT = "uq_accounts_ibkr_account_id"
+
+
+class AccountClaimedError(Exception):
+    """One or more accounts referenced by the XML already belong to another org.
+
+    Raised by ``_ensure_accounts`` when the global ``ibkr_account_id`` unique is
+    violated under RLS (the row is owned by a different organization, invisible
+    to this one). The message is intentionally GENERIC — it leaks neither which
+    organization owns the account nor which account id collided — so that HTTP
+    endpoints can surface a clean 409 without an existence/ownership leak.
+    """
+
+    def __init__(
+        self, message: str = "one or more accounts belong to another organization"
+    ) -> None:
+        super().__init__(message)
+
+
+def _is_account_unique_violation(exc: IntegrityError) -> bool:
+    """True iff ``exc`` is specifically the ``ibkr_account_id`` global unique.
+
+    Inspects the underlying DBAPI error: asyncpg's ``UniqueViolationError`` exposes
+    ``constraint_name``. Falls back to a substring match on the message so the
+    detection survives drivers that don't populate ``constraint_name``. Any other
+    IntegrityError (a different unique, an FK, a check) returns False → the caller
+    re-raises it unchanged.
+    """
+    orig = getattr(exc, "orig", None)
+    constraint_name = getattr(orig, "constraint_name", None)
+    if constraint_name == _ACCOUNT_UNIQUE_CONSTRAINT:
+        return True
+    return _ACCOUNT_UNIQUE_CONSTRAINT in str(exc)
 
 
 def _is_shadow_account(ibkr_account_id: str) -> bool:
@@ -641,6 +683,16 @@ async def _ensure_accounts(
     could race here — the second would either get the existing row (race lost
     safely) or hit the UNIQUE(ibkr_account_id) constraint and fail. Acceptable
     V1 trade-off; if it becomes a problem, wrap with ON CONFLICT DO NOTHING.
+
+    Cross-org collision (H2): under RLS the SELECT above is RLS-blinded from
+    rows owned by other orgs, so an account already claimed by another org reads
+    as "missing" here → we try to INSERT → the global ``ibkr_account_id`` unique
+    fires. We wrap the INSERT+flush in a SAVEPOINT so the failed INSERT does NOT
+    poison the outer request transaction (the endpoint can still return a clean
+    409), roll the SAVEPOINT back, and raise ``AccountClaimedError`` — a generic
+    domain error (no org/account leak). Only the ``ibkr_account_id`` unique is
+    converted; any other IntegrityError re-raises unchanged so unrelated DB
+    errors are never masked.
     """
     if not ibkr_ids:
         return {}
@@ -649,14 +701,32 @@ async def _ensure_accounts(
     existing: dict[str, int] = {a.ibkr_account_id: a.id for a in result.all()}
 
     missing = set(ibkr_ids) - set(existing.keys())
-    for ibkr_id in missing:
-        a = Account(
-            organization_id=organization_id, ibkr_account_id=ibkr_id, alias=None, currency="USD"
-        )
-        session.add(a)
-
     if missing:
-        await session.flush()
+        # SAVEPOINT isolates the INSERT: on a cross-org collision the nested
+        # rollback reverts just this flush, leaving the outer transaction usable
+        # so the caller/endpoint can return a clean 409 instead of a poisoned 500.
+        # Open the SAVEPOINT BEFORE adding the rows: begin_nested() autoflushes
+        # any pending objects, so adding them outside it would surface the
+        # collision from begin_nested() (outside this try) as a raw IntegrityError.
+        sp = await session.begin_nested()
+        try:
+            for ibkr_id in missing:
+                session.add(
+                    Account(
+                        organization_id=organization_id,
+                        ibkr_account_id=ibkr_id,
+                        alias=None,
+                        currency="USD",
+                    )
+                )
+            await session.flush()
+            await sp.commit()
+        except IntegrityError as exc:
+            await sp.rollback()
+            if _is_account_unique_violation(exc):
+                raise AccountClaimedError() from exc
+            raise
+
         result2 = await session.scalars(select(Account).where(Account.ibkr_account_id.in_(missing)))
         for a in result2.all():
             existing[a.ibkr_account_id] = a.id

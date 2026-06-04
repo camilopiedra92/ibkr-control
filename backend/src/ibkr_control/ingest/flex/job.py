@@ -151,6 +151,17 @@ async def ingest_xml(
                 source=source,
             )
             await sp.commit()
+        except flex_persister_mod.AccountClaimedError:
+            # Cross-org account collision (H2) is NOT a poison condition: the XML
+            # is valid, it just references a broker account owned by another org.
+            # Roll back partial writes (the persister's _ensure_accounts already
+            # rolled back its inner savepoint, but the outer one may hold the
+            # flex_import row) and re-raise so upload_xml maps it to a generic 409.
+            # Do NOT insert a poison row — that would wrongly block re-attempts as
+            # "poison" instead of surfacing the tenancy boundary. ingest_log_entry
+            # still marks the log row 'failed', which is honest.
+            await sp.rollback()
+            raise
         except Exception as exc:
             # Must stay broad: the SAVEPOINT catch-all must roll back partial
             # persister writes regardless of exception type (DB error, parse
