@@ -10,7 +10,6 @@ from ibkr_control.auth.backend import current_active_user
 from ibkr_control.auth.models import User
 from ibkr_control.config import get_settings
 from ibkr_control.db.models.flex_raw import FlexImport
-from ibkr_control.db.rls import apply_org_context
 from ibkr_control.db.session import get_async_session
 from ibkr_control.ingest.flex import job as flex_job_mod
 from ibkr_control.ingest.flex import parser as flex_parser_mod
@@ -114,13 +113,11 @@ async def upload_xml(
             },
         ) from exc
 
-    # ingest_xml commits internally (via ingest_log_entry), which ends the
-    # transaction the org_context dependency SET LOCAL'd into. Under RLS the
-    # follow-up read below runs in a fresh transaction with no context →
-    # default-deny → fi is None. Re-apply the org context so the re-pull of the
-    # just-written FlexImport is visible (org-scoped). Owner/create_all hid this.
-    await apply_org_context(session, org_id=org_id, user_id=user.id)
-
+    # ingest_xml commits internally (via ingest_log_entry), ending the transaction.
+    # The follow-up read below autobegins a fresh transaction; the after_begin RLS
+    # listener (db/rls.py) re-applies app.current_org from the session's stashed
+    # context, so the just-written FlexImport is visible (org-scoped) without a
+    # manual re-apply.
     fi = await session.scalar(select(FlexImport).where(FlexImport.id == flex_import_id))
     return {
         "flex_import_id": flex_import_id,
