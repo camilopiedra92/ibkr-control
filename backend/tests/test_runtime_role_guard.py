@@ -29,6 +29,21 @@ async def test_guard_passes_for_app_rls(_migrated_app_db):
         await engine.dispose()
 
 
+async def test_app_rls_role_is_not_superuser_and_not_bypassrls(app_rls_db_session):
+    """The role the app actually connects as must be subject to RLS."""
+    row = (
+        await app_rls_db_session.execute(
+            text(
+                "SELECT current_setting('is_superuser')::bool AS is_su, "
+                "COALESCE((SELECT rolbypassrls FROM pg_roles "
+                "WHERE rolname = current_user), false) AS bypass"
+            )
+        )
+    ).one()
+    assert row.is_su is False
+    assert row.bypass is False
+
+
 async def test_guard_raises_for_nonsuperuser_bypassrls(_migrated_app_db):
     """Lock the rolbypassrls arm specifically: a NON-superuser role that carries
     BYPASSRLS must be rejected. is_superuser is false here, so this can only pass
