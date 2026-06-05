@@ -204,9 +204,12 @@ Se cierra esa brecha de parity:
 2. El boot guard rechaza arranque como superuser/BYPASSRLS (test verde).
 3. Un request que escribe-y-lee mantiene aislamiento RLS a través del commit
    (test verde).
-4. Suite completa verde **bajo `app_rls`** (sin regresión vs los 337 actuales).
+4. Suite completa verde **bajo `app_rls`** (sin regresión vs el baseline
+   pre-branch; el conteo crece con los tests nuevos — cerró en 351).
 5. `ruff check .` limpio, boot smoke OK como `app_rls`, `make prod-local`
    arranca con el split de servicios.
-6. Verificación end-to-end manual: con dos orgs cargados, un request de org A no
-   puede leer datos de org B aunque se fuerce un query sin filtro explícito
-   (RLS lo bloquea ahora que el runtime conecta como `app_rls`).
+6. Aislamiento cross-tenant sin filtro explícito: cubierto de forma durable por
+   `tests/test_rls.py::test_org_a_cannot_see_org_b_accounts` (query crudo bajo
+   `app_rls` con contexto → solo la org propia), que ahora refleja la config real
+   de runtime. Un smoke end-to-end por HTTP con dos orgs queda como verificación
+   manual opcional (belt-and-suspenders sobre la prueba automatizada).
