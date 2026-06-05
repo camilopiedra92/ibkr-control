@@ -14,6 +14,7 @@ services:
       timeout: 5s
       retries: 10
 
+  # migrate and backend build the same image, so any migration change forces migrate to re-run before backend starts (depends_on: service_completed_successfully).
   migrate:
     build:
       context: ./backend
@@ -23,6 +24,7 @@ services:
       # Owner DSN — DDL + role/policy provisioning. Lives ONLY in this one-shot
       # service; the long-running backend never sees the owner credentials.
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # present because Settings validates it at construction (env.py imports get_settings); alembic itself does not use it.
       JWT_SECRET: ${JWT_SECRET}
       APP_RLS_PASSWORD: ${APP_RLS_PASSWORD}
     command: ["sh", "-c", "uv run alembic upgrade head"]

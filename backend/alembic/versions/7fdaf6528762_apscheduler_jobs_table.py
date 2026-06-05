@@ -7,6 +7,17 @@ pre-create it here (run as the owner) so APScheduler's checkfirst sees it and
 skips DDL. Schema matches APScheduler 3.x SQLAlchemyJobStore exactly:
   id VARCHAR(191) PRIMARY KEY, next_run_time DOUBLE PRECISION (indexed),
   job_state BYTEA NOT NULL.
+
+IDEMPOTENT on purpose (raw IF NOT EXISTS DDL, not op.create_table which has no
+checkfirst): APScheduler's SQLAlchemyJobStore lazily create_all()s this exact
+table at runtime, so any volume that ran the PRE-SPLIT app (which chained
+alembic INTO the uvicorn CMD and started the scheduler from the same process)
+already has the table. An unconditional op.create_table raises
+DuplicateTableError on such volumes, taking the migrate step — and therefore the
+backend (depends_on: service_completed_successfully) — down. The schema is
+APScheduler-owned and frozen by the APScheduler==3.11.* pin, so IF NOT EXISTS
+cannot mask meaningful drift (there is no third writer with a different shape).
+
 Not part of Base.metadata (runtime table) — the drift test already ignores it
 (tests/test_migrations.py: "apscheduler_jobs" in text). Explicit grant to
 app_rls so the running app can read/write job rows.
@@ -19,7 +30,6 @@ Create Date: 2026-06-05
 from collections.abc import Sequence
 from typing import Union
 
-import sqlalchemy as sa
 from alembic import op
 
 revision: str = "7fdaf6528762"
@@ -29,21 +39,28 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "apscheduler_jobs",
-        sa.Column("id", sa.Unicode(191), primary_key=True, nullable=False),
-        sa.Column("next_run_time", sa.Float(25), nullable=True),
-        sa.Column("job_state", sa.LargeBinary(), nullable=False),
+    # Idempotent on purpose: APScheduler's SQLAlchemyJobStore lazily create_all()s
+    # this exact table at runtime, so any volume that ran the pre-split app already
+    # has it. The schema is APScheduler-owned and frozen by the APScheduler==3.11.*
+    # pin, so IF NOT EXISTS cannot mask meaningful drift (no third writer). This lets
+    # the migrate step converge instead of failing DuplicateTableError on such volumes.
+    op.execute(
+        "CREATE TABLE IF NOT EXISTS apscheduler_jobs ("
+        "id VARCHAR(191) NOT NULL PRIMARY KEY, "
+        "next_run_time DOUBLE PRECISION, "
+        "job_state BYTEA NOT NULL)"
     )
-    op.create_index("ix_apscheduler_jobs_next_run_time", "apscheduler_jobs", ["next_run_time"])
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_apscheduler_jobs_next_run_time "
+        "ON apscheduler_jobs (next_run_time)"
+    )
+    # Defensive + explicit (idempotent): see baseline ALTER DEFAULT PRIVILEGES; this
+    # GRANT is what survives once the migrate-owner is split from that role.
     from ibkr_control.db.rls import APP_ROLE
 
-    # Defensive + explicit: the baseline's ALTER DEFAULT PRIVILEGES already grants
-    # app_rls DML on tables created by the migration owner, but this explicit GRANT
-    # is what survives once Task 4 splits the migrate-owner from that role.
     op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON apscheduler_jobs TO {APP_ROLE}")
 
 
 def downgrade() -> None:
-    op.drop_index("ix_apscheduler_jobs_next_run_time", table_name="apscheduler_jobs")
-    op.drop_table("apscheduler_jobs")
+    op.execute("DROP INDEX IF EXISTS ix_apscheduler_jobs_next_run_time")
+    op.execute("DROP TABLE IF EXISTS apscheduler_jobs")
