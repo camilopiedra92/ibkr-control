@@ -41,7 +41,8 @@ COPY --chown=appuser:appuser scripts/ ./scripts/
 EXPOSE 8000
 
 # --reload-dir limita el watcher a src/ para evitar restarts espurios por logs/cache.
-CMD ["sh", "-c", "uv run alembic upgrade head && exec uv run uvicorn ibkr_control.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir src"]
+# Migrations run in the one-shot `migrate` compose service, not here.
+CMD ["sh", "-c", "exec uv run uvicorn ibkr_control.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir src"]
 
 # ---------- prod: solo runtime deps, source horneado, sin reload ----------
 FROM base AS prod
@@ -59,4 +60,5 @@ RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=1001,gid=1001 \
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "uv run alembic upgrade head && exec uv run uvicorn ibkr_control.main:app --host 0.0.0.0 --port 8000"]
+# Migrations run in the one-shot `migrate` compose service, not here.
+CMD ["sh", "-c", "exec uv run uvicorn ibkr_control.main:app --host 0.0.0.0 --port 8000"]

@@ -14,6 +14,25 @@ services:
       timeout: 5s
       retries: 10
 
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: prod
+    environment:
+      # Owner DSN — DDL + role/policy provisioning. Lives ONLY in this one-shot
+      # service; the long-running backend never sees the owner credentials.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+      APP_RLS_PASSWORD: ${APP_RLS_PASSWORD}
+    command: ["sh", "-c", "uv run alembic upgrade head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    labels:
+      - "coolify.managed=true"
+
   backend:
     build:
       context: ./backend
@@ -21,13 +40,17 @@ services:
       target: prod
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # app_rls DSN — non-bypass role the long-running app connects as. Owner
+      # credentials never reach this service (DDL runs in the `migrate` service).
+      DATABASE_URL: postgresql+asyncpg://app_rls:${APP_RLS_PASSWORD}@postgres:5432/${POSTGRES_DB}
       JWT_SECRET: ${JWT_SECRET}
       JWT_LIFETIME_SECONDS: ${JWT_LIFETIME_SECONDS:-3600}
       BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS}
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     labels:
       - "coolify.managed=true"
 

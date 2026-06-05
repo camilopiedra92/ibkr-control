@@ -23,6 +23,21 @@
 #   Polling cuesta ~1-3% CPU constante; preferí activar VirtioFS antes.
 
 services:
+  # migrate inherits owner DSN / command / depends_on / restart from compose.yaml.
+  # Override the build target to `dev` so we don't build a second `prod` image
+  # just for the one-shot (both targets ship alembic), and bind-mount the
+  # migrations so dev runs against the live source like the backend does.
+  migrate:
+    build:
+      target: dev
+    volumes:
+      - ./backend/src:/app/src
+      - ./backend/alembic:/app/alembic
+      - ./backend/alembic.ini:/app/alembic.ini
+      - ./backend/scripts:/app/scripts
+      - ./backend/pyproject.toml:/app/pyproject.toml
+      - ./backend/uv.lock:/app/uv.lock
+
   backend:
     build:
       target: dev
@@ -36,6 +51,7 @@ services:
       - ./backend/uv.lock:/app/uv.lock
     environment:
       # Dev-only flags. CORS abierto a localhost:3000 para HMR del frontend.
+      # DATABASE_URL (app_rls DSN) is inherited from compose.yaml — not overridden.
       LOG_LEVEL: DEBUG
 
   frontend:
