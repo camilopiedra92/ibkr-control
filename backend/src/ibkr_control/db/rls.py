@@ -14,8 +14,19 @@ without inverting the inner→outer direction.
 
 import os
 
-from sqlalchemy import text
+from sqlalchemy import Connection, event, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session, SessionTransaction
+
+
+def _org_context_set_config(org_id: int, user_id: int | None) -> tuple[str, dict[str, str]]:
+    """SQL + params to SET LOCAL the RLS GUCs. Single source for both the
+    explicit apply (apply_org_context) and the after_begin listener. '' for a
+    no-user context (NULLIF(...,'')::bigint -> NULL: clean default-deny)."""
+    return (
+        "SELECT set_config('app.current_org', :o, true), set_config('app.current_user', :u, true)",
+        {"o": str(org_id), "u": "" if user_id is None else str(user_id)},
+    )
 
 
 async def apply_org_context(
@@ -32,12 +43,47 @@ async def apply_org_context(
     here.
     """
     # set_config(key, value, is_local=true) == SET LOCAL; parameterized (no injection).
-    await session.execute(
-        text(
-            "SELECT set_config('app.current_org', :o, true), "
-            "set_config('app.current_user', :u, true)"
-        ).bindparams(o=str(org_id), u="" if user_id is None else str(user_id))
-    )
+    sql, params = _org_context_set_config(org_id, user_id)
+    await session.execute(text(sql), params)
+
+
+# session.info keys carrying the per-request RLS context for the after_begin
+# listener. The stash lives on the SYNC session's .info (what the listener reads).
+_ORG_KEY = "rls_org_id"
+_USER_KEY = "rls_user_id"
+
+
+def set_session_org_context(session: AsyncSession, *, org_id: int, user_id: int | None) -> None:
+    """Stash the RLS context on the session for the after_begin listener.
+
+    Writes to the underlying sync session's ``.info`` — the same dict the
+    ``after_begin`` listener reads — so the GUC is re-applied on every new
+    transaction of this session (surviving intra-request commits). Applying the
+    GUC to the *currently open* transaction is org_context's job (it awaits
+    apply_org_context right after this), because the membership lookup may have
+    already opened a transaction before org_id was known.
+    """
+    session.sync_session.info[_ORG_KEY] = org_id
+    session.sync_session.info[_USER_KEY] = user_id
+
+
+@event.listens_for(Session, "after_begin")
+def _reapply_org_context(
+    session: Session, transaction: SessionTransaction, connection: Connection
+) -> None:
+    """Re-apply the org GUC on every new transaction that carries context.
+
+    SET LOCAL is transaction-scoped; without this, the GUC would vanish after
+    any commit mid-request. Fires on the sync Session under the async wrapper;
+    ``connection`` is a sync Connection, so we execute synchronously here. Same
+    GUC contract as apply_org_context ('' for a no-user context).
+    """
+    org_id = session.info.get(_ORG_KEY)
+    if org_id is None:
+        return
+    user_id = session.info.get(_USER_KEY)
+    sql, params = _org_context_set_config(org_id, user_id)
+    connection.execute(text(sql), params)
 
 
 # Tenant tables: organization_id NOT NULL + (later) standard single-org RLS policy.

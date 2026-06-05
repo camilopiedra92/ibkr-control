@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ibkr_control.auth.backend import current_active_user
 from ibkr_control.auth.models import User
 from ibkr_control.db.models.memberships import Membership
-from ibkr_control.db.rls import apply_org_context
+from ibkr_control.db.rls import apply_org_context, set_session_org_context
 from ibkr_control.db.session import get_async_session
 
 __all__ = ["resolve_current_org_id", "org_context"]
@@ -58,7 +58,11 @@ async def org_context(
     user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> int:
-    """FastAPI dependency: resolve org, SET LOCAL the RLS context, return org_id."""
+    """FastAPI dependency: resolve org, stash RLS context for the after_begin
+    listener (so it survives intra-request commits), apply it to the currently
+    open transaction, and return org_id.
+    """
     org_id = await resolve_current_org_id(session, user_id=user.id, requested_org_id=None)
+    set_session_org_context(session, org_id=org_id, user_id=user.id)
     await apply_org_context(session, org_id=org_id, user_id=user.id)
     return org_id
