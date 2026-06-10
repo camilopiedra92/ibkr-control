@@ -4,20 +4,25 @@
 
 **Goal:** Reemplazar `flex_credentials` por el modelo Plaid-grade `institutions → connections → connection_ibkr_flex` con state machine de conexión (W4) cableada al cron/job/API/UI, y linaje `connection_id` en `flex_imports`/`ingest_log`.
 
-**Architecture:** Expand/contract (parallel change): la migración *expand* crea las tablas nuevas + copia datos + reescribe la función `SECURITY DEFINER`; los consumidores se reescriben task a task con la suite verde; la migración *contract* dropea `flex_credentials` al final. Transiciones de estado SOLO vía `ingest/connection_state.py` (T1-D5). Spec: `docs/specs/2026-06-10-tier1-worldclass-model-design.md` (T1-S1..S4, T1-D1..D6, D15).
+**Architecture:** **Re-baseline pre-deploy (T1-D14 amended):** no hay deployment todavía, así que NO hay migraciones transicionales ni data-copy — el branch squashea la cadena actual (5 revisiones) en UN baseline pristino y lo va **amendando canónicamente** task a task hasta que `flex_credentials` no exista más. La DB dev se wipea en cada amendment (`down -v`; el usuario recarga XMLs por wizard). `main` mergeado termina con UNA migración baseline y cero rastro del modelo viejo. Las transiciones de estado pasan SOLO por `ingest/connection_state.py` (T1-D5). Spec: `docs/specs/2026-06-10-tier1-worldclass-model-design.md` (T1-S1..S4, T1-D1..D6, D14 amended, D15).
 
 **Tech Stack:** SQLAlchemy 2.x async + Alembic (autogenerate canónico en container) + FastAPI + Pydantic + Next.js/TanStack/orval + pytest/testcontainers + vitest/Playwright.
 
-**Branch:** `saas/w1-connections` (ya existe, spec commiteado). NO crear branches nuevos; verificar `git branch --show-current` después de cada commit.
+**Branch:** `saas/w1-connections` (ya existe, spec + plan commiteados). NO crear branches nuevos; verificar `git branch --show-current` después de cada commit.
 
 **Reglas del repo que aplican a TODOS los tasks:**
-- TDD: failing test → impl mínima → test verde → commit.
-- Migraciones: generar con `alembic revision --autogenerate` DENTRO del container backend (`docker compose -f compose.yaml -f compose.dev.yaml exec backend uv run alembic revision --autogenerate -m "..."`) y luego editar a mano lo no-autogenerable. Remover el falso positivo `apscheduler_jobs` si aparece.
+- TDD: failing test → impl mínima → test verde → commit. Cada task termina con la suite COMPLETA verde.
+- Baseline amendments: regenerar DENTRO del container backend (ver procedimiento en Task 1/Step 4) y re-aplicar las secciones hand-written congeladas. Remover el falso positivo `apscheduler_jobs` del autogenerate si aparece (la tabla va en la sección hand-written).
 - Tests corren desde el HOST: `cd backend && uv run pytest` (testcontainers necesita el Docker socket del host).
 - `cd backend && uv run ruff check . && uv run ruff format .` antes de cada commit.
 - No emojis en código. `Decimal` para dinero. Settings via `get_settings()` dentro de funciones.
 
 **CR-3 (checkpoint resuelto durante planning):** los errores auth-class del Flex WS son `FlexAuthError` (códigos `1003/1004/1018`, ver `client.py::ERR_AUTH_CODES`) y `FlexQueryNotFoundError` (`1005`, query_id mal configurado — también requiere acción del usuario). Ambos → `reauth_required`. `FlexBusyError` (1001), `FlexPollTimeoutError`, `httpx` errors → fallo transitorio (`consecutive_failures++`).
+
+**Política re-baseline (T1-D14 amended — leer antes de tocar migraciones):**
+- El baseline es **mutable hasta el primer deploy**. Cada amendment = regenerar el schema autogenerado + re-aplicar las secciones hand-written + wipe de la DB dev.
+- Las migraciones NUNCA importan builders vivos de `db/rls.py` — todas las secciones hand-written van **frozen inline** (el squash elimina el caso `a1f2c3d4e5b6`, que importaba `system_enum_function_sql()` vivo: una bomba de replay si el builder cambiaba).
+- Al primer deployment esta política EXPIRA: migraciones inmutables + expand/contract cuando haga falta.
 
 ---
 
@@ -25,136 +30,331 @@
 
 | Acción | Path | Responsabilidad |
 |---|---|---|
+| Create | `backend/alembic/versions/<rev>_tier1_baseline.py` | Baseline único pristino (squash + W1, amendado por task) |
+| Delete | `backend/alembic/versions/05943d9efcdb_saas_baseline.py` y las otras 4 revisiones | Cadena vieja squasheada (Task 1) |
 | Create | `backend/src/ibkr_control/db/models/institutions.py` | Catálogo global de brokers (control plane) |
 | Create | `backend/src/ibkr_control/db/models/connections.py` | `Connection` + `ConnectionIbkrFlex` |
 | Create | `backend/src/ibkr_control/ingest/connection_state.py` | State machine (única puerta de transiciones) |
 | Create | `backend/src/ibkr_control/api/connections.py` | Router `/api/connections` |
-| Create | `backend/alembic/versions/<rev1>_w1_connections_expand.py` | Expand: tablas nuevas + data copy + función nueva + policies |
-| Create | `backend/alembic/versions/<rev2>_w1_drop_flex_credentials.py` | Contract: drop tabla vieja |
-| Modify | `backend/alembic/versions/a1f2c3d4e5b6_system_enum_function.py` | Congelar SQL histórico (quitar import vivo) |
 | Modify | `backend/src/ibkr_control/db/__init__.py` | Exports |
-| Modify | `backend/src/ibkr_control/db/rls.py` | `ORG_SCOPED_TABLES` + builder de la función |
+| Modify | `backend/src/ibkr_control/db/rls.py` | `ORG_SCOPED_TABLES` + builder de la función (SSOT para tests; las migraciones congelan su copia) |
 | Modify | `backend/src/ibkr_control/db/models/flex_raw.py` | `FlexImport.connection_id` |
 | Modify | `backend/src/ibkr_control/db/models/ingest_log.py` | `IngestLog.connection_id` |
 | Modify | `backend/src/ibkr_control/ingest/log.py` | param `connection_id` |
 | Modify | `backend/src/ibkr_control/ingest/flex/job.py` | `run()` itera connections activas + transiciones |
 | Modify | `backend/src/ibkr_control/ingest/flex/persister.py` | `persist(connection_id=...)` |
-| Modify | `backend/src/ibkr_control/scheduler/jobs.py` | docstring/comментarios (función renombrada de fuente) |
-| Modify | `backend/src/ibkr_control/api/_schemas.py` | Schemas Connection* |
+| Modify | `backend/src/ibkr_control/scheduler/jobs.py` | docstrings (enumera connections) |
+| Modify | `backend/src/ibkr_control/api/_schemas.py` | Schemas Connection*; muere FlexCredentials* |
 | Modify | `backend/src/ibkr_control/api/setup.py` | step1/state/step2_detect sobre connections |
 | Modify | `backend/src/ibkr_control/api/health.py` | estado de connections en la respuesta |
 | Modify | `backend/src/ibkr_control/main.py` | router connections (reemplaza credentials) |
 | Delete | `backend/src/ibkr_control/db/models/flex_credentials.py` | (Task 7) |
-| Delete | `backend/src/ibkr_control/api/credentials.py` | (Task 4) |
+| Delete | `backend/src/ibkr_control/api/credentials.py` | (Task 5) |
 | Create | `frontend/src/components/settings/ConnectionsSection.tsx` | Cards con badge de estado + acciones |
 | Modify | `frontend/src/components/settings/RotateTokenModal.tsx` | Opera sobre connection id |
-| Modify | `frontend/src/components/wizard/Step1Credentials.tsx` | display_name opcional (endpoint igual) |
+| Modify | `frontend/src/components/wizard/Step1Credentials.tsx` | display_name opcional |
 | Delete | `frontend/src/components/settings/FlexCredentialsSection.tsx` | Reemplazada |
-| Tests | `backend/tests/ingest/test_connection_state.py` (new), `backend/tests/api/test_connections_api.py` (new), `backend/tests/test_w1_connections_migration.py` (new), updates en `test_job.py`, `test_job_rls.py`, `test_scheduler.py`, `test_rls.py`, `test_credentials.py` (delete), `test_setup_*.py`, `test_identity_models.py`, vitest + Playwright | |
+| Tests | `backend/tests/ingest/test_connection_state.py` (new), `backend/tests/api/test_connections_api.py` (new), `backend/tests/test_tier1_baseline.py` (new), updates en `test_job.py`, `test_job_rls.py`, `test_scheduler.py`, `test_rls.py`, `test_setup_*.py`, `test_identity_models.py`; delete `test_credentials.py` y `test_w1_*` obsoletos; vitest + Playwright | |
 
 ---
 
-### Task 0: Congelar el SQL histórico de `a1f2c3d4e5b6` (replay safety)
+### Task 1: Re-baseline mecánico (squash de la cadena actual — SIN cambios de modelo)
 
-La migración `a1f2c3d4e5b6_system_enum_function.py` importa `system_enum_function_sql()` VIVO desde `db/rls.py`. Cuando el builder cambie a leer `connections` (Task 1), un `alembic upgrade head` sobre DB fresca rompería: esa revisión corre ANTES de que `connections` exista y Postgres valida el body de funciones `LANGUAGE sql` al crearlas. Las migraciones deben ser time-frozen.
+Squash de las 5 revisiones (`05943d9efcdb` baseline → `7fdaf6528762` apscheduler → `544a0b2c362c` db-hardening → `a1f2c3d4e5b6` system function → `fd27737af54e` multihome) en UN baseline nuevo que reproduce el estado ACTUAL de `Base.metadata`. Aislar la corrección del squash de los cambios W1 (lección Phase 2.8: el squash anterior destapó una cadena rota y 15 tests obsoletos — mejor descubrir eso sin ruido de features).
 
 **Files:**
-- Modify: `backend/alembic/versions/a1f2c3d4e5b6_system_enum_function.py`
-- Verify: `backend/tests/test_migrations.py` (replay fresco ya existe — es el test que atraparía el bug)
+- Create: `backend/alembic/versions/<rev>_tier1_baseline.py`
+- Delete: las 5 revisiones existentes en `backend/alembic/versions/`
+- Test: `backend/tests/test_tier1_baseline.py` (new) + audit de tests por-revisión
 
-- [ ] **Step 1: Leer la migración completa** (`Read` del archivo) y copiar el output EXACTO de `system_enum_function_sql()` actual (las 3 sentencias: `CREATE OR REPLACE FUNCTION system_credentialed_org_ids() ... FROM flex_credentials $$`, `REVOKE ...`, `GRANT ...` — ver `db/rls.py:178-185`).
+- [ ] **Step 1: Inventariar las secciones hand-written de la cadena vieja ANTES de borrar.** Leer los 5 archivos y extraer VERBATIM a un scratch local: (a) del baseline `05943d9efcdb`: bloques RLS (ENABLE/FORCE/CREATE POLICY por tabla, policy especial de `access_grants`, grants del rol `app_rls` — comparar con los builders de `db/rls.py` para confirmar que son equivalentes); (b) de `7fdaf6528762`: DDL completo de `apscheduler_jobs` (`CREATE TABLE IF NOT EXISTS` — dirty-volume safe, `app_rls` no tiene CREATE); (c) de `a1f2c3d4e5b6`: las 3 sentencias de `system_credentialed_org_ids()` (body actual lee `flex_credentials`); (d) verificar que `544a0b2c362c`/`fd27737af54e` no tengan hand-sections no capturadas por autogenerate (índices/constraints ya viven en los modelos — drift test lo garantiza).
 
-- [ ] **Step 2: Reemplazar el import vivo por el SQL congelado.** En `upgrade()` (y `downgrade()` si también importa), sustituir:
-
-```python
-    from ibkr_control.db.rls import system_enum_function_sql
-
-    for stmt in system_enum_function_sql():
-        op.execute(stmt)
-```
-
-por las sentencias inline (texto idéntico al output actual del builder):
+- [ ] **Step 2: Failing test** en `backend/tests/test_tier1_baseline.py`:
 
 ```python
-    # FROZEN 2026-06-10 (W1): este SQL era el output de
-    # db/rls.py::system_enum_function_sql() al momento de esta revisión.
-    # Las migraciones no importan builders vivos — el builder evoluciona
-    # (W1 lo apunta a `connections`) y esta revisión corre antes de que esa
-    # tabla exista; Postgres valida el body de funciones LANGUAGE sql al crearlas.
-    for stmt in [
-        "CREATE OR REPLACE FUNCTION system_credentialed_org_ids() "
-        "RETURNS SETOF bigint LANGUAGE sql STABLE SECURITY DEFINER "
-        "SET search_path = pg_catalog, public AS $$ "
-        "SELECT DISTINCT organization_id FROM flex_credentials $$",
-        "REVOKE EXECUTE ON FUNCTION system_credentialed_org_ids() FROM PUBLIC",
-        "GRANT EXECUTE ON FUNCTION system_credentialed_org_ids() TO app_rls",
-    ]:
-        op.execute(stmt)
+"""Baseline tier1: replay fresco + secciones hand-written presentes."""
+
+# Patrón de tests/test_migrations.py (container fresco + alembic upgrade head).
+
+def test_baseline_is_single_revision():
+    # listdir de alembic/versions: exactamente 1 archivo de revisión,
+    # down_revision is None
+    ...
+
+def test_apscheduler_jobs_exists_after_upgrade(fresh_pg_engine):
+    # upgrade head → tabla apscheduler_jobs existe (no está en Base.metadata,
+    # el drift test la ignora — este assert es su única red)
+    ...
+
+def test_system_function_exists_and_is_security_definer(fresh_pg_engine):
+    # SELECT prosecdef, prosrc FROM pg_proc WHERE proname='system_credentialed_org_ids'
+    # → prosecdef=True; prosrc contiene 'FROM flex_credentials' (Task 4 lo cambia)
+    ...
 ```
 
-(Aplicar el mismo tratamiento al `downgrade()` con su contenido actual congelado.)
+Run: `cd backend && uv run pytest tests/test_tier1_baseline.py -v` → FAIL.
 
-- [ ] **Step 3: Verificar replay fresco**
+- [ ] **Step 3: Borrar las 5 revisiones** (`git rm backend/alembic/versions/05943d9efcdb_*.py 7fdaf6528762_*.py 544a0b2c362c_*.py a1f2c3d4e5b6_*.py fd27737af54e_*.py`).
 
-Run: `cd backend && uv run pytest tests/test_migrations.py -v`
-Expected: PASS (mismo resultado que antes — el SQL es byte-idéntico).
-
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Generar el baseline nuevo canónicamente.** Con el stack dev arriba (`make dev`) y la DB del container WIPEADA para que autogenerate vea schema vacío:
 
 ```bash
-git add backend/alembic/versions/a1f2c3d4e5b6_system_enum_function.py
-git commit -m "fix(migrations): freeze system_enum_function SQL inline (no live builder imports)"
+docker compose -f compose.yaml -f compose.dev.yaml down -v && make dev
+docker compose -f compose.yaml -f compose.dev.yaml exec backend \
+  uv run alembic revision --autogenerate -m "tier1_baseline"
+```
+
+(El servicio `migrate` puede haber aplicado `head` al boot — si la DB no está vacía al autogenerar, dropear el schema dentro del container o regenerar tras `down -v` sin el servicio migrate. El resultado esperado: un archivo con TODO el DDL de `Base.metadata`, `down_revision = None`.)
+
+- [ ] **Step 5: Re-aplicar las secciones hand-written congeladas** al final del `upgrade()` (todo inline, CERO imports de `db/rls.py`):
+
+```python
+    # --- Hand-written frozen sections (T1-D14 amended: no live builder imports) ---
+    # 1. apscheduler_jobs (runtime de APScheduler, fuera de Base.metadata;
+    #    pre-creada porque app_rls no tiene CREATE; IF NOT EXISTS = dirty-volume safe)
+    #    [DDL copiado VERBATIM de la vieja 7fdaf6528762]
+    # 2. Rol app_rls + grants  [output actual de app_role_grants_sql(), inline]
+    # 3. RLS ENABLE/FORCE/POLICY por cada tabla org-scoped  [lista inline snapshot
+    #    de ORG_SCOPED_TABLES a hoy — INCLUYE flex_credentials todavía]
+    # 4. Policy especial access_grants  [inline]
+    # 5. system_credentialed_org_ids()  [inline, body ACTUAL: FROM flex_credentials]
+```
+
+`downgrade()`: `op.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public")` NO — mantener el patrón del baseline viejo (leerlo: si su downgrade era no-op/`pass` documentado, replicar; el baseline es el piso).
+
+- [ ] **Step 6: Audit de tests por-revisión** (lección Phase 2.8): `grep -rn "05943d9efcdb\|7fdaf6528762\|544a0b2c362c\|a1f2c3d4e5b6\|fd27737af54e" backend/tests/` → tests de mecánica-de-revisión (upgrade/downgrade a revisiones muertas) se BORRAN; tests de comportamiento (CHECK enforcement, CASCADE, RLS) se PRESERVAN actualizando referencias.
+
+- [ ] **Step 7: Suite completa + wipe dev**
+
+Run: `cd backend && uv run pytest -q`
+Expected: PASS — en particular `test_migrations.py` (replay fresco + drift cero) y `test_rls.py` (policies presentes).
+
+```bash
+docker compose -f compose.yaml -f compose.dev.yaml down -v && make dev   # dev DB renace del baseline nuevo
+```
+
+- [ ] **Step 8: Commit**
+
+```bash
+cd backend && uv run ruff check . && uv run ruff format .
+git add -A backend
+git commit -m "chore(w1): re-baseline tier1 — squash 5 revisiones en baseline pristino (pre-deploy, T1-D14 amended)"
 ```
 
 ---
 
-### Task 1: Modelos nuevos + migración expand
+### Task 2: State machine `ingest/connection_state.py`
+
+**Files:**
+- Create: `backend/src/ibkr_control/ingest/connection_state.py`
+- Test: `backend/tests/ingest/test_connection_state.py`
+
+(El módulo depende solo del modelo `Connection` de Task 3 — escribir los tests importando el modelo; quedarán rojos hasta que exista. Para mantener este task verde standalone, Task 2 se ejecuta DESPUÉS de Task 3 si el implementer lo prefiere; el orden 2↔3 es intercambiable. Si se ejecuta antes, marcar los tests con el modelo como dependencia y mover el commit al final de Task 3.)
+
+**Orden recomendado: ejecutar Task 3 primero y este después.** Se numera así para mantener la correspondencia con el spec.
+
+- [ ] **Step 1: Failing tests** en `backend/tests/ingest/test_connection_state.py`:
+
+```python
+"""Unit tests de la state machine de Connection (W4, T1-D5).
+
+Mutadores puros sobre el objeto ORM (sin session) — el caller commitea.
+"""
+
+from datetime import datetime, timezone
+
+from ibkr_control.db.models.connections import Connection
+from ibkr_control.ingest import connection_state as cs
+
+NOW = datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
+
+
+def _conn(status: str = "active", failures: int = 0) -> Connection:
+    return Connection(
+        organization_id=1,
+        institution_id=1,
+        provider_type="ibkr_flex",
+        status=status,
+        consecutive_failures=failures,
+    )
+
+
+def test_sync_ok_resets_to_active():
+    c = _conn(status="degraded", failures=3)
+    cs.mark_sync_ok(c, now=NOW)
+    assert c.status == "active"
+    assert c.consecutive_failures == 0
+    assert c.status_reason is None
+    assert c.last_sync_at == NOW
+    assert c.last_sync_status == "ok"
+
+
+def test_sync_ok_after_reauth_required_recovers():
+    # El usuario arregló el token por fuera — el retry natural lo detecta.
+    c = _conn(status="reauth_required", failures=1)
+    cs.mark_sync_ok(c, now=NOW)
+    assert c.status == "active"
+
+
+def test_auth_failure_goes_reauth_required():
+    c = _conn()
+    cs.mark_auth_failed(c, reason="Flex auth error 1018: bad token", now=NOW)
+    assert c.status == "reauth_required"
+    assert "1018" in c.status_reason
+    assert c.last_sync_status == "failed"
+
+
+def test_transient_failure_degrades_at_threshold():
+    c = _conn()
+    cs.mark_sync_failed(c, reason="boom", now=NOW)
+    assert c.status == "active"          # 1 fallo: aún no degraded
+    assert c.consecutive_failures == 1
+    cs.mark_sync_failed(c, reason="boom", now=NOW)
+    assert c.status == "degraded"        # 2do consecutivo: umbral R4
+    assert c.consecutive_failures == 2
+
+
+def test_transient_failure_does_not_mask_reauth_required():
+    c = _conn(status="reauth_required", failures=2)
+    cs.mark_sync_failed(c, reason="net", now=NOW)
+    assert c.status == "reauth_required"  # estado más específico se conserva
+
+
+def test_disabled_is_sticky_for_sync_events():
+    c = _conn(status="disabled")
+    cs.mark_sync_ok(c, now=NOW)
+    assert c.status == "disabled"
+    cs.mark_auth_failed(c, reason="x", now=NOW)
+    assert c.status == "disabled"
+
+
+def test_rotate_reactivates_unless_disabled():
+    c = _conn(status="reauth_required", failures=4)
+    cs.mark_rotated(c)
+    assert c.status == "active"
+    assert c.consecutive_failures == 0
+    d = _conn(status="disabled")
+    cs.mark_rotated(d)
+    assert d.status == "disabled"        # rotar no des-pausa
+
+
+def test_set_enabled_toggles():
+    c = _conn(status="degraded", failures=5)
+    cs.set_enabled(c, enabled=False)
+    assert c.status == "disabled"
+    cs.set_enabled(c, enabled=True)
+    assert c.status == "active"
+    assert c.consecutive_failures == 0
+```
+
+Run: `cd backend && uv run pytest tests/ingest/test_connection_state.py -v` → FAIL (módulo inexistente).
+
+- [ ] **Step 2: Implementar `backend/src/ibkr_control/ingest/connection_state.py`:**
+
+```python
+"""Única puerta de transiciones del status de Connection (W4, spec T1-D5).
+
+Mutadores puros sobre el objeto ORM — sin session, sin commit (el caller
+persiste). Reglas:
+- `disabled` es sticky para eventos de sync (solo set_enabled lo cambia).
+- `reauth_required` no se enmascara con fallos transitorios posteriores
+  (estado más específico gana); un sync OK sí lo limpia (token arreglado).
+- 2 fallos transitorios consecutivos => degraded (umbral compartido con el
+  health banner R4).
+"""
+
+from datetime import datetime
+
+from ibkr_control.db.models.connections import Connection
+
+DEGRADED_THRESHOLD = 2
+_REASON_MAX = 500
+
+
+def mark_sync_ok(conn: Connection, *, now: datetime) -> None:
+    if conn.status != "disabled":
+        conn.status = "active"
+    conn.status_reason = None
+    conn.consecutive_failures = 0
+    conn.last_sync_at = now
+    conn.last_sync_status = "ok"
+
+
+def mark_auth_failed(conn: Connection, *, reason: str, now: datetime) -> None:
+    if conn.status != "disabled":
+        conn.status = "reauth_required"
+    conn.status_reason = reason[:_REASON_MAX]
+    conn.consecutive_failures += 1
+    conn.last_sync_at = now
+    conn.last_sync_status = "failed"
+
+
+def mark_sync_failed(conn: Connection, *, reason: str, now: datetime) -> None:
+    conn.consecutive_failures += 1
+    conn.status_reason = reason[:_REASON_MAX]
+    conn.last_sync_at = now
+    conn.last_sync_status = "failed"
+    if (
+        conn.status not in ("disabled", "reauth_required")
+        and conn.consecutive_failures >= DEGRADED_THRESHOLD
+    ):
+        conn.status = "degraded"
+
+
+def mark_rotated(conn: Connection) -> None:
+    conn.consecutive_failures = 0
+    conn.status_reason = None
+    if conn.status != "disabled":
+        conn.status = "active"
+
+
+def set_enabled(conn: Connection, *, enabled: bool) -> None:
+    if enabled:
+        conn.status = "active"
+        conn.consecutive_failures = 0
+        conn.status_reason = None
+    else:
+        conn.status = "disabled"
+```
+
+- [ ] **Step 3: Verde + commit**
+
+Run: `cd backend && uv run pytest tests/ingest/test_connection_state.py -v` → PASS
+
+```bash
+cd backend && uv run ruff check . && uv run ruff format .
+git add backend/src/ibkr_control/ingest/connection_state.py backend/tests/ingest/test_connection_state.py
+git commit -m "feat(w1): connection state machine (W4) — única puerta de transiciones"
+```
+
+---
+
+### Task 3: Modelos nuevos + baseline amendment #1 (tablas connections)
+
+Agrega `institutions`, `connections`, `connection_ibkr_flex` y los `connection_id` de linaje. `flex_credentials` SIGUE existiendo (modelo + baseline) — los consumidores se rewirean en Tasks 4-6 con la suite verde, y Task 7 la elimina. El estado transicional vive SOLO dentro del branch; `main` mergeado no lo ve.
 
 **Files:**
 - Create: `backend/src/ibkr_control/db/models/institutions.py`
 - Create: `backend/src/ibkr_control/db/models/connections.py`
-- Modify: `backend/src/ibkr_control/db/models/flex_raw.py` (FlexImport.connection_id)
-- Modify: `backend/src/ibkr_control/db/models/ingest_log.py` (connection_id)
-- Modify: `backend/src/ibkr_control/db/__init__.py`
-- Modify: `backend/src/ibkr_control/db/rls.py` (ORG_SCOPED_TABLES + system_enum_function_sql)
-- Create: `backend/alembic/versions/<rev1>_w1_connections_expand.py`
-- Test: `backend/tests/test_w1_connections_migration.py`
+- Modify: `backend/src/ibkr_control/db/models/flex_raw.py`, `backend/src/ibkr_control/db/models/ingest_log.py`, `backend/src/ibkr_control/db/__init__.py`, `backend/src/ibkr_control/db/rls.py`
+- Modify: `backend/alembic/versions/<rev>_tier1_baseline.py` (amendment #1)
+- Test: `backend/tests/test_tier1_baseline.py` (extender)
 
-- [ ] **Step 1: Escribir el failing test de la migración** en `backend/tests/test_w1_connections_migration.py`. Seguir el patrón de los migration tests existentes (testcontainers + upgrade a la revisión previa + seed + upgrade head). Contenido:
+- [ ] **Step 1: Failing tests.** Extender `test_tier1_baseline.py`:
 
 ```python
-"""Migration tests W1 expand: data-copy flex_credentials -> connections + detail,
-seed de institutions, función SECURITY DEFINER apuntando a connections."""
-
-# Usar las fixtures/helpers del migration-test existente más reciente
-# (tests/test_migrations.py y el patrón de test_phaseX_migration que sobrevivió
-# al squash). Estructura:
-
-def test_expand_copies_credentials_to_connections(fresh_pg_engine):
-    # 1. alembic upgrade fd27737af54e  (revisión previa: account-multihome)
-    # 2. INSERT org de prueba + 2 rows en flex_credentials (mismo org —
-    #    el caso >1 login por org) con token_encrypted=b"tok", ytd_query_id='111'/'222'
-    # 3. alembic upgrade head
-    # 4. SELECT: institutions tiene 1 row code='ibkr'
-    # 5. SELECT: connections tiene 2 rows para el org, status='active',
-    #    provider_type='ibkr_flex', institution_id=el de 'ibkr'
-    # 6. SELECT: connection_ibkr_flex tiene 2 rows con los token/query_id ORIGINALES
-    #    (mapeo 1:1 por fila, no cartesiano)
-    # 7. SELECT prosrc FROM pg_proc WHERE proname='system_credentialed_org_ids'
-    #    → contiene 'FROM connections' y "status <> 'disabled'"
+def test_institutions_seeded(fresh_pg_engine):
+    # upgrade head → SELECT code, name FROM institutions → [('ibkr', 'Interactive Brokers')]
     ...
 
-def test_expand_downgrade_reversible(fresh_pg_engine):
-    # upgrade head → downgrade -1 → las tablas nuevas no existen,
-    # flex_credentials intacta (expand NUNCA borra rows de flex_credentials),
-    # la función vuelve a leer flex_credentials
+def test_connections_subtype_integrity(fresh_pg_engine):
+    # INSERT connections(provider_type='ibkr_flex') OK;
+    # INSERT connection_ibkr_flex con (connection_id, 'ibkr_flex') OK;
+    # el CHECK ck_connection_ibkr_flex_provider_type rechaza otro literal.
     ...
 ```
 
-(El subagent escribe el cuerpo real con los helpers del archivo de migración tests vigente — leerlo primero; los asserts listados son el contrato.)
-
-Run: `cd backend && uv run pytest tests/test_w1_connections_migration.py -v`
-Expected: FAIL (revisión inexistente / tablas inexistentes).
+(El aislamiento RLS de las tablas nuevas lo cubre `test_rls.py` automáticamente al crecer `ORG_SCOPED_TABLES` — verificar que ese test itere la lista; si no, agregar el caso.)
 
 - [ ] **Step 2: Crear `backend/src/ibkr_control/db/models/institutions.py`:**
 
@@ -317,355 +517,62 @@ class ConnectionIbkrFlex(Base):
     )
 ```
 
-- [ ] **Step 4: Agregar `connection_id` a `FlexImport` y `IngestLog`.**
-
-En `flex_raw.py`, dentro de `class FlexImport`, después de `organization_id`:
+- [ ] **Step 4: `connection_id` en `FlexImport` y `IngestLog`.** En ambos modelos, después de `organization_id`:
 
 ```python
-    # W1: linaje import -> connection. NULL para manual_upload (no hay conexión)
-    # y para imports que sobreviven al borrado de su conexión (SET NULL —
-    # append-only ledger: el hecho del import no muere con la credencial).
+    # W1: linaje import/run -> connection. NULL para manual_upload (no hay
+    # conexión) y para rows que sobreviven al borrado de su conexión (SET NULL —
+    # append-only ledger: el hecho no muere con la credencial).
     connection_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("connections.id", ondelete="SET NULL"), nullable=True
     )
 ```
 
-En `ingest_log.py`, después de `organization_id` (mismo bloque y comment análogo):
+más `Index(None, "connection_id")` en `__table_args__` de ambos (lección sp1-db-hardening: FK sin índice = seq scan en el SET NULL del delete).
+
+- [ ] **Step 5: Exports y RLS.** `db/__init__.py`: agregar imports + `__all__` de `Institution`, `Connection`, `ConnectionIbkrFlex` (mantener `FlexCredentials` hasta Task 7). `db/rls.py`: `ORG_SCOPED_TABLES` += `"connections"`, `"connection_ibkr_flex"` (mantener `"flex_credentials"`; `institutions` NO va — control plane).
+
+- [ ] **Step 6: Baseline amendment #1.** Regenerar el schema del baseline (mismo procedimiento de Task 1/Step 4: `down -v`, autogenerate, reemplazar la parte autogenerada del archivo, conservar el MISMO revision id para no invalidar nada) y actualizar las hand-sections: (a) RLS policies — agregar los bloques ENABLE/FORCE/POLICY de `connections` y `connection_ibkr_flex` (inline); (b) agregar el seed:
 
 ```python
-    connection_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("connections.id", ondelete="SET NULL"), nullable=True
-    )
-```
-
-Agregar `Index(None, "connection_id")` en `__table_args__` de ambas (lección sp1-db-hardening: FK sin índice = seq scan en el SET NULL del delete).
-
-- [ ] **Step 5: Exports y RLS.** En `db/__init__.py` agregar (manteniendo `FlexCredentials` por ahora — se va en Task 7):
-
-```python
-from ibkr_control.db.models.institutions import Institution  # noqa: F401
-from ibkr_control.db.models.connections import Connection, ConnectionIbkrFlex  # noqa: F401
-```
-
-y sumar `"Institution", "Connection", "ConnectionIbkrFlex"` a `__all__`.
-
-En `db/rls.py`:
-1. `ORG_SCOPED_TABLES`: agregar `"connections"` y `"connection_ibkr_flex"` (mantener `"flex_credentials"` hasta Task 7). `institutions` NO va (control plane).
-2. Reemplazar el body de `system_enum_function_sql()` (el docstring se conserva, actualizando la mención de tabla):
-
-```python
-    return [
-        "CREATE OR REPLACE FUNCTION system_credentialed_org_ids() "
-        "RETURNS SETOF bigint LANGUAGE sql STABLE SECURITY DEFINER "
-        "SET search_path = pg_catalog, public AS $$ "
-        "SELECT DISTINCT organization_id FROM connections "
-        "WHERE provider_type = 'ibkr_flex' AND status <> 'disabled' $$",
-        "REVOKE EXECUTE ON FUNCTION system_credentialed_org_ids() FROM PUBLIC",
-        f"GRANT EXECUTE ON FUNCTION system_credentialed_org_ids() TO {APP_ROLE}",
-    ]
-```
-
-- [ ] **Step 6: Generar la migración canónicamente** (container corriendo con `make dev`):
-
-```bash
-docker compose -f compose.yaml -f compose.dev.yaml exec backend \
-  uv run alembic revision --autogenerate -m "w1_connections_expand"
-```
-
-Remover el falso positivo `apscheduler_jobs` si aparece. El autogenerate produce: create `institutions`, `connections`, `connection_ibkr_flex`, add column + FK + index en `flex_imports`/`ingest_log`. Verificar `down_revision = "fd27737af54e"`.
-
-- [ ] **Step 7: Completar a mano la migración** (después del DDL autogenerado, en `upgrade()`):
-
-```python
-    # --- Hand-written section (W1 expand) ---
-    bind = op.get_bind()
-
-    # 1. Seed del catálogo (control plane, T1-D3).
-    bind.execute(
-        sa.text(
-            "INSERT INTO institutions (code, name) VALUES ('ibkr', 'Interactive Brokers') "
-            "ON CONFLICT (code) DO NOTHING"
-        )
-    )
-    ibkr_id = bind.execute(
-        sa.text("SELECT id FROM institutions WHERE code = 'ibkr'")
-    ).scalar_one()
-
-    # 2. Data-copy flex_credentials -> connections + connection_ibkr_flex.
-    #    Loop por fila (no JOIN por organization_id): >1 credencial por org es
-    #    legal y un join produciría mapeo cartesiano.
-    rows = bind.execute(
-        sa.text(
-            "SELECT id, organization_id, token_encrypted, ytd_query_id, last_rotated_at "
-            "FROM flex_credentials ORDER BY id"
-        )
-    ).fetchall()
-    for r in rows:
-        conn_id = bind.execute(
-            sa.text(
-                "INSERT INTO connections "
-                "(organization_id, institution_id, provider_type, status, consecutive_failures) "
-                "VALUES (:org, :inst, 'ibkr_flex', 'active', 0) RETURNING id"
-            ),
-            {"org": r.organization_id, "inst": ibkr_id},
-        ).scalar_one()
-        bind.execute(
-            sa.text(
-                "INSERT INTO connection_ibkr_flex "
-                "(connection_id, provider_type, organization_id, token_encrypted, "
-                " query_id, last_rotated_at) "
-                "VALUES (:cid, 'ibkr_flex', :org, :tok, :qid, :rot)"
-            ),
-            {
-                "cid": conn_id,
-                "org": r.organization_id,
-                "tok": r.token_encrypted,
-                "qid": r.ytd_query_id,
-                "rot": r.last_rotated_at,
-            },
-        )
-    # NOTA: expand NO borra flex_credentials (contract = revisión separada, Task 7).
-
-    # 3. RLS policies para las tablas nuevas (frozen inline — las migraciones
-    #    no importan builders vivos; ver Task 0).
-    for table in ("connections", "connection_ibkr_flex"):
-        op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
-        op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
-        op.execute(
-            f"CREATE POLICY org_isolation ON {table} "
-            "USING (organization_id = NULLIF(current_setting('app.current_org', true), '')::bigint) "
-            "WITH CHECK (organization_id = NULLIF(current_setting('app.current_org', true), '')::bigint)"
-        )
-
-    # 4. Función SECURITY DEFINER ahora enumera connections (frozen inline).
     op.execute(
-        "CREATE OR REPLACE FUNCTION system_credentialed_org_ids() "
-        "RETURNS SETOF bigint LANGUAGE sql STABLE SECURITY DEFINER "
-        "SET search_path = pg_catalog, public AS $$ "
-        "SELECT DISTINCT organization_id FROM connections "
-        "WHERE provider_type = 'ibkr_flex' AND status <> 'disabled' $$"
+        "INSERT INTO institutions (code, name) VALUES ('ibkr', 'Interactive Brokers') "
+        "ON CONFLICT (code) DO NOTHING"
     )
-    op.execute("REVOKE EXECUTE ON FUNCTION system_credentialed_org_ids() FROM PUBLIC")
-    op.execute("GRANT EXECUTE ON FUNCTION system_credentialed_org_ids() TO app_rls")
 ```
 
-En `downgrade()`: antes del DDL autogenerado (drop tables/columns), restaurar la función vieja (frozen inline, leyendo `flex_credentials`) — los datos de connections se pierden (documentado: flex_credentials conserva los originales porque expand no los borró).
+(la función del sistema NO cambia todavía — Task 4). Wipe dev: `down -v && make dev`.
 
-- [ ] **Step 8: Correr la suite de migración + drift test**
+- [ ] **Step 7: Suite + commit**
 
-Run: `cd backend && uv run pytest tests/test_w1_connections_migration.py tests/test_migrations.py -v`
-Expected: PASS (data-copy correcto, downgrade reversible, drift cero contra `Base.metadata`).
-
-- [ ] **Step 9: Ruff + commit**
+Run: `cd backend && uv run pytest -q` → PASS (drift + replay + RLS + baseline asserts).
 
 ```bash
 cd backend && uv run ruff check . && uv run ruff format .
-git add backend/src/ibkr_control/db backend/alembic/versions backend/tests/test_w1_connections_migration.py
-git commit -m "feat(w1): institutions + connections + connection_ibkr_flex + expand migration"
+git add -A backend
+git commit -m "feat(w1): institutions + connections + connection_ibkr_flex (baseline amendment #1)"
 ```
+
+**→ Ejecutar Task 2 (state machine) acá si no se hizo antes.**
 
 ---
 
-### Task 2: State machine `ingest/connection_state.py`
+### Task 4: Rewire del job/persister/log + función del sistema a connections
 
 **Files:**
-- Create: `backend/src/ibkr_control/ingest/connection_state.py`
-- Test: `backend/tests/ingest/test_connection_state.py`
+- Modify: `backend/src/ibkr_control/ingest/log.py`, `backend/src/ibkr_control/ingest/flex/persister.py`, `backend/src/ibkr_control/ingest/flex/job.py`, `backend/src/ibkr_control/scheduler/jobs.py` (docstrings), `backend/src/ibkr_control/db/rls.py` (builder), `backend/alembic/versions/<rev>_tier1_baseline.py` (amendment #2: body de la función)
+- Test: `backend/tests/ingest/flex/test_job.py`, `backend/tests/ingest/flex/test_job_rls.py`, `backend/tests/test_scheduler.py`, `backend/tests/test_tier1_baseline.py`
 
-- [ ] **Step 1: Failing tests** en `backend/tests/ingest/test_connection_state.py`:
-
-```python
-"""Unit tests de la state machine de Connection (W4, T1-D5).
-
-Mutadores puros sobre el objeto ORM (sin session) — el caller commitea.
-"""
-
-from datetime import datetime, timezone
-
-from ibkr_control.db.models.connections import Connection
-from ibkr_control.ingest import connection_state as cs
-
-NOW = datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
-
-
-def _conn(status: str = "active", failures: int = 0) -> Connection:
-    return Connection(
-        organization_id=1,
-        institution_id=1,
-        provider_type="ibkr_flex",
-        status=status,
-        consecutive_failures=failures,
-    )
-
-
-def test_sync_ok_resets_to_active():
-    c = _conn(status="degraded", failures=3)
-    cs.mark_sync_ok(c, now=NOW)
-    assert c.status == "active"
-    assert c.consecutive_failures == 0
-    assert c.status_reason is None
-    assert c.last_sync_at == NOW
-    assert c.last_sync_status == "ok"
-
-
-def test_sync_ok_after_reauth_required_recovers():
-    # El usuario arregló el token por fuera — el retry natural lo detecta.
-    c = _conn(status="reauth_required", failures=1)
-    cs.mark_sync_ok(c, now=NOW)
-    assert c.status == "active"
-
-
-def test_auth_failure_goes_reauth_required():
-    c = _conn()
-    cs.mark_auth_failed(c, reason="Flex auth error 1018: bad token", now=NOW)
-    assert c.status == "reauth_required"
-    assert "1018" in c.status_reason
-    assert c.last_sync_status == "failed"
-
-
-def test_transient_failure_degrades_at_threshold():
-    c = _conn()
-    cs.mark_sync_failed(c, reason="boom", now=NOW)
-    assert c.status == "active"          # 1 fallo: aún no degraded
-    assert c.consecutive_failures == 1
-    cs.mark_sync_failed(c, reason="boom", now=NOW)
-    assert c.status == "degraded"        # 2do consecutivo: umbral R4
-    assert c.consecutive_failures == 2
-
-
-def test_transient_failure_does_not_mask_reauth_required():
-    c = _conn(status="reauth_required", failures=2)
-    cs.mark_sync_failed(c, reason="net", now=NOW)
-    assert c.status == "reauth_required"  # estado más específico se conserva
-
-
-def test_disabled_is_sticky_for_sync_events():
-    c = _conn(status="disabled")
-    cs.mark_sync_ok(c, now=NOW)
-    assert c.status == "disabled"
-    cs.mark_auth_failed(c, reason="x", now=NOW)
-    assert c.status == "disabled"
-
-
-def test_rotate_reactivates_unless_disabled():
-    c = _conn(status="reauth_required", failures=4)
-    cs.mark_rotated(c)
-    assert c.status == "active"
-    assert c.consecutive_failures == 0
-    d = _conn(status="disabled")
-    cs.mark_rotated(d)
-    assert d.status == "disabled"        # rotar no des-pausa
-
-
-def test_set_enabled_toggles():
-    c = _conn(status="degraded", failures=5)
-    cs.set_enabled(c, enabled=False)
-    assert c.status == "disabled"
-    cs.set_enabled(c, enabled=True)
-    assert c.status == "active"
-    assert c.consecutive_failures == 0
-```
-
-Run: `cd backend && uv run pytest tests/ingest/test_connection_state.py -v`
-Expected: FAIL (módulo inexistente).
-
-- [ ] **Step 2: Implementar `backend/src/ibkr_control/ingest/connection_state.py`:**
-
-```python
-"""Única puerta de transiciones del status de Connection (W4, spec T1-D5).
-
-Mutadores puros sobre el objeto ORM — sin session, sin commit (el caller
-persiste). Reglas:
-- `disabled` es sticky para eventos de sync (solo set_enabled lo cambia).
-- `reauth_required` no se enmascara con fallos transitorios posteriores
-  (estado más específico gana); un sync OK sí lo limpia (token arreglado).
-- 2 fallos transitorios consecutivos => degraded (umbral compartido con el
-  health banner R4).
-"""
-
-from datetime import datetime
-
-from ibkr_control.db.models.connections import Connection
-
-DEGRADED_THRESHOLD = 2
-_REASON_MAX = 500
-
-
-def mark_sync_ok(conn: Connection, *, now: datetime) -> None:
-    if conn.status != "disabled":
-        conn.status = "active"
-    conn.status_reason = None
-    conn.consecutive_failures = 0
-    conn.last_sync_at = now
-    conn.last_sync_status = "ok"
-
-
-def mark_auth_failed(conn: Connection, *, reason: str, now: datetime) -> None:
-    if conn.status != "disabled":
-        conn.status = "reauth_required"
-    conn.status_reason = reason[:_REASON_MAX]
-    conn.consecutive_failures += 1
-    conn.last_sync_at = now
-    conn.last_sync_status = "failed"
-
-
-def mark_sync_failed(conn: Connection, *, reason: str, now: datetime) -> None:
-    conn.consecutive_failures += 1
-    conn.status_reason = reason[:_REASON_MAX]
-    conn.last_sync_at = now
-    conn.last_sync_status = "failed"
-    if (
-        conn.status not in ("disabled", "reauth_required")
-        and conn.consecutive_failures >= DEGRADED_THRESHOLD
-    ):
-        conn.status = "degraded"
-
-
-def mark_rotated(conn: Connection) -> None:
-    conn.consecutive_failures = 0
-    conn.status_reason = None
-    if conn.status != "disabled":
-        conn.status = "active"
-
-
-def set_enabled(conn: Connection, *, enabled: bool) -> None:
-    if enabled:
-        conn.status = "active"
-        conn.consecutive_failures = 0
-        conn.status_reason = None
-    else:
-        conn.status = "disabled"
-```
-
-- [ ] **Step 3: Verificar verde + commit**
-
-Run: `cd backend && uv run pytest tests/ingest/test_connection_state.py -v` → PASS
-
-```bash
-cd backend && uv run ruff check . && uv run ruff format .
-git add backend/src/ibkr_control/ingest/connection_state.py backend/tests/ingest/test_connection_state.py
-git commit -m "feat(w1): connection state machine (W4) — única puerta de transiciones"
-```
-
----
-
-### Task 3: Rewire del job/persister/log al modelo connections
-
-**Files:**
-- Modify: `backend/src/ibkr_control/ingest/log.py`
-- Modify: `backend/src/ibkr_control/ingest/flex/persister.py`
-- Modify: `backend/src/ibkr_control/ingest/flex/job.py`
-- Modify: `backend/src/ibkr_control/scheduler/jobs.py` (solo docstrings/comentarios)
-- Test: `backend/tests/ingest/flex/test_job.py`, `backend/tests/ingest/flex/test_job_rls.py`, `backend/tests/test_scheduler.py`
-
-- [ ] **Step 1: Failing tests.** En `test_job.py` (leer primero las fixtures existentes — crean `FlexCredentials`; reemplazarlas por `Connection` + `ConnectionIbkrFlex` con un helper):
+- [ ] **Step 1: Failing tests.** En los tests de job, reemplazar el seeding de `FlexCredentials` por un helper compartido en `tests/ingest/flex/conftest.py`:
 
 ```python
 async def _seed_connection(session, org_id: int, *, query_id: str = "12345",
                            status: str = "active") -> int:
+    from sqlalchemy import select
+
     from ibkr_control.db.models.connections import Connection, ConnectionIbkrFlex
     from ibkr_control.db.models.institutions import Institution
-    from sqlalchemy import select
+    from ibkr_control.ingest.flex.crypto import encrypt_token
 
     inst_id = await session.scalar(select(Institution.id).where(Institution.code == "ibkr"))
     conn = Connection(
@@ -682,54 +589,34 @@ async def _seed_connection(session, org_id: int, *, query_id: str = "12345",
     return conn.id
 ```
 
-Tests nuevos (además de adaptar los existentes al seeding nuevo):
+Tests nuevos (además de adaptar los existentes):
 
 ```python
-async def test_run_iterates_all_active_connections(...):
-    # 2 connections activas en el org, FlexClient fake que devuelve XML fixture.
-    # run() → 2 flex_imports, cada uno con connection_id correcto,
-    # 2 ingest_log rows kind='flex' cada una con su connection_id,
-    # ambas connections quedan status='active', last_sync_status='ok'.
-
-async def test_run_skips_disabled_connections(...):
-    # 1 activa + 1 disabled → solo 1 import; la disabled no se toca.
-
-async def test_run_auth_error_transitions_reauth_required(...):
-    # FlexClient fake lanza FlexAuthError("1018", "bad token") para la conn A
-    # y devuelve XML válido para la B.
-    # → conn A: status='reauth_required', status_reason contiene '1018',
-    #   ingest_log row failed con su connection_id.
-    # → conn B: import OK (el fallo de A NO bloquea a B).
-    # → run() NO lanza (hubo al menos un éxito).
-
-async def test_run_raises_when_all_connections_fail(...):
-    # Todas las conns lanzan FlexAuthError → run() re-lanza la última excepción
-    # (contrato con _run_manual: el SSE muestra el fallo).
-
-async def test_run_no_active_connections_raises(...):
-    # Org sin connections (o todas disabled) → RuntimeError claro.
+# test_run_iterates_all_active_connections:
+#   2 connections activas, FlexClient fake devuelve XML fixture →
+#   2 flex_imports (cada uno con su connection_id), 2 ingest_log rows
+#   kind='flex' con su connection_id, ambas conns quedan active/ok.
+# test_run_skips_disabled_connections:
+#   1 activa + 1 disabled → 1 import; la disabled intacta.
+# test_run_auth_error_transitions_reauth_required:
+#   conn A lanza FlexAuthError("1018", ...), conn B responde XML →
+#   A: status='reauth_required', reason contiene '1018', su ingest_log failed;
+#   B: import OK. run() NO lanza (hubo >=1 éxito).
+# test_run_raises_when_all_connections_fail:
+#   todas lanzan FlexAuthError → run() re-lanza la última (contrato _run_manual/SSE).
+# test_run_no_active_connections_raises:
+#   org sin connections (o todas disabled) → RuntimeError claro.
+# test_tier1_baseline: actualizar el assert de prosrc → contiene 'FROM connections'
+#   y "status <> 'disabled'".
 ```
 
-Run: `cd backend && uv run pytest tests/ingest/flex/test_job.py -v`
-Expected: FAIL.
+Run: `cd backend && uv run pytest tests/ingest/flex -v` → FAIL.
 
-- [ ] **Step 2: `ingest/log.py` — param `connection_id`:**
+- [ ] **Step 2: `ingest/log.py`** — agregar `connection_id: int | None = None` a la firma de `ingest_log_entry` y `connection_id=connection_id` al constructor del row (docstring: "conexión que produjo el run (flex); None para manual_upload/TRM").
 
-```python
-async def ingest_log_entry(
-    session: AsyncSession,
-    job_kind: str,
-    organization_id: int,
-    trigger: str,
-    connection_id: int | None = None,
-):
-```
+- [ ] **Step 3: `persister.py`** — kwarg `connection_id: int | None = None` en `persist()`, pasado al values del INSERT de `FlexImport`. Ídem `job._insert_poison_row` (los poison rows también llevan linaje).
 
-y en el constructor del row: `connection_id=connection_id,` (docstring: "connection_id: conexión que produjo el run (flex); None para manual_upload/TRM/runs pre-W1").
-
-- [ ] **Step 3: `persister.py` — threading de `connection_id`.** Agregar a la firma de `persist()` el kwarg `connection_id: int | None = None` y pasarlo en el INSERT/values de `FlexImport`. Hacer lo mismo en `job._insert_poison_row` (param + values). Leer el persister para ubicar el punto exacto del INSERT de `FlexImport` (es el primer write de `persist()`).
-
-- [ ] **Step 4: Reescribir `job.run()`** (firma y semántica nuevas; `ingest_xml()` queda igual — manual upload no tiene conexión):
+- [ ] **Step 4: Reescribir `job.run()`** (`ingest_xml()` NO cambia — manual upload no tiene conexión):
 
 ```python
 async def run(
@@ -743,13 +630,13 @@ async def run(
     Devuelve {connection_id: flex_import_id | None} (None = hash dedup, sin
     cambios). Aislamiento per-connection: el fallo de una conexión transiciona
     SU estado (connection_state) y registra SU ingest_log row, pero no bloquea
-    a las demás. Si TODAS fallaron y hubo >=1 excepción, re-lanza la última
+    a las demás. Si results quedó vacío y hubo excepción, re-lanza la última
     (contrato con _run_manual: el SSE debe mostrar el fallo).
 
-    RLS: usa set_session_org_context (stash + after_begin listener) además del
-    apply inmediato, porque ingest_log_entry commitea por conexión y las
-    transiciones de estado corren en transacciones nuevas que necesitan el GUC
-    re-aplicado (mecanismo de PR #7).
+    RLS: usa set_session_org_context (stash + after_begin listener, PR #7)
+    además del apply inmediato, porque ingest_log_entry commitea por conexión
+    y las transiciones de estado corren en transacciones nuevas que necesitan
+    el GUC re-aplicado.
     """
     from ibkr_control.db.models.connections import Connection, ConnectionIbkrFlex
     from ibkr_control.db.rls import set_session_org_context
@@ -779,7 +666,6 @@ async def run(
 
             for conn in conns:
                 detail = await session.get(ConnectionIbkrFlex, conn.id)
-                now = datetime.now(timezone.utc)
                 try:
                     results[conn.id] = await _run_one_connection(
                         session,
@@ -789,10 +675,15 @@ async def run(
                         token_encrypted=detail.token_encrypted,
                         query_id=detail.query_id,
                     )
-                except (flex_client_mod.FlexAuthError, flex_client_mod.FlexQueryNotFoundError) as exc:
+                except (
+                    flex_client_mod.FlexAuthError,
+                    flex_client_mod.FlexQueryNotFoundError,
+                ) as exc:
                     # CR-3: auth-class (1003/1004/1018) o query_id mal configurado
                     # (1005) — ambos requieren acción del usuario.
-                    connection_state.mark_auth_failed(conn, reason=str(exc), now=now)
+                    connection_state.mark_auth_failed(
+                        conn, reason=str(exc), now=datetime.now(timezone.utc)
+                    )
                     await session.commit()
                     last_exc = exc
                     continue
@@ -800,71 +691,78 @@ async def run(
                     # Transitorio (1001 BUSY agotado, timeout, red, parse/persist).
                     # Broad a propósito: cualquier fallo debe transicionar estado
                     # y seguir con la próxima conexión, no matar el loop.
-                    connection_state.mark_sync_failed(conn, reason=str(exc), now=now)
+                    connection_state.mark_sync_failed(
+                        conn, reason=str(exc), now=datetime.now(timezone.utc)
+                    )
                     await session.commit()
                     last_exc = exc
                     continue
                 connection_state.mark_sync_ok(conn, now=datetime.now(timezone.utc))
                 await session.commit()
 
-    if not any(v is not None or k in results for k, v in results.items()) and last_exc:
-        raise last_exc
     if not results and last_exc is not None:
         raise last_exc
     return results
 ```
 
-(Nota para el implementer: la condición final es simplemente "si `results` quedó vacío y hubo excepción, re-lanzar" — `results` solo gana keys en éxito. Simplificar a `if not results and last_exc is not None: raise last_exc` y eliminar la primera condición redundante.)
+`_run_one_connection(session, *, organization_id, trigger, connection_id, token_encrypted, query_id) -> int | None` es la extracción del cuerpo actual de `run()` (decrypt + SendRequest + poll + hash check + SAVEPOINT + persist + items_processed) con tres cambios: pasa `connection_id` a `ingest_log_entry(...)`, a `persist(connection_id=...)` y a `_insert_poison_row(connection_id=...)`. El `ingest_log_entry` envuelve todo el cuerpo (igual que hoy) para que un fallo marque `failed` su propio row. Devuelve `None` en hash-dedup (hoy `return None`), `flex_import_id` si persistió.
 
-`_run_one_connection` es la extracción del cuerpo actual de `run()` (SendRequest + poll + hash check + SAVEPOINT + persist + items_processed), con tres cambios: recibe `connection_id` y lo pasa a `ingest_log_entry(...)`, a `persist(connection_id=...)` y a `_insert_poison_row(connection_id=...)`. El `ingest_log_entry` envuelve TODO el cuerpo (igual que hoy) para que un fallo marque `failed` su propio row.
+- [ ] **Step 5: Función del sistema → connections.** En `db/rls.py::system_enum_function_sql()` reemplazar el body:
 
-- [ ] **Step 5: `scheduler/jobs.py`** — el código del loop NO cambia (la función `system_credentialed_org_ids()` ya devuelve orgs con connections activas tras la migración). Actualizar el docstring de `_run_flex_for_all_orgs` (mencionar connections, no flex_credentials) y el comentario del catch `FlexAuthError` (ahora es defensa residual: `run()` ya maneja auth per-connection y solo re-lanza si TODAS fallaron).
+```python
+    return [
+        "CREATE OR REPLACE FUNCTION system_credentialed_org_ids() "
+        "RETURNS SETOF bigint LANGUAGE sql STABLE SECURITY DEFINER "
+        "SET search_path = pg_catalog, public AS $$ "
+        "SELECT DISTINCT organization_id FROM connections "
+        "WHERE provider_type = 'ibkr_flex' AND status <> 'disabled' $$",
+        "REVOKE EXECUTE ON FUNCTION system_credentialed_org_ids() FROM PUBLIC",
+        f"GRANT EXECUTE ON FUNCTION system_credentialed_org_ids() TO {APP_ROLE}",
+    ]
+```
 
-- [ ] **Step 6: Adaptar `test_job_rls.py` y `test_scheduler.py`** al seeding por connections (mismo helper `_seed_connection`; moverlo a `tests/ingest/flex/conftest.py` si ambos lo usan — DRY).
+y aplicar el MISMO texto frozen inline en la hand-section del baseline (amendment #2). Wipe dev. Actualizar docstrings de `scheduler/jobs.py::_run_flex_for_all_orgs` (enumera connections; el catch de `FlexAuthError` queda como defensa residual — `run()` ya transiciona per-connection y solo re-lanza si todas fallaron).
 
-- [ ] **Step 7: Suite verde + commit**
+- [ ] **Step 6: Suite + commit**
 
-Run: `cd backend && uv run pytest tests/ingest -v && uv run pytest -q`
-Expected: PASS completo.
+Run: `cd backend && uv run pytest -q` → PASS.
 
 ```bash
 cd backend && uv run ruff check . && uv run ruff format .
 git add -A backend
-git commit -m "feat(w1): flex job itera connections activas con state transitions per-connection"
+git commit -m "feat(w1): flex job itera connections activas con transiciones per-connection; función de sistema enumera connections"
 ```
 
 ---
 
-### Task 4: API `/api/connections` (reemplaza `/api/credentials`)
+### Task 5: API `/api/connections` (reemplaza `/api/credentials`)
 
 **Files:**
 - Create: `backend/src/ibkr_control/api/connections.py`
-- Modify: `backend/src/ibkr_control/api/_schemas.py`
-- Modify: `backend/src/ibkr_control/main.py`
+- Modify: `backend/src/ibkr_control/api/_schemas.py`, `backend/src/ibkr_control/main.py`
 - Delete: `backend/src/ibkr_control/api/credentials.py`
-- Test: `backend/tests/api/test_connections_api.py` (new), delete `backend/tests/api/test_credentials.py`
+- Test: `backend/tests/api/test_connections_api.py` (new); delete `backend/tests/api/test_credentials.py`
 
-- [ ] **Step 1: Failing tests** en `test_connections_api.py` (usar las fixtures de auth/org existentes en `tests/api/conftest.py` — leerlas primero; espejo del estilo de `test_credentials.py` actual):
+- [ ] **Step 1: Failing tests** en `test_connections_api.py` (fixtures de auth/org del conftest de api existente; espejo del estilo de `test_credentials.py` antes de borrarlo):
 
 ```python
 # Casos (cada uno un test):
 # - GET /api/connections vacío → []
 # - POST /api/connections con token inválido → 401 (FlexClient fake lanza FlexAuthError)
-# - POST /api/connections OK (FlexClient fake responde) → 201 con ConnectionRead,
-#   status='active', institution_code='ibkr'; el token NO aparece en la response
-# - GET lista la creada (query_id visible, token nunca)
+# - POST /api/connections OK (FlexClient fake responde) → 201 ConnectionRead,
+#   status='active', institution_code='ibkr'; el token NUNCA aparece en la response
+# - GET lista la creada (query_id visible, token jamás)
 # - PATCH {id} display_name → actualizado
-# - POST {id}/rotate-token con token válido → last_rotated_at avanza, status='active'
-#   (seedear la conn en 'reauth_required' para verificar la transición)
-# - POST {id}/disable → status='disabled'; POST {id}/enable → 'active'
-# - DELETE {id} → 204; sus flex_imports/ingest_log quedan con connection_id NULL
-#   (seedear un flex_import vinculado antes de borrar)
-# - Aislamiento RLS: org B no ve ni puede operar la connection de org A (404)
+# - POST {id}/rotate-token con token válido → last_rotated_at avanza; seedear la
+#   conn en 'reauth_required' y verificar que rota a 'active' (mark_rotated)
+# - POST {id}/disable → 'disabled'; POST {id}/enable → 'active'
+# - DELETE {id} → 204; un flex_import vinculado queda con connection_id NULL
+# - Aislamiento RLS: org B no ve ni opera la connection de org A (404)
 ```
 
 Run: `cd backend && uv run pytest tests/api/test_connections_api.py -v` → FAIL.
 
-- [ ] **Step 2: Schemas** en `api/_schemas.py` (reemplazan a los FlexCredentials* — borrarlos en Step 4):
+- [ ] **Step 2: Schemas** en `api/_schemas.py` (borrar `FlexCredentialsRead`/`FlexCredentialsUpdate`; `FlexCredentialsValidate` sobrevive hasta Task 6):
 
 ```python
 class ConnectionRead(BaseModel):
@@ -897,7 +795,7 @@ class ConnectionUpdate(BaseModel):
     display_name: str | None = Field(default=None, max_length=120)
 ```
 
-- [ ] **Step 3: Router `api/connections.py`:**
+- [ ] **Step 3: Router `backend/src/ibkr_control/api/connections.py`:**
 
 ```python
 """Router /api/connections — CRUD + rotate + enable/disable (W1+W4, T1-D15).
@@ -931,8 +829,8 @@ router = APIRouter(prefix="/connections", tags=["connections"])
 
 
 async def _get_or_404(session: AsyncSession, connection_id: int) -> Connection:
-    # RLS ya scopea por org; el 404 cubre tanto inexistente como cross-org
-    # (no filtra existencia — mismo criterio que D1/SSE).
+    # RLS ya scopea por org; 404 cubre inexistente y cross-org por igual
+    # (no filtra existencia — mismo criterio D1/SSE).
     conn = await session.get(Connection, connection_id)
     if conn is None:
         raise HTTPException(status_code=404, detail="Connection not found")
@@ -961,7 +859,9 @@ async def _validate_token_against_ibkr(token: str, query_id: str) -> None:
 
 async def _serialize(session: AsyncSession, conn: Connection) -> ConnectionRead:
     detail = await _detail_or_500(session, conn.id)
-    code = await session.scalar(select(Institution.code).where(Institution.id == conn.institution_id))
+    code = await session.scalar(
+        select(Institution.code).where(Institution.id == conn.institution_id)
+    )
     return ConnectionRead(
         id=conn.id,
         institution_code=code,
@@ -1084,64 +984,82 @@ async def delete_connection(
     return Response(status_code=204)
 ```
 
-- [ ] **Step 4: Wiring.** En `main.py`: reemplazar el include del router credentials por connections (leer cómo está incluido el actual y espejar). Borrar `api/credentials.py`, borrar los schemas `FlexCredentialsRead/Update` de `_schemas.py` (NO `FlexCredentialsValidate` — setup.py la usa hasta Task 5), borrar `tests/api/test_credentials.py`.
+- [ ] **Step 4: Wiring.** `main.py`: reemplazar el include del router credentials por el de connections (leer cómo está incluido y espejar). Borrar `api/credentials.py` y `tests/api/test_credentials.py`.
 
 - [ ] **Step 5: Suite + commit**
 
-Run: `cd backend && uv run pytest tests/api/test_connections_api.py -v && uv run pytest -q` → PASS
+Run: `cd backend && uv run pytest -q` → PASS.
 
 ```bash
 cd backend && uv run ruff check . && uv run ruff format .
-git add -A backend && git commit -m "feat(w1): /api/connections CRUD+rotate+enable/disable; remove /api/credentials"
+git add -A backend
+git commit -m "feat(w1): /api/connections CRUD+rotate+enable/disable; remove /api/credentials"
 ```
 
 ---
 
-### Task 5: Wizard/setup sobre connections
+### Task 6: Wizard/setup sobre connections
 
 **Files:**
-- Modify: `backend/src/ibkr_control/api/setup.py`
-- Modify: `backend/src/ibkr_control/api/_schemas.py` (renombrar `FlexCredentialsValidate` → `SetupConnectionPayload` con `display_name` opcional)
+- Modify: `backend/src/ibkr_control/api/setup.py`, `backend/src/ibkr_control/api/_schemas.py` (renombrar `FlexCredentialsValidate` → `SetupConnectionPayload` + `display_name` opcional)
 - Test: `backend/tests/api/test_setup_state.py`, `backend/tests/api/test_setup_step2_detect.py`
 
-- [ ] **Step 1: Failing tests.** Adaptar el seeding de los tests de setup al helper de connections (reusar `_seed_connection` — moverlo a un conftest compartido si Task 3 no lo hizo). Tests nuevos:
+- [ ] **Step 1: Failing tests** (adaptar seeding al helper `_seed_connection`; moverlo a un conftest compartido si hace falta — DRY):
 
 ```python
 # - step1_save sin connection previa → crea Connection+detail (status='active')
-# - step1_save con connection existente → rota token/query de la PRIMERA
-#   ibkr_flex (orden por id) + mark_rotated; NO crea duplicada
+# - step1_save con connection existente → actualiza token/query del detail de la
+#   PRIMERA ibkr_flex (orden por id) + mark_rotated; NO crea duplicada
 # - get_state: step1_credentials=True si la org tiene >=1 connection ibkr_flex
 # - step2_detect itera todas las connections ACTIVAS y acumula cuentas
-#   detectadas (2 conns con XMLs de cuentas distintas → unión de cuentas)
-# - step2_detect: si TODAS las conns activas dan FlexBusyError agotado → 503 IBKR_BUSY
+#   detectadas (2 conns con XMLs de cuentas distintas → unión, dedup por
+#   ibkr_account_id)
+# - step2_detect: conn con FlexAuthError → transición reauth_required + continúa
+#   con la siguiente; si TODAS fallan → el mejor error (auth → 401; busy → 503
+#   IBKR_BUSY como hoy)
 ```
 
-- [ ] **Step 2: Reescribir en `setup.py`:**
-  - `step1_save`: buscar `select(Connection).where(Connection.provider_type == "ibkr_flex").order_by(Connection.id)` (RLS scopea org). Si no hay → crear Connection + ConnectionIbkrFlex (mismo código del POST de Task 4, sin validación IBKR — spec D5 del wizard original: step1 no llama a IBKR). Si hay → actualizar `token_encrypted`/`query_id`/`last_rotated_at` del detail de la primera + `connection_state.mark_rotated(conn)`.
-  - `get_state`: `has_creds` = `count(Connection.id)` con filtro `provider_type == "ibkr_flex"`.
-  - `step2_detect`: loop sobre connections activas; por cada una decrypt + fetch con el retry 1001 existente; parse + persist con `connection_id=conn.id`; acumular cuentas detectadas (dedup por `ibkr_account_id`). Si una conexión da `FlexAuthError` → transición + continuar; si TODAS fallan → propagar el mejor error (auth → 401 con detail claro; busy → 503 `IBKR_BUSY` como hoy).
-  - Reemplazar todos los imports/usos de `FlexCredentials` en setup.py.
+- [ ] **Step 2: Reescribir en `setup.py`:** `step1_save` (sin validación IBKR — spec D5 del wizard), `get_state` (`count(Connection.id)` con `provider_type == "ibkr_flex"`), `step2_detect` (loop sobre activas; por cada una decrypt + fetch con el retry 1001 existente + parse + persist con `connection_id=conn.id`; acumular cuentas). Reemplazar todos los imports/usos de `FlexCredentials`.
 
 - [ ] **Step 3: Suite + commit**
 
-Run: `cd backend && uv run pytest tests/api -v && uv run pytest -q` → PASS
+Run: `cd backend && uv run pytest -q` → PASS.
 
 ```bash
-cd backend && uv run ruff check . && uv run ruff format .
 git add -A backend && git commit -m "feat(w1): wizard setup opera sobre connections (step1/state/step2_detect)"
 ```
 
 ---
 
-### Task 6: Health endpoint con estado de connections
+### Task 7: Eliminar `flex_credentials` (baseline amendment #3)
+
+**Files:**
+- Delete: `backend/src/ibkr_control/db/models/flex_credentials.py`
+- Modify: `backend/src/ibkr_control/db/__init__.py`, `backend/src/ibkr_control/db/rls.py` (quitar `"flex_credentials"` de `ORG_SCOPED_TABLES`), `backend/alembic/versions/<rev>_tier1_baseline.py` (amendment #3)
+- Test: limpiar referencias residuales
+
+- [ ] **Step 1: Verificar cero consumidores:** `grep -rn "FlexCredentials\|flex_credentials" backend/src backend/tests --include="*.py"` → solo el modelo, exports, rls.py y el baseline. Si aparece un consumidor vivo, volver al task correspondiente.
+- [ ] **Step 2: Borrar** el modelo, los exports, la entrada en `ORG_SCOPED_TABLES`, y en el baseline: la tabla del bloque autogenerado + su bloque RLS hand-written (regenerar la parte autogenerada canónicamente; el autogenerate ya no la emite porque el modelo no existe). Wipe dev (`down -v && make dev`).
+- [ ] **Step 3: Suite completa**
+
+Run: `cd backend && uv run pytest -q` → PASS (drift test confirma metadata == baseline sin la tabla; `test_tier1_baseline.py` sigue verde).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add -A backend && git commit -m "feat(w1): flex_credentials eliminada — baseline pristino sin modelo viejo"
+```
+
+---
+
+### Task 8: Health endpoint con estado de connections
 
 **Files:**
 - Modify: `backend/src/ibkr_control/api/health.py`
 - Test: `backend/tests/api/test_health.py` (leer el existente y extender)
 
-- [ ] **Step 1: Failing test:** `GET /api/health/ingest` incluye `connections: [{id, display_name, status, status_reason, last_sync_at}]` para la org (1 activa + 1 reauth_required seedeadas → ambas presentes con su status).
-
-- [ ] **Step 2: Implementar.** Agregar al módulo:
+- [ ] **Step 1: Failing test:** `GET /api/health/ingest` incluye `connections: [{id, display_name, status, status_reason, last_sync_at}]` (seedear 1 activa + 1 `reauth_required` → ambas presentes con su status).
+- [ ] **Step 2: Implementar** (campo ADITIVO — `sources` no cambia, contrato frontend intacto):
 
 ```python
 class ConnectionHealth(BaseModel):
@@ -1158,45 +1076,19 @@ class IngestHealthResponse(BaseModel):
     checked_at: datetime
 ```
 
-y en `get_ingest_health` un `select(Connection).order_by(Connection.id)` (RLS scopea) mapeado a `ConnectionHealth`. Campo ADITIVO — `sources` no cambia (contrato frontend intacto).
+y en `get_ingest_health` un `select(Connection).order_by(Connection.id)` (RLS scopea) mapeado a `ConnectionHealth`.
 
-- [ ] **Step 3: Suite + commit** (mismos comandos; mensaje `feat(w1): connection status en /api/health/ingest`).
-
----
-
-### Task 7: Contract — drop `flex_credentials`
-
-**Files:**
-- Create: `backend/alembic/versions/<rev2>_w1_drop_flex_credentials.py`
-- Delete: `backend/src/ibkr_control/db/models/flex_credentials.py`
-- Modify: `backend/src/ibkr_control/db/__init__.py`, `backend/src/ibkr_control/db/rls.py` (quitar `"flex_credentials"` de `ORG_SCOPED_TABLES`)
-- Test: extender `backend/tests/test_w1_connections_migration.py`; limpiar referencias residuales
-
-- [ ] **Step 1: Verificar cero consumidores:** `grep -rn "FlexCredentials\|flex_credentials" backend/src backend/tests --include="*.py"` debe devolver SOLO el modelo, exports, rls.py, migraciones históricas y tests de migración. Si aparece un consumidor vivo → volver al task correspondiente.
-
-- [ ] **Step 2: Failing test:** en `test_w1_connections_migration.py` agregar `test_contract_drops_flex_credentials` (upgrade head → tabla no existe; downgrade → existe de nuevo y el data-copy inverso desde connections+detail restaura las filas).
-
-- [ ] **Step 3: Migración contract** (autogenerate canónico tras borrar el modelo + quitar exports/lista RLS; el autogenerate emite el drop). Completar `downgrade()` a mano: recrear tabla (DDL frozen del baseline) + repoblar desde `connections JOIN connection_ibkr_flex` + re-crear policy RLS frozen inline.
-
-- [ ] **Step 4: Suite completa + commit**
-
-Run: `cd backend && uv run pytest -q` → PASS (drift test valida que metadata == migraciones sin la tabla).
-
-```bash
-git add -A backend && git commit -m "feat(w1): contract — drop flex_credentials (expand/contract completo)"
-```
+- [ ] **Step 3: Suite + commit** (`feat(w1): connection status en /api/health/ingest`).
 
 ---
 
-### Task 8: Frontend — ConnectionsSection + wiring
+### Task 9: Frontend — ConnectionsSection + wiring
 
 **Files:**
-- Regenerate: `frontend/openapi.json` + `frontend/src/api/generated.ts` (path según repo)
+- Regenerate: `frontend/openapi.json` + cliente orval
 - Create: `frontend/src/components/settings/ConnectionsSection.tsx`
-- Modify: `frontend/src/components/settings/RotateTokenModal.tsx`
-- Modify: `frontend/src/components/wizard/Step1Credentials.tsx` (campo `display_name` opcional)
+- Modify: `frontend/src/components/settings/RotateTokenModal.tsx`, `frontend/src/components/wizard/Step1Credentials.tsx`, la page de Settings que monta la sección (grep `FlexCredentialsSection`)
 - Delete: `frontend/src/components/settings/FlexCredentialsSection.tsx`
-- Modify: la page de Settings que monta la sección (grep `FlexCredentialsSection`)
 - Test: `frontend/src/components/settings/ConnectionsSection.test.tsx` (vitest)
 
 - [ ] **Step 1: Regenerar el cliente canónicamente** (¡el camino importa! — lección D12):
@@ -1207,18 +1099,17 @@ export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"
 cd frontend && pnpm openapi:gen
 ```
 
-Verificar que los hooks/fetchers de connections aparecen en el cliente generado (nombres tipo `listConnectionsApiConnectionsGet`, `createConnectionApiConnectionsPost`, etc. — usar los nombres REALES generados; recordar el quirk Orval: si genera `useMutation` para GETs o `useQuery` para POSTs, usar TanStack directo con la función fetch generada).
+Usar los nombres REALES generados (tipo `listConnectionsApiConnectionsGet`); recordar el quirk Orval (si genera `useMutation` para GETs o `useQuery` para POSTs, usar TanStack directo con la función fetch generada).
 
-- [ ] **Step 2: Failing vitest** para `ConnectionsSection`: renderiza una card por connection con badge según `status` (mock del fetcher con 1 `active` + 1 `reauth_required`); la `reauth_required` muestra CTA "Rotar token" y el `status_reason`; botón "Pausar"/"Reanudar" según estado.
-
-- [ ] **Step 3: Implementar `ConnectionsSection.tsx`** (patrón existente: TanStack Query + componentes shadcn `Card`/`Badge`/`Button` + `Input`/`Label`+`useState` para el form de alta; UI strings en español). Estructura:
+- [ ] **Step 2: Failing vitest** para `ConnectionsSection`: mock del fetcher con 1 `active` + 1 `reauth_required` → una card por connection con badge según `status`; la `reauth_required` muestra CTA "Rotar token" y el `status_reason`; botón "Pausar"/"Reanudar" según estado.
+- [ ] **Step 3: Implementar `ConnectionsSection.tsx`** (patrón existente: TanStack Query + shadcn `Card`/`Badge`/`Button` + `Input`+`Label`+`useState` para el form de alta; UI strings en español):
   - `useQuery` lista connections; estados loading/empty/error.
   - Card por connection: `display_name ?? 'Conexión IBKR'`, badge (`active`→verde "Activa", `degraded`→ámbar "Degradada", `reauth_required`→rojo "Requiere re-autenticación", `disabled`→gris "Pausada"), `last_sync_at` formateado, `status_reason` visible cuando exista.
-  - Acciones: Rotar token (abre `RotateTokenModal` con `connectionId`), Pausar/Reanudar (`useMutation` → disable/enable + invalidate), Eliminar (confirm + DELETE).
-  - Form "Agregar conexión" (token, query_id, display_name) → POST + invalidate; errores 401/400/502 del backend mostrados textual.
-- [ ] **Step 4: Adaptar `RotateTokenModal`** para recibir `connectionId` y pegarle a `/api/connections/{id}/rotate-token` (leer el modal actual y conservar su UX; el doble-cast `as unknown as` está prohibido — tipos del cliente generado).
-- [ ] **Step 5: `Step1Credentials.tsx`**: agregar `Input` opcional "Nombre de la conexión" → `display_name` en el payload de `step1/save` (el endpoint del wizard no cambió de path).
-- [ ] **Step 6: Verde + lint + commit**
+  - Acciones: Rotar token (abre `RotateTokenModal` con `connectionId`), Pausar/Reanudar (mutation → disable/enable + invalidate), Eliminar (confirm + DELETE).
+  - Form "Agregar conexión" (token, query_id, display_name) → POST + invalidate; errores 401/400/502 mostrados textuales.
+- [ ] **Step 4: `RotateTokenModal`** recibe `connectionId` y pega a `/api/connections/{id}/rotate-token` (leer el modal actual y conservar su UX; prohibido `as unknown as` — tipos del cliente generado).
+- [ ] **Step 5: `Step1Credentials.tsx`**: `Input` opcional "Nombre de la conexión" → `display_name` en el payload de `step1/save`.
+- [ ] **Step 6: Verde + lint + build + commit**
 
 ```bash
 cd frontend && pnpm test && pnpm lint && pnpm build
@@ -1227,37 +1118,37 @@ git add -A frontend && git commit -m "feat(w1): ConnectionsSection con estado de
 
 ---
 
-### Task 9: E2E + verificación final + docs
+### Task 10: E2E + verificación final + docs
 
 **Files:**
 - Modify: specs Playwright que toquen Settings/wizard (grep `credentials` en `frontend/e2e/`)
-- Modify: `CLAUDE.md` (§"Cómo continuar": entrada W1 + estado), `docs/specs/2026-06-03-saas-program-roadmap.md` (marcar W1/W4 hechos en este PR)
+- Modify: `CLAUDE.md` (§"Cómo continuar"), `docs/specs/2026-06-03-saas-program-roadmap.md` (W1/W4 hechos)
 
-- [ ] **Step 1: Playwright:** actualizar specs que referencien la sección de credenciales vieja; smoke de Settings mostrando la card de conexión. Run: `cd frontend && pnpm e2e` → PASS.
-- [ ] **Step 2: Suite completa backend + frontend + boot smoke:**
+- [ ] **Step 1: Playwright:** actualizar specs que referencien la sección vieja; smoke de Settings mostrando card de conexión. Run: `cd frontend && pnpm e2e` → PASS.
+- [ ] **Step 2: Verificación completa:**
 
 ```bash
 cd backend && uv run pytest -q && uv run ruff check .
 cd frontend && pnpm lint && pnpm build
-make prod-local   # boot smoke: backend arranca como app_rls con el schema nuevo
+make prod-local   # boot smoke: backend arranca como app_rls con el baseline nuevo
 ```
 
-- [ ] **Step 3: Smoke manual mínimo** (dev, datos reales si están cargados): `make dev` → Settings muestra la conexión migrada con badge "Activa" → "Refresh manual" → SSE ok → `ingest_log` row nueva con `connection_id` poblado.
-- [ ] **Step 4: Docs:** CLAUDE.md entrada nueva en §"Cómo continuar" (W1 mergeado→pendiente, tests N→M, spec/plan links); roadmap: W1/W4 marcados "✅ hecho (PR W1)" en la sección Ampliaciones.
-- [ ] **Step 5: Commit + push + PR**
+- [ ] **Step 3: Smoke manual** (dev): `make dev` (DB fresca del baseline) → wizard step1 crea conexión → Settings muestra badge "Activa" → "Refresh manual" → SSE ok → `ingest_log` row con `connection_id` poblado.
+- [ ] **Step 4: Docs:** CLAUDE.md entrada W1 en §"Cómo continuar" (incluida la política "baseline mutable hasta el primer deploy" y su expiración); roadmap: W1/W4 "✅ hecho (PR W1)" en §Ampliaciones.
+- [ ] **Step 5: Push + PR**
 
 ```bash
-git add -A && git commit -m "docs(w1): CLAUDE.md + roadmap — W1/W4 completados"
 git push -u origin saas/w1-connections
-gh pr create --title "W1+W4: connections/providers + connection state machine" --body "..."
+gh pr create --title "W1+W4: connections/providers + connection state machine (re-baseline pre-deploy)" --body "..."
 ```
 
-- [ ] **Step 6: Code review holístico** (superpowers:requesting-code-review) con la suite completa corriendo — los reviewers de spec y calidad ya corrieron por task; este es el review final pre-merge.
+- [ ] **Step 6: Code review holístico** (superpowers:requesting-code-review) con la suite completa — los reviewers por task ya corrieron; este es el final pre-merge.
 
 ---
 
 ## Self-Review (ejecutado al escribir el plan)
 
-- **Spec coverage:** T1-D1 (detail table, Task 1) · T1-D2 (FK compuesto, Task 1) · T1-D3 (seed, Task 1) · T1-D4 (SET NULL nullable, Task 1) · T1-D5 (Task 2, consumido en Tasks 3-5) · T1-D6 (función nueva + cron, Tasks 1/3) · T1-D14 data-preserving (Task 1 expand) · T1-D15 (Task 4) · UI completa T1-S3 (Tasks 8-9) · CR-3 resuelto (header). W2/W3 NO están en este plan (PRs 2 y 3, planes propios).
-- **Riesgo descubierto y mitigado:** migraciones históricas con imports vivos (Task 0) — sin eso, el replay fresco rompe al cambiar el builder.
-- **Consistencia de tipos:** `run() -> dict[int, int | None]`; `_run_manual` ignora el retorno (verificado contra `api/ingest.py:118`) y depende del raise — contrato preservado por "re-lanza si todas fallaron".
+- **Spec coverage:** T1-D1 (detail table, Task 3) · T1-D2 (FK compuesto + CHECK, Task 3) · T1-D3 (seed, Task 3) · T1-D4 (SET NULL nullable, Task 3) · T1-D5 (Task 2, consumido en 4-6) · T1-D6 (función + cron, Task 4) · T1-D14 **amended** (re-baseline, Tasks 1/3/4/7) · T1-D15 (Task 5) · UI completa T1-S3 (Tasks 9-10) · CR-3 resuelto (header). W2/W3 = PRs 2 y 3 con planes propios.
+- **Sin legacy en `main` mergeado:** una sola migración baseline, cero expand/contract, cero data-copy, cero archivo congelado transicional. El estado dual (`flex_credentials` + `connections`) existe SOLO entre Tasks 3 y 7 dentro del branch, para que cada task termine con la suite verde.
+- **Consistencia de tipos:** `run() -> dict[int, int | None]`; `_run_manual` ignora el retorno (verificado contra `api/ingest.py`) y depende del raise — preservado por "re-lanza si `results` vacío y hubo excepción".
+- **Riesgo principal:** el squash (Task 1) — mitigado aislándolo como task mecánico sin features, con el audit de tests por-revisión (lección Phase 2.8) y el replay test fresco.
