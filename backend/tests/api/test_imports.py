@@ -41,33 +41,27 @@ async def test_upload_duplicate_returns_409(client: AsyncClient, auth_headers_wi
     assert "flex_import_id" in body.get("detail", {})
 
 
-async def test_upload_same_xml_different_org_collides_with_graceful_409(
+async def test_upload_same_xml_two_orgs_isolated_universes(
     client: AsyncClient,
     app_owner_engine,
     auth_headers_with_org: dict,
     second_auth_headers_with_org: dict,
 ):
-    """Per-org dedup vs shared-identity accounts under strict org-RLS (SP1 + H2).
+    """Multi-home (spec 2026-06-10, supersedes H2): la misma cuenta broker puede
+    existir en N orgs — dos orgs subiendo el MISMO XML obtienen, cada uno, su
+    copia independiente.
 
-    Two layers interact here:
+    Pre-multi-home esto era un 409 de cuenta reclamada (la cuenta era UNIQUE
+    global y el segundo org colisionaba bajo RLS). Ahora la unicidad es per-org
+    (``uq_accounts_org_ibkr_account_id`` + ``uq_flex_imports_org_xml_hash``):
 
-    1. Dedup is per-org: ``flex_imports`` is unique on ``(organization_id,
-       xml_hash)``, so a second org uploading the same XML is NOT a 409
-       duplicate of the first org's import — the hash check is org-scoped.
+    1. Dedup sigue per-org → el mismo XML en otro org NO es un 409 duplicado.
+    2. _ensure_accounts inserta la cuenta en el org B sin chocar con la del org A.
 
-    2. ``accounts.ibkr_account_id`` is UNIQUE GLOBAL (shared broker identity, by
-       design — a joint account is one row). Under strict org-RLS the persister's
-       ``_ensure_accounts`` SELECT is RLS-blinded from the FIRST org's account
-       rows, so it re-INSERTs and collides on the global unique constraint. This
-       is the genuine SP1 boundary: a broker account belongs to exactly ONE org.
-
-    H2 (this task): that collision is now converted to a clean, GENERIC HTTP 409
-    (``ACCOUNT_CLAIMED``) instead of a raw ``IntegrityError`` 500. The 409 leaks
-    neither org A's id nor which account collided — it only says one of the XML's
-    accounts already belongs to another organization. A SAVEPOINT in
-    ``_ensure_accounts`` keeps the failed INSERT from poisoning the request tx, so
-    org B is left with NO partial rows (no import, no account, no children).
+    Resultado: ambos uploads = 200, DOS flex_imports para el mismo hash (uno por
+    org), DOS filas de accounts para la misma ibkr_account_id (una por org).
     """
+    from ibkr_control.db.models.accounts import Account
     from ibkr_control.db.models.flex_raw import FlexImport
     from sqlalchemy import func, select
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -78,27 +72,15 @@ async def test_upload_same_xml_different_org_collides_with_graceful_409(
     r_a = await client.post("/api/imports/upload", files=files, headers=auth_headers_with_org)
     assert r_a.status_code == 200
 
-    # Same bytes, different org: NOT a per-org duplicate (would be a 409 DUP) — it
-    # gets past the org-scoped hash gate — but then collides on the shared-account
-    # global UNIQUE. H2 turns that into a clean 409 ACCOUNT_CLAIMED.
+    # Mismos bytes, otro org: pasa el gate de hash org-scoped Y _ensure_accounts
+    # inserta la cuenta en el org B (per-org unique). Sin colisión cross-org.
     r_b = await client.post(
         "/api/imports/upload", files=files, headers=second_auth_headers_with_org
     )
-    assert r_b.status_code == 409
-    detail = r_b.json()["detail"]
-    assert detail["code"] == "ACCOUNT_CLAIMED"
+    assert r_b.status_code == 200
 
-    # No existence/ownership leak: the generic message must NOT echo any broker
-    # account id from the XML, nor org A's id, nor confirm where the account lives.
-    serialized = str(r_b.json())
-    assert "U99999" not in serialized  # no sanitized broker account id leaked
-    assert "organization" not in serialized.lower()  # no org id / ownership hint
-
-    # No partial persist for org B: its collided upload left NO flex_imports row
-    # (the SAVEPOINT rollback reverted the import + account writes). Verify via the
-    # owner engine (bypasses RLS) so we can see both orgs at once: exactly ONE
-    # flex_imports row exists for this hash — org A's — and none for org B.
-    from ibkr_control.db.models.organizations import Organization
+    # Verificación cross-org vía owner engine (bypassea RLS): cada org tiene SU
+    # copia del import y de la cuenta para el mismo hash / mismo ibkr_account_id.
     from ibkr_control.ingest.hash_dedup import xml_hash
 
     session_maker = async_sessionmaker(
@@ -106,18 +88,23 @@ async def test_upload_same_xml_different_org_collides_with_graceful_409(
     )
     h = xml_hash(xml)
     async with session_maker() as s:
-        # Resolve org B's id by its seeded org name (see second_auth_headers_with_org).
-        org_b_id = await s.scalar(
-            select(Organization.id).where(Organization.name == "Org Owner 2 Household")
-        )
-        rows = (
-            await s.scalars(select(FlexImport.organization_id).where(FlexImport.xml_hash == h))
-        ).all()
-        assert org_b_id not in rows  # org B persisted nothing
-        n_for_hash = await s.scalar(
+        n_imports_for_hash = await s.scalar(
             select(func.count(FlexImport.id)).where(FlexImport.xml_hash == h)
         )
-        assert n_for_hash == 1  # only org A's import exists
+        assert n_imports_for_hash == 2  # una copia por org, universos aislados
+        org_ids = (
+            await s.scalars(select(FlexImport.organization_id).where(FlexImport.xml_hash == h))
+        ).all()
+        assert len(set(org_ids)) == 2  # dos orgs distintos
+
+        # accounts: la misma ibkr_account_id (la conjunta U99999001) existe en
+        # los dos orgs — una fila por org, multi-home por diseño.
+        n_shared_orgs = await s.scalar(
+            select(func.count(func.distinct(Account.organization_id))).where(
+                Account.ibkr_account_id == "U99999001"
+            )
+        )
+        assert n_shared_orgs == 2
 
 
 async def test_upload_malformed_returns_400(client: AsyncClient, auth_headers_with_org: dict):

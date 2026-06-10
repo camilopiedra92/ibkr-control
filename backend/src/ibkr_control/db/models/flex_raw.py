@@ -111,15 +111,16 @@ class Trade(Base):
     __table_args__ = (
         CheckConstraint("open_close IS NULL OR open_close IN ('O', 'C')", name="open_close"),
         CheckConstraint("buy_sell IN ('BUY', 'SELL')", name="buy_sell"),
+        UniqueConstraint("organization_id", "transaction_id", name="uq_trades_org_transaction_id"),
         Index(None, "account_id", "symbol"),
         Index(None, "trade_date"),
-        Index(None, "organization_id"),
         Index(None, "flex_import_id"),
         {
             "comment": (
                 "Account-scoped. Visibilidad vía participations; sin user_id. "
-                "transaction_id UNIQUE global correcto — un hecho pertenece a la "
-                "cuenta, no al usuario."
+                "transaction_id único POR TENANT (multi-home, spec 2026-06-10): "
+                "la misma cuenta broker puede existir en N orgs, cada org tiene "
+                "su copia de los hechos."
             )
         },
     )
@@ -131,7 +132,7 @@ class Trade(Base):
     flex_import_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )
-    transaction_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    transaction_id: Mapped[str] = mapped_column(String, nullable=False)
     account_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False
     )
@@ -154,10 +155,10 @@ class ClosedLot(Base):
     __tablename__ = "closed_lots"
     __table_args__ = (
         Index(None, "account_id", "symbol"),
-        Index(None, "organization_id"),
         Index(None, "flex_import_id"),
         Index(None, "source_trade_id"),
         UniqueConstraint(
+            "organization_id",
             "transaction_id",
             "close_datetime",
             "qty",
@@ -168,8 +169,9 @@ class ClosedLot(Base):
             "comment": (
                 "Account-scoped. Visibilidad vía participations; sin user_id. "
                 "Identidad por natural key compuesto (uq_closed_lots_natural_key); "
-                "transaction_id NO es único global — múltiples ejecuciones de "
-                "cierre lo comparten (amendment A3)."
+                "transaction_id NO es único ni global ni per-org — múltiples "
+                "ejecuciones de cierre lo comparten (amendment A3); la key es "
+                "per-tenant (multi-home, spec 2026-06-10)."
             )
         },
     )
@@ -279,7 +281,9 @@ class Transfer(Base):
             "(dst_account_id IS NOT NULL) <> (dst_counterparty_id IS NOT NULL)",
             name="dst_arc",
         ),
-        Index(None, "organization_id"),
+        UniqueConstraint(
+            "organization_id", "transaction_id", name="uq_transfers_org_transaction_id"
+        ),
         Index(None, "flex_import_id"),
         Index(None, "src_account_id"),
         Index(None, "dst_account_id"),
@@ -288,8 +292,9 @@ class Transfer(Base):
         {
             "comment": (
                 "Account-scoped. Visibilidad vía participations; sin user_id. "
-                "transaction_id UNIQUE global correcto — un hecho pertenece a la "
-                "cuenta, no al usuario."
+                "transaction_id único POR TENANT (multi-home, spec 2026-06-10): "
+                "la misma cuenta broker puede existir en N orgs, cada org tiene "
+                "su copia de los hechos."
             )
         },
     )
@@ -301,7 +306,7 @@ class Transfer(Base):
     flex_import_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )
-    transaction_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    transaction_id: Mapped[str] = mapped_column(String, nullable=False)
     transfer_date: Mapped[date] = mapped_column(Date, nullable=False)
     direction: Mapped[str] = mapped_column(String, nullable=False)
     src_account_id: Mapped[int | None] = mapped_column(
@@ -324,14 +329,17 @@ class Transfer(Base):
 class CashTransaction(Base):
     __tablename__ = "cash_transactions"
     __table_args__ = (
+        UniqueConstraint(
+            "organization_id", "transaction_id", name="uq_cash_transactions_org_transaction_id"
+        ),
         Index(None, "date"),
-        Index(None, "organization_id"),
         Index(None, "flex_import_id"),
         {
             "comment": (
                 "Account-scoped. Visibilidad vía participations; sin user_id. "
-                "transaction_id UNIQUE global correcto — un hecho pertenece a la "
-                "cuenta, no al usuario."
+                "transaction_id único POR TENANT (multi-home, spec 2026-06-10): "
+                "la misma cuenta broker puede existir en N orgs, cada org tiene "
+                "su copia de los hechos."
             )
         },
     )
@@ -343,7 +351,7 @@ class CashTransaction(Base):
     flex_import_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
     )
-    transaction_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    transaction_id: Mapped[str] = mapped_column(String, nullable=False)
     account_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False
     )

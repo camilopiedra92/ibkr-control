@@ -28,7 +28,6 @@ from datetime import date
 
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ibkr_control.db.models.accounts import Account
@@ -51,47 +50,6 @@ from ibkr_control.ingest.flex._upsert_helpers import (
     _upsert_snapshot,
 )
 from ibkr_control.ingest.hash_dedup import xml_hash
-
-
-# The global unique constraint on accounts.ibkr_account_id. A broker account is
-# single-org by design (a shared broker identity is ONE row, owned by ONE org);
-# under RLS a second org's _ensure_accounts SELECT is RLS-blinded from the first
-# org's row → tries to INSERT → collides on this constraint. We convert ONLY this
-# specific violation to AccountClaimedError; any other IntegrityError re-raises
-# unchanged so unrelated DB errors are never masked.
-_ACCOUNT_UNIQUE_CONSTRAINT = "uq_accounts_ibkr_account_id"
-
-
-class AccountClaimedError(Exception):
-    """One or more accounts referenced by the XML already belong to another org.
-
-    Raised by ``_ensure_accounts`` when the global ``ibkr_account_id`` unique is
-    violated under RLS (the row is owned by a different organization, invisible
-    to this one). The message is intentionally GENERIC — it leaks neither which
-    organization owns the account nor which account id collided — so that HTTP
-    endpoints can surface a clean 409 without an existence/ownership leak.
-    """
-
-    def __init__(
-        self, message: str = "one or more accounts belong to another organization"
-    ) -> None:
-        super().__init__(message)
-
-
-def _is_account_unique_violation(exc: IntegrityError) -> bool:
-    """True iff ``exc`` is specifically the ``ibkr_account_id`` global unique.
-
-    Inspects the underlying DBAPI error: asyncpg's ``UniqueViolationError`` exposes
-    ``constraint_name``. Falls back to a substring match on the message so the
-    detection survives drivers that don't populate ``constraint_name``. Any other
-    IntegrityError (a different unique, an FK, a check) returns False → the caller
-    re-raises it unchanged.
-    """
-    orig = getattr(exc, "orig", None)
-    constraint_name = getattr(orig, "constraint_name", None)
-    if constraint_name == _ACCOUNT_UNIQUE_CONSTRAINT:
-        return True
-    return _ACCOUNT_UNIQUE_CONSTRAINT in str(exc)
 
 
 def _is_shadow_account(ibkr_account_id: str) -> bool:
@@ -310,7 +268,9 @@ async def _upsert_all_children(
         for t in parsed.trades
         if not _is_shadow_account(t.ibkr_account_id)
     ]
-    n_new_trades = await _upsert_immutable(session, Trade.__table__, trade_rows, ["transaction_id"])
+    n_new_trades = await _upsert_immutable(
+        session, Trade.__table__, trade_rows, ["organization_id", "transaction_id"]
+    )
 
     # === ClosedLots (immutable) ===
     # Necesitamos un mapa transaction_id → trades.id para linkar source_trade_id.
@@ -356,7 +316,7 @@ async def _upsert_all_children(
         session,
         ClosedLot.__table__,
         closed_rows,
-        ["transaction_id", "close_datetime", "qty", "fifo_pnl_usd"],
+        ["organization_id", "transaction_id", "close_datetime", "qty", "fifo_pnl_usd"],
     )
 
     # === CashTransactions (immutable) ===
@@ -382,7 +342,7 @@ async def _upsert_all_children(
         session,
         CashTransaction.__table__,
         cash_rows,
-        ["transaction_id"],
+        ["organization_id", "transaction_id"],
         ["transaction_id", "type"],
     )
     n_new_cash = len(inserted_cash)
@@ -436,7 +396,7 @@ async def _upsert_all_children(
         )
 
     n_new_transfers = await _upsert_immutable(
-        session, Transfer.__table__, transfer_rows, ["transaction_id"]
+        session, Transfer.__table__, transfer_rows, ["organization_id", "transaction_id"]
     )
 
     # === OpenPositionLots (snapshot) ===
@@ -668,67 +628,49 @@ async def _ensure_accounts(
     *,
     organization_id: int,
 ) -> dict[str, int]:
-    """Ensure DB rows exist for all given IBKR account IDs. Returns ibkr_id -> db id map.
+    """Ensure per-org rows exist for the given IBKR account IDs. Returns ibkr_id -> db id.
 
-    New accounts are created with organization_id stamped (ibkr_account_id UNIQUE
-    global means there is at most one row per broker account across all orgs — a
-    shared identity, by design; org FK points to the first org that ingested it).
+    Multi-home (spec 2026-06-10): accounts son únicos POR ORG
+    (uq_accounts_org_ibkr_account_id) — la misma cuenta broker puede existir en
+    N orgs. El SELECT scopea por organization_id EXPLÍCITAMENTE (no confía en
+    el RLS-blinding: correcto bajo cualquier rol, tests con owner incluidos).
 
-    Race condition note: this function uses SELECT-then-INSERT, not ON CONFLICT.
-    For the cron Flex flow, this is safe because flex_job.run() holds an
-    advisory_lock(source='flex', org_id=X) preventing concurrent ingests for
-    the same org. For manual uploads via /api/imports/upload, the spec (D9)
-    explicitly forgoes the advisory lock (different XML hashes = independent
-    work). In that case, two parallel uploads referencing the same NEW account
-    could race here — the second would either get the existing row (race lost
-    safely) or hit the UNIQUE(ibkr_account_id) constraint and fail. Acceptable
-    V1 trade-off; if it becomes a problem, wrap with ON CONFLICT DO NOTHING.
-
-    Cross-org collision (H2): under RLS the SELECT above is RLS-blinded from
-    rows owned by other orgs, so an account already claimed by another org reads
-    as "missing" here → we try to INSERT → the global ``ibkr_account_id`` unique
-    fires. We wrap the INSERT+flush in a SAVEPOINT so the failed INSERT does NOT
-    poison the outer request transaction (the endpoint can still return a clean
-    409), roll the SAVEPOINT back, and raise ``AccountClaimedError`` — a generic
-    domain error (no org/account leak). Only the ``ibkr_account_id`` unique is
-    converted; any other IntegrityError re-raises unchanged so unrelated DB
-    errors are never masked.
+    Concurrencia same-org (ex-H2, ahora trivial): INSERT ... ON CONFLICT
+    (organization_id, ibkr_account_id) DO NOTHING + re-select. El conflicto
+    cross-org dejó de existir por diseño; el same-org (dos uploads paralelos,
+    spec D9 sin advisory lock) lo absorbe el ON CONFLICT y el re-select SÍ ve
+    la fila (mismo org) — el razonamiento de H2 sobre por qué esto no
+    alcanzaba aplicaba SOLO a la unicidad global (SUPERSEDED).
     """
     if not ibkr_ids:
         return {}
 
-    result = await session.scalars(select(Account).where(Account.ibkr_account_id.in_(ibkr_ids)))
-    existing: dict[str, int] = {a.ibkr_account_id: a.id for a in result.all()}
+    scoped = select(Account).where(
+        Account.organization_id == organization_id,
+        Account.ibkr_account_id.in_(ibkr_ids),
+    )
+    existing: dict[str, int] = {
+        a.ibkr_account_id: a.id for a in (await session.scalars(scoped)).all()
+    }
 
-    missing = set(ibkr_ids) - set(existing.keys())
+    missing = sorted(set(ibkr_ids) - set(existing))
     if missing:
-        # SAVEPOINT isolates the INSERT: on a cross-org collision the nested
-        # rollback reverts just this flush, leaving the outer transaction usable
-        # so the caller/endpoint can return a clean 409 instead of a poisoned 500.
-        # Open the SAVEPOINT BEFORE adding the rows: begin_nested() autoflushes
-        # any pending objects, so adding them outside it would surface the
-        # collision from begin_nested() (outside this try) as a raw IntegrityError.
-        sp = await session.begin_nested()
-        try:
-            for ibkr_id in missing:
-                session.add(
-                    Account(
-                        organization_id=organization_id,
-                        ibkr_account_id=ibkr_id,
-                        alias=None,
-                        currency="USD",
-                    )
-                )
-            await session.flush()
-            await sp.commit()
-        except IntegrityError as exc:
-            await sp.rollback()
-            if _is_account_unique_violation(exc):
-                raise AccountClaimedError() from exc
-            raise
-
-        result2 = await session.scalars(select(Account).where(Account.ibkr_account_id.in_(missing)))
-        for a in result2.all():
-            existing[a.ibkr_account_id] = a.id
+        stmt = (
+            pg_insert(Account.__table__)
+            .values(
+                [
+                    {
+                        "organization_id": organization_id,
+                        "ibkr_account_id": ibkr_id,
+                        "alias": None,
+                        "currency": "USD",
+                    }
+                    for ibkr_id in missing
+                ]
+            )
+            .on_conflict_do_nothing(index_elements=["organization_id", "ibkr_account_id"])
+        )
+        await session.execute(stmt)
+        existing = {a.ibkr_account_id: a.id for a in (await session.scalars(scoped)).all()}
 
     return existing

@@ -25,6 +25,8 @@ La enumeración de "qué orgs tienen credenciales" es una operación de **contro
 
 ### H2 — Colisión cross-org → error de dominio + 409 genérico
 
+> **⚠️ SUPERSEDED (2026-06-10):** H2 fue desmantelado por `docs/specs/2026-06-10-account-multihome-design.md` (M3) — la unicidad pasó a per-org (patrón Plaid/Sharesight) y el conflicto cross-org dejó de existir por diseño. El razonamiento de abajo era correcto BAJO unicidad global; se preserva como registro histórico.
+
 `_ensure_accounts` envuelve el INSERT de cuentas nuevas en un `SAVEPOINT`; ante `UniqueViolation` sobre `ibkr_account_id` levanta un error de dominio (`AccountClaimedError` o similar). Los endpoints que ingieren (wizard `step2/save`/`step3`, `imports/upload`) lo mapean a **HTTP 409 genérico** ("una de las cuentas ya pertenece a otra organización") — **sin leak de existencia** (no revela cuál org). Cierra el `IntegrityError` crudo/500.
 
 ### H3 — `app_rls` password por env

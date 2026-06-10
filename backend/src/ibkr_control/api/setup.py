@@ -104,21 +104,6 @@ def _is_shadow(ibkr_account_id: str) -> bool:
     return ibkr_account_id.endswith("F")
 
 
-def _account_claimed_http() -> HTTPException:
-    """Generic 409 for a cross-org account collision (H2).
-
-    Leaks neither which org owns the account nor which account id collided —
-    just that one of the XML's accounts already belongs to another organization.
-    """
-    return HTTPException(
-        status_code=409,
-        detail={
-            "code": "ACCOUNT_CLAIMED",
-            "message": "Una o más cuentas del XML ya pertenecen a otra organización.",
-        },
-    )
-
-
 async def _org_imported_account_ids(session: AsyncSession, org_id: int) -> set[str]:
     """ibkr_account_ids that appear in this org's Flex imports.
 
@@ -362,16 +347,13 @@ async def step2_detect(
     # Persist via the orchestrator-grade persister: it builds FlexImport
     # internally, dedups by xml_hash, and skips F-shadow accounts. Returns
     # (flex_import_id, counters_dict) per spec A5 (Task 8 persister rewrite).
-    try:
-        flex_import_id, counters = await flex_persister_mod.persist(
-            session,
-            parsed=parsed,
-            organization_id=org_id,
-            xml_bytes=xml_bytes,
-            source="web_service",
-        )
-    except flex_persister_mod.AccountClaimedError as exc:
-        raise _account_claimed_http() from exc
+    flex_import_id, counters = await flex_persister_mod.persist(
+        session,
+        parsed=parsed,
+        organization_id=org_id,
+        xml_bytes=xml_bytes,
+        source="web_service",
+    )
     await session.commit()
 
     detected = _detected_from_parsed(parsed)
@@ -408,16 +390,13 @@ async def step2_detect_from_xml(
     # Persister returns (flex_import_id, counters_dict); this endpoint doesn't
     # surface either to the response shape, but we still need to consume the
     # tuple cleanly so future linter doesn't flag the discard.
-    try:
-        _flex_import_id, _counters = await flex_persister_mod.persist(
-            session,
-            parsed=parsed,
-            organization_id=org_id,
-            xml_bytes=content,
-            source="manual_upload",
-        )
-    except flex_persister_mod.AccountClaimedError as exc:
-        raise _account_claimed_http() from exc
+    _flex_import_id, _counters = await flex_persister_mod.persist(
+        session,
+        parsed=parsed,
+        organization_id=org_id,
+        xml_bytes=content,
+        source="manual_upload",
+    )
     await session.commit()
 
     return Step2DetectFromXmlResponse(
@@ -726,16 +705,13 @@ async def step3_commit(
             continue  # belt-and-suspenders; validate pass already checked
         data = entry.data
         parsed = data["parsed"]
-        try:
-            flex_import_id, counters = await flex_persister_mod.persist(
-                session,
-                parsed=parsed,
-                organization_id=org_id,
-                xml_bytes=data["xml_bytes"],
-                source="manual_upload",
-            )
-        except flex_persister_mod.AccountClaimedError as exc:
-            raise _account_claimed_http() from exc
+        flex_import_id, counters = await flex_persister_mod.persist(
+            session,
+            parsed=parsed,
+            organization_id=org_id,
+            xml_bytes=data["xml_bytes"],
+            source="manual_upload",
+        )
         flex_import_ids.append(flex_import_id)
         total_rows += sum(counters.get(k, 0) for k in _NEW_KEYS)
 

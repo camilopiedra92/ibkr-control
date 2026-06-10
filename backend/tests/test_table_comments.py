@@ -9,10 +9,13 @@ def _comment(table_name):
     return Base.metadata.tables[table_name].comment
 
 
-def test_accounts_comment_marks_shared_identity():
+def test_accounts_comment_marks_multihome_identity():
+    # Multi-home (spec 2026-06-10): el comment dejó de afirmar identidad global
+    # COMPARTIDA; ahora documenta la tenancy per-org (una fila por org) +
+    # propiedad intra-org vía participations.
     c = _comment("accounts")
     assert c is not None
-    assert "COMPARTIDA" in c
+    assert "Multi-home" in c
     assert "participations" in c
 
 

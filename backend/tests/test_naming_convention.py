@@ -43,8 +43,12 @@ def test_fk_follows_convention():
     assert "fk_trades_account_id_accounts" in names
 
 
-def test_single_col_unique_follows_convention():
-    assert "uq_accounts_ibkr_account_id" in _names("accounts")
+def test_org_scoped_unique_uses_explicit_name():
+    # Multi-home (spec 2026-06-10): accounts es único POR ORG, no global.
+    # El UniqueConstraint compuesto lleva name explícito (verbatim, la
+    # convención no se aplica a multi-col con name).
+    assert "uq_accounts_org_ibkr_account_id" in _names("accounts")
+    assert "uq_accounts_ibkr_account_id" not in _names("accounts")
 
 
 def test_index_names_follow_convention():
