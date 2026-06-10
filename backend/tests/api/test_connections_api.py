@@ -274,6 +274,58 @@ async def test_create_connection_403_when_no_org(client: AsyncClient, auth_heade
     assert resp.status_code == 403
 
 
+async def test_create_connection_unknown_query_id_400(
+    client: AsyncClient, auth_headers_with_org: dict, monkeypatch
+):
+    """IBKR responde 1005 (query no existe) -> 400 con detail explicativo."""
+
+    class _FakeFlexClientQueryNotFound:
+        def __init__(self, token):
+            pass
+
+        async def send_request(self, query_id):
+            raise flex_client_mod.FlexQueryNotFoundError("query desconocido")
+
+    monkeypatch.setattr(flex_client_mod, "FlexClient", _FakeFlexClientQueryNotFound)
+    resp = await client.post(
+        "/api/connections",
+        json={"token": "valid-token-abc123", "query_id": "QID-NOPE"},
+        headers=auth_headers_with_org,
+    )
+    assert resp.status_code == 400
+    assert "Query ID invalido" in resp.json()["detail"]
+
+
+async def test_list_connection_without_detail_500_fail_loud(
+    client: AsyncClient, auth_headers_with_org: dict, app_owner_engine
+):
+    """Connection sin su detail 1:1 = invariante de subtipo roto -> 500 fail-loud
+    (no degradar en silencio). Se seedea owner-side porque la API nunca puede
+    producir este estado."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    session_maker = async_sessionmaker(
+        app_owner_engine, expire_on_commit=False, class_=AsyncSession
+    )
+    async with session_maker() as session:
+        org_id = await session.scalar(
+            text("SELECT id FROM organizations WHERE name = 'Org Owner Household'")
+        )
+        inst_id = await session.scalar(text("SELECT id FROM institutions WHERE code = 'ibkr'"))
+        await session.execute(
+            text(
+                "INSERT INTO connections (organization_id, institution_id, provider_type) "
+                "VALUES (:o, :i, 'ibkr_flex')"
+            ).bindparams(o=org_id, i=inst_id)
+        )
+        await session.commit()
+
+    resp = await client.get("/api/connections", headers=auth_headers_with_org)
+    assert resp.status_code == 500
+    assert resp.json()["detail"] == "Connection detail missing"
+
+
 async def test_create_connection_ibkr_unreachable_502(
     client: AsyncClient, auth_headers_with_org: dict, monkeypatch
 ):
