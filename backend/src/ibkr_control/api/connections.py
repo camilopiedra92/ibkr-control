@@ -50,11 +50,11 @@ async def _validate_token_against_ibkr(token: str, query_id: str) -> None:
         client = flex_client_mod.FlexClient(token=token)
         await client.send_request(query_id=query_id)
     except flex_client_mod.FlexAuthError as e:
-        raise HTTPException(status_code=401, detail=f"Token invalido: {e.error_message}")
+        raise HTTPException(status_code=401, detail=f"Token invalido: {e.error_message}") from e
     except flex_client_mod.FlexQueryNotFoundError as e:
-        raise HTTPException(status_code=400, detail=f"Query ID invalido: {e.error_message}")
+        raise HTTPException(status_code=400, detail=f"Query ID invalido: {e.error_message}") from e
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"No pude alcanzar IBKR: {e}")
+        raise HTTPException(status_code=502, detail=f"No pude alcanzar IBKR: {e}") from e
 
 
 async def _serialize(session: AsyncSession, conn: Connection) -> ConnectionRead:
@@ -95,6 +95,10 @@ async def create_connection(
 ) -> ConnectionRead:
     await _validate_token_against_ibkr(payload.token, payload.query_id)
     inst_id = await session.scalar(select(Institution.id).where(Institution.code == "ibkr"))
+    if inst_id is None:
+        # Seed roto (la migracion baseline inserta 'ibkr') -- fail-loud, no
+        # dejar que el FK NOT NULL explote en un IntegrityError opaco.
+        raise HTTPException(status_code=500, detail="Institution 'ibkr' seed missing")
     conn = Connection(
         organization_id=org_id,
         institution_id=inst_id,
