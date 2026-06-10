@@ -48,6 +48,9 @@ def mark_sync_failed(conn: Connection, *, reason: str, now: datetime) -> None:
 
 
 def mark_rotated(conn: Connection) -> None:
+    # Sin `now`/`last_sync_at` deliberadamente: el timestamp de rotación vive
+    # en la detail (connection_ibkr_flex.last_rotated_at, escrito por la API)
+    # y last_sync_at pertenece solo a eventos de sync.
     conn.consecutive_failures = 0
     conn.status_reason = None
     if conn.status != "disabled":

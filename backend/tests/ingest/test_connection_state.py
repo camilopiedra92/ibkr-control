@@ -60,6 +60,18 @@ def test_transient_failure_does_not_mask_reauth_required():
     c = _conn(status="reauth_required", failures=2)
     cs.mark_sync_failed(c, reason="net", now=NOW)
     assert c.status == "reauth_required"  # estado más específico se conserva
+    assert c.consecutive_failures == 3  # el contador SÍ avanza
+    assert c.status_reason == "net"  # el reason SÍ se actualiza
+
+
+def test_auth_failure_overrides_pending_degrade():
+    # 1 fallo transitorio previo (active, a un paso del umbral) y luego un
+    # fallo de AUTH: el estado específico gana sobre el degrade pendiente.
+    c = _conn(failures=1)
+    cs.mark_auth_failed(c, reason="Flex auth error 1003: expired", now=NOW)
+    assert c.status == "reauth_required"
+    assert c.consecutive_failures == 2
+    assert "1003" in c.status_reason
 
 
 def test_disabled_is_sticky_for_sync_events():
