@@ -3,7 +3,7 @@
 **Fecha:** 2026-06-10
 **Branch destino:** `saas/sp1-db-hardening` (desde `main`, post-merge PR #7 `731cacc`)
 **Depende de:** SP1 + SP1-hardening + SP1-rls-runtime-wiring — los tres en `main`.
-**Estado:** spec aprobado, pendiente plan.
+**Estado:** implementado y mergeado a `main` (PR #8, merge `b62e1bc`, 2026-06-10). Plan ejecutado subagent-driven: `docs/plans/2026-06-10-sp1-db-hardening.md`.
 
 ## 1. Problema
 
