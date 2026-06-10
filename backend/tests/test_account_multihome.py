@@ -1,8 +1,8 @@
 """Multi-home de cuentas broker (spec 2026-06-10-account-multihome, M1/M3).
 
 Patrón Plaid/Sharesight: dos orgs conectan la misma cuenta IBKR, cada uno en
-su universo aislado. Supersede H2 (AccountClaimedError): el conflicto
-cross-org deja de existir por diseño.
+su universo aislado. Supersede H2 (el manejo de colisión de cuenta cross-org):
+el conflicto cross-org deja de existir por diseño.
 """
 
 from pathlib import Path

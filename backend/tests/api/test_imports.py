@@ -51,8 +51,8 @@ async def test_upload_same_xml_two_orgs_isolated_universes(
     existir en N orgs — dos orgs subiendo el MISMO XML obtienen, cada uno, su
     copia independiente.
 
-    Pre-multi-home esto era un 409 ACCOUNT_CLAIMED (la cuenta era UNIQUE global y
-    el segundo org colisionaba bajo RLS). Ahora la unicidad es per-org
+    Pre-multi-home esto era un 409 de cuenta reclamada (la cuenta era UNIQUE
+    global y el segundo org colisionaba bajo RLS). Ahora la unicidad es per-org
     (``uq_accounts_org_ibkr_account_id`` + ``uq_flex_imports_org_xml_hash``):
 
     1. Dedup sigue per-org → el mismo XML en otro org NO es un 409 duplicado.
