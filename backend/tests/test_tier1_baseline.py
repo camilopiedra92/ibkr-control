@@ -47,6 +47,8 @@ def test_org_scoped_snapshot_matches_live_ssot():
     import ibkr_control.db.rls as rls
 
     baseline_path = _VERSIONS_DIR / "a9977ac077e5_tier1_baseline.py"
+    # Safe to exec_module: the baseline has no import-time side effects (env is
+    # only read inside _app_rls_password(), called from upgrade(), never at load).
     spec = importlib.util.spec_from_file_location("_tier1_baseline_snapshot", baseline_path)
     baseline = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(baseline)
@@ -136,13 +138,13 @@ def test_institutions_seeded(fresh_postgres, monkeypatch):
 
 
 def test_connections_subtype_integrity(fresh_postgres, monkeypatch):
-    """Subtype integrity (T1-D2): a connection_ibkr_flex detail can only hang off a
-    connection whose provider_type is 'ibkr_flex', and the detail's own CHECK
-    rejects any other literal.
+    """Subtype integrity (T1-D2): a valid ibkr_flex parent+detail pair inserts, and
+    the detail's CHECK rejects any provider_type literal other than 'ibkr_flex'.
 
-    The composite FK (connection_id, provider_type) -> connections(id,
-    provider_type) plus the CHECK provider_type = 'ibkr_flex' make it impossible to
-    attach an ibkr_flex detail to a connection of another provider."""
+    Only the CHECK leg is verified here. The composite-FK leg (detail must point at
+    a parent with the SAME provider_type) is unreachable today: the parent's own
+    CHECK only allows 'ibkr_flex', so no mismatched parent can exist to test
+    against. It becomes testable when a second provider is added."""
     sync_url = _upgrade_head(fresh_postgres, monkeypatch)
     engine = create_engine(sync_url)
     with engine.begin() as conn:

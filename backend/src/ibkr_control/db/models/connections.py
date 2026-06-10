@@ -48,6 +48,10 @@ class Connection(Base):
         # Ancla del FK compuesto de subtipo (T1-D2).
         UniqueConstraint("id", "provider_type", name="uq_connections_id_provider_type"),
         Index(None, "organization_id"),
+        # FK RESTRICT joineado en cada lectura de connections (Task 5 serializa
+        # Institution.code) — regla sp1-db-hardening: todo FK usado en
+        # joins/deletes lleva índice.
+        Index(None, "institution_id"),
         {
             "comment": (
                 "Org-scoped (RLS). Vínculo org<->institución (patrón Plaid Item). "

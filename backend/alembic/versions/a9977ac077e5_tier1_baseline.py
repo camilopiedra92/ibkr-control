@@ -277,6 +277,9 @@ def upgrade() -> None:
         comment="Org-scoped (RLS). Vínculo org<->institución (patrón Plaid Item). Config provider-specific en la detail 1:1 (connection_ibkr_flex). status SOLO vía ingest/connection_state.py (W4).",
     )
     op.create_index(
+        op.f("ix_connections_institution_id"), "connections", ["institution_id"], unique=False
+    )
+    op.create_index(
         op.f("ix_connections_organization_id"), "connections", ["organization_id"], unique=False
     )
     op.create_table(
@@ -1418,6 +1421,7 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_counterparties_organization_id"), table_name="counterparties")
     op.drop_table("counterparties")
     op.drop_index(op.f("ix_connections_organization_id"), table_name="connections")
+    op.drop_index(op.f("ix_connections_institution_id"), table_name="connections")
     op.drop_table("connections")
     op.drop_table("accounts")
     op.drop_index(op.f("ix_users_email"), table_name="users")
