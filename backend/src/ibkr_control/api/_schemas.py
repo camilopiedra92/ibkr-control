@@ -5,21 +5,41 @@ from decimal import Decimal
 from pydantic import BaseModel, Field
 
 
-# -- Credentials ------------------------------------------------------------
-class FlexCredentialsRead(BaseModel):
-    configured_at: datetime
-    query_id: str
-    last_rotated_at: datetime
-
-
+# -- Credentials (legacy, solo FlexCredentialsValidate sobrevive hasta Task 6) -
 class FlexCredentialsValidate(BaseModel):
     token: str = Field(min_length=10, max_length=512)
     query_id: str = Field(min_length=1, max_length=64)
 
 
-class FlexCredentialsUpdate(BaseModel):
-    token: str | None = Field(default=None, min_length=10, max_length=512)
+# -- Connections (W1, reemplaza credentials) --------------------------------
+class ConnectionRead(BaseModel):
+    id: int
+    institution_code: str
+    provider_type: str
+    display_name: str | None
+    status: str
+    status_reason: str | None
+    last_sync_at: datetime | None
+    last_sync_status: str | None
+    consecutive_failures: int
+    query_id: str
+    last_rotated_at: datetime
+    created_at: datetime
+
+
+class ConnectionCreate(BaseModel):
+    token: str = Field(min_length=10, max_length=512)
+    query_id: str = Field(min_length=1, max_length=64)
+    display_name: str | None = Field(default=None, max_length=120)
+
+
+class ConnectionRotate(BaseModel):
+    token: str = Field(min_length=10, max_length=512)
     query_id: str | None = Field(default=None, min_length=1, max_length=64)
+
+
+class ConnectionUpdate(BaseModel):
+    display_name: str | None = Field(default=None, max_length=120)
 
 
 # -- Setup wizard -----------------------------------------------------------
