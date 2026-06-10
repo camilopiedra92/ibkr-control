@@ -23,7 +23,8 @@ async def _connection_rows(app_owner_engine) -> list[dict]:
             (
                 await session.execute(
                     text(
-                        "SELECT c.id, c.status, d.query_id, d.token_encrypted, d.last_rotated_at "
+                        "SELECT c.id, c.status, c.display_name, "
+                        "d.query_id, d.token_encrypted, d.last_rotated_at "
                         "FROM connections c JOIN connection_ibkr_flex d ON d.connection_id = c.id "
                         "WHERE c.provider_type = 'ibkr_flex' ORDER BY c.id"
                     )
@@ -68,11 +69,12 @@ async def test_state_step1_credentials_derives_from_connection(
 async def test_step1_save_creates_connection_active(
     client: AsyncClient, auth_headers_with_org: dict, app_owner_engine
 ):
-    """No connection yet → step1/save creates Connection (status='active') + detail."""
+    """No connection yet → step1/save creates Connection (status='active') + detail,
+    persisting display_name from the payload."""
     r = await client.post(
         "/api/setup/step1/save",
         headers=auth_headers_with_org,
-        json={"token": "tok_first_save_1", "query_id": "QID-1"},
+        json={"token": "tok_first_save_1", "query_id": "QID-1", "display_name": "Mi IBKR"},
     )
     assert r.status_code == 200, r.text
 
@@ -80,17 +82,20 @@ async def test_step1_save_creates_connection_active(
     assert len(rows) == 1
     assert rows[0]["status"] == "active"
     assert rows[0]["query_id"] == "QID-1"
+    assert rows[0]["display_name"] == "Mi IBKR"
 
 
 async def test_step1_save_idempotent_updates_first_and_rotates(
     client: AsyncClient, auth_headers_with_org: dict, app_owner_engine
 ):
     """Re-save updates the FIRST connection's detail (token/query) + mark_rotated;
-    never creates a duplicate. Seed in reauth_required → must return to active."""
+    never creates a duplicate. Seed in reauth_required → must return to active.
+    A re-save WITHOUT display_name leaves the stored one unchanged (Task 9
+    builds on this contract)."""
     r = await client.post(
         "/api/setup/step1/save",
         headers=auth_headers_with_org,
-        json={"token": "tok_initial_save", "query_id": "QID-OLD"},
+        json={"token": "tok_initial_save", "query_id": "QID-OLD", "display_name": "Original"},
     )
     assert r.status_code == 200, r.text
     before = await _connection_rows(app_owner_engine)
@@ -126,3 +131,4 @@ async def test_step1_save_idempotent_updates_first_and_rotates(
     assert after[0]["query_id"] == "QID-NEW"
     assert after[0]["token_encrypted"] != old_token, "token re-encrypted on update"
     assert after[0]["last_rotated_at"] > old_rotated, "last_rotated_at advanced"
+    assert after[0]["display_name"] == "Original", "display_name=None leaves it unchanged"

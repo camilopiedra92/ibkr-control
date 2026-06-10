@@ -347,6 +347,27 @@ async def _fetch_statement_with_retry(client, query_id: str) -> bytes:
     raise AssertionError("unreachable")  # pragma: no cover
 
 
+def _classify_detect_failure(exc: Exception):
+    """Mapea una excepción del fetch/parse/persist de UNA connection a
+    (transition_fn, failure_class). Espejo de la clasificación del job loop de
+    Task 4 (ingest/flex/job.py::run, CR-3): auth-class (token inválido o
+    query_id mal configurado) requiere acción del usuario → mark_auth_failed
+    (reauth_required); todo lo demás es transitorio → mark_sync_failed.
+
+    failure_class alimenta la precedencia del error agregado cuando CERO
+    connections produjeron cuentas: 'auth' → 401, 'data' (parse/persist —
+    comparten el mismo catch, igual que en el job loop) → 422 PARSE_ERROR,
+    'transient' (busy/transporte) → 503 IBKR_BUSY.
+    """
+    if isinstance(exc, (flex_client_mod.FlexAuthError, flex_client_mod.FlexQueryNotFoundError)):
+        return connection_state.mark_auth_failed, "auth"
+    if isinstance(exc, (flex_client_mod.FlexClientError, flex_client_mod.FlexPollTimeoutError)):
+        # Incluye FlexBusyError (subclase de FlexClientError, retries agotados).
+        return connection_state.mark_sync_failed, "transient"
+    # No es una excepción del cliente Flex → vino del parse o del persist.
+    return connection_state.mark_sync_failed, "data"
+
+
 @router.post("/step2/detect", response_model=Step2DetectResponse)
 async def step2_detect(
     org_id: int = Depends(org_context),
@@ -355,29 +376,36 @@ async def step2_detect(
     """Fetch + parse + persist YTD across ALL active connections (W1).
 
     Iterates the org's non-disabled ibkr_flex connections, accumulating detected
-    accounts deduped by ibkr_account_id. Per-connection failures are isolated:
-    an auth-class error (FlexAuthError/FlexQueryNotFoundError) transitions the
-    connection to reauth_required (connection_state.mark_auth_failed) and the
-    loop continues. Partial success returns the accumulated accounts. If every
-    connection failed: any auth-class failure → 401; else (all busy/transient)
-    → 503 IBKR_BUSY (same shape as before).
+    accounts deduped by ibkr_account_id. detect es partial-tolerant (espejo del
+    job loop de Task 4): CUALQUIER fallo per-connection (auth, busy, transporte,
+    parse, persist) transiciona SU estado vía connection_state + commit y el
+    loop continúa; el error agregado solo se lanza si CERO connections
+    produjeron cuentas. Precedencia del agregado: any auth-class → 401
+    INVALID_TOKEN; elif any parse/persist → 422 PARSE_ERROR; else → 503
+    IBKR_BUSY (misma shape que antes).
 
     Retry policy per spec D10: server-side retry on 1001 with backoff [5,15,30]s
     per connection.
     """
     conns = await _ibkr_flex_connections(session)
-    conns = [c for c in conns if c.status != "disabled"]
-    if not conns:
+    # Capturar los ids ANTES del loop: un rollback per-connection (fallo de
+    # persist) expira TODOS los objetos ORM de la sesión; iterar por id y
+    # re-cargar con session.get evita accesos a instancias expiradas
+    # (MissingGreenlet bajo asyncio).
+    conn_ids = [c.id for c in conns if c.status != "disabled"]
+    if not conn_ids:
         raise HTTPException(status_code=400, detail="MISSING_CREDENTIALS")
 
     detected_by_id: dict[str, DetectedAccount] = {}
     last_import_id: int | None = None
     last_counters: dict | None = None
-    auth_failure = False
+    failure_classes: set[str] = set()
+    data_error_message: str | None = None
     any_success = False
 
-    for conn in conns:
-        detail = await session.get(ConnectionIbkrFlex, conn.id)
+    for conn_id in conn_ids:
+        conn = await session.get(Connection, conn_id)
+        detail = await session.get(ConnectionIbkrFlex, conn_id)
         if detail is None:
             # Invariante de subtipo roto -- fail-loud, no degradar en silencio.
             raise HTTPException(status_code=500, detail="Connection detail missing")
@@ -385,53 +413,35 @@ async def step2_detect(
         client = flex_client_mod.FlexClient(token=token)
         try:
             xml_bytes = await _fetch_statement_with_retry(client, detail.query_id)
-        except (
-            flex_client_mod.FlexAuthError,
-            flex_client_mod.FlexQueryNotFoundError,
-        ) as e:
-            # CR-3: auth-class — user action required. Mark + commit + continue.
-            connection_state.mark_auth_failed(conn, reason=str(e), now=datetime.now(timezone.utc))
-            await session.commit()
-            auth_failure = True
-            continue
-        except flex_client_mod.FlexBusyError:
-            # Transient (1001 retries exhausted). Mark degraded + continue.
-            connection_state.mark_sync_failed(
-                conn, reason="IBKR_BUSY", now=datetime.now(timezone.utc)
-            )
-            await session.commit()
-            continue
-        except (
-            flex_client_mod.FlexClientError,
-            flex_client_mod.FlexPollTimeoutError,
-        ) as e:
-            # Other client/transport errors (IBKR_ERROR, timeout). Transient:
-            # mark degraded + continue so one connection's blip doesn't fail the
-            # whole detect; if it's the only/last failing one the all-busy 503
-            # path surfaces it.
-            connection_state.mark_sync_failed(conn, reason=str(e), now=datetime.now(timezone.utc))
-            await session.commit()
-            continue
-
-        try:
             parsed = flex_parser_mod.parse(xml_bytes)
-        except Exception as e:  # noqa: BLE001 — surface as 422 for diagnosis
-            raise HTTPException(
-                status_code=422,
-                detail={"code": "PARSE_ERROR", "message": str(e)[:500]},
-            ) from e
+            # Persist via the orchestrator-grade persister: builds FlexImport
+            # internally, dedups by xml_hash, and skips F-shadow accounts.
+            # Returns (flex_import_id, counters_dict) per spec A5.
+            flex_import_id, counters = await flex_persister_mod.persist(
+                session,
+                parsed=parsed,
+                organization_id=org_id,
+                xml_bytes=xml_bytes,
+                source="web_service",
+                connection_id=conn.id,
+            )
+        except Exception as e:  # noqa: BLE001 — espejo del broad catch del job loop
+            # Un persist fallido puede dejar la transacción abortada: rollback
+            # ANTES de la transición de estado para que el commit de abajo
+            # corra en una transacción limpia (el GUC RLS se re-aplica vía el
+            # listener after_begin, PR #7). El rollback expira el objeto conn;
+            # refresh explícito (async) antes de mutarlo — el acceso implícito
+            # lanzaría MissingGreenlet.
+            await session.rollback()
+            await session.refresh(conn)
+            transition, failure_class = _classify_detect_failure(e)
+            transition(conn, reason=str(e)[:500], now=datetime.now(timezone.utc))
+            await session.commit()
+            failure_classes.add(failure_class)
+            if failure_class == "data" and data_error_message is None:
+                data_error_message = str(e)[:500]
+            continue
 
-        # Persist via the orchestrator-grade persister: it builds FlexImport
-        # internally, dedups by xml_hash, and skips F-shadow accounts. Returns
-        # (flex_import_id, counters_dict) per spec A5 (Task 8 persister rewrite).
-        flex_import_id, counters = await flex_persister_mod.persist(
-            session,
-            parsed=parsed,
-            organization_id=org_id,
-            xml_bytes=xml_bytes,
-            source="web_service",
-            connection_id=conn.id,
-        )
         connection_state.mark_sync_ok(conn, now=datetime.now(timezone.utc))
         await session.commit()
 
@@ -442,8 +452,13 @@ async def step2_detect(
             detected_by_id.setdefault(da.ibkr_account_id, da)
 
     if not any_success:
-        if auth_failure:
+        if "auth" in failure_classes:
             raise HTTPException(status_code=401, detail="INVALID_TOKEN")
+        if "data" in failure_classes:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "PARSE_ERROR", "message": data_error_message or ""},
+            )
         # All transient/busy.
         raise HTTPException(
             status_code=503,

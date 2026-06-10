@@ -109,6 +109,23 @@ async def _connection_statuses(app_owner_engine) -> list[str]:
     return [r[0] for r in rows]
 
 
+async def _connection_sync_states(app_owner_engine) -> list[tuple[str, str | None]]:
+    """(status, last_sync_status) per ibkr_flex connection, ordered by id."""
+    session_maker = async_sessionmaker(
+        app_owner_engine, expire_on_commit=False, class_=AsyncSession
+    )
+    async with session_maker() as session:
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT status, last_sync_status FROM connections "
+                    "WHERE provider_type='ibkr_flex' ORDER BY id"
+                )
+            )
+        ).all()
+    return [(r[0], r[1]) for r in rows]
+
+
 async def test_step2_detect_happy_path_returns_accounts_filtering_f(
     client: AsyncClient, auth_headers_with_org: dict, monkeypatch
 ):
@@ -252,3 +269,80 @@ async def test_step2_detect_400_when_no_connection(
     r = await client.post("/api/setup/step2/detect", headers=auth_headers_with_org)
     assert r.status_code == 400
     assert r.json()["detail"] == "MISSING_CREDENTIALS"
+
+
+async def test_step2_detect_partial_tolerant_on_parse_failure(
+    client: AsyncClient, auth_headers_with_org: dict, app_owner_engine, monkeypatch
+):
+    """detect es partial-tolerant: primera conn devuelve XML que no parsea,
+    segunda OK → 200 con las cuentas de la segunda; la primera transiciona via
+    mark_sync_failed (last_sync_status='failed'), espejo del job loop de Task 4."""
+    await _seed_creds(client, auth_headers_with_org)
+    await _seed_second_connection(app_owner_engine)
+
+    monkeypatch.setattr(flex_client_mod.FlexClient, "send_request", AsyncMock(return_value="ref"))
+    monkeypatch.setattr(
+        flex_client_mod.FlexClient,
+        "get_statement",
+        AsyncMock(side_effect=[b"this is not flex xml", _FAKE_XML_B]),
+    )
+
+    r = await client.post("/api/setup/step2/detect", headers=auth_headers_with_org)
+    assert r.status_code == 200, r.text
+    ids = [a["ibkr_account_id"] for a in r.json()["detected_accounts"]]
+    assert ids == ["U88888888"]
+
+    states = await _connection_sync_states(app_owner_engine)
+    assert states[0][1] == "failed", "parse failure transitioned the first connection"
+    assert states[1] == ("active", "ok")
+
+
+async def test_step2_detect_422_when_only_connection_has_unparseable_xml(
+    client: AsyncClient, auth_headers_with_org: dict, app_owner_engine, monkeypatch
+):
+    """Single conn with poison XML → 422 PARSE_ERROR (old single-connection UX
+    preserved) + the connection transitions (mark_sync_failed)."""
+    await _seed_creds(client, auth_headers_with_org)
+
+    monkeypatch.setattr(flex_client_mod.FlexClient, "send_request", AsyncMock(return_value="ref"))
+    monkeypatch.setattr(
+        flex_client_mod.FlexClient,
+        "get_statement",
+        AsyncMock(return_value=b"this is not flex xml"),
+    )
+
+    r = await client.post("/api/setup/step2/detect", headers=auth_headers_with_org)
+    assert r.status_code == 422
+    assert r.json()["detail"]["code"] == "PARSE_ERROR"
+
+    states = await _connection_sync_states(app_owner_engine)
+    assert states[0][1] == "failed"
+
+
+async def test_step2_detect_persist_failure_transitions_and_aggregates(
+    client: AsyncClient, auth_headers_with_org: dict, app_owner_engine, monkeypatch
+):
+    """Persist failure shares the same per-connection catch as parse: the conn
+    transitions (mark_sync_failed) and, with zero successes, the aggregate is
+    422 PARSE_ERROR (data-class) — never an uncaught 500 with stale state."""
+    await _seed_creds(client, auth_headers_with_org)
+
+    monkeypatch.setattr(flex_client_mod.FlexClient, "send_request", AsyncMock(return_value="ref"))
+    monkeypatch.setattr(
+        flex_client_mod.FlexClient,
+        "get_statement",
+        AsyncMock(return_value=_FAKE_XML),
+    )
+    monkeypatch.setattr(
+        "ibkr_control.ingest.flex.persister.persist",
+        AsyncMock(side_effect=RuntimeError("simulated persist failure")),
+    )
+
+    r = await client.post("/api/setup/step2/detect", headers=auth_headers_with_org)
+    assert r.status_code == 422
+    body = r.json()
+    assert body["detail"]["code"] == "PARSE_ERROR"
+    assert "simulated persist failure" in body["detail"]["message"]
+
+    states = await _connection_sync_states(app_owner_engine)
+    assert states[0][1] == "failed", "persist failure transitioned the connection"
