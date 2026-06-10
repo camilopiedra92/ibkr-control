@@ -18,7 +18,14 @@ from ibkr_control.scheduler.jobs import register_jobs
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Startup: start APScheduler with daily ingest jobs. Shutdown: stop it."""
+    """Startup: assert the runtime DB role enforces RLS (fail-closed), then start
+    APScheduler with daily ingest jobs. Shutdown: stop it.
+    """
+    from ibkr_control.db.guards import assert_runtime_role_enforces_rls
+    from ibkr_control.db.session import get_engine
+
+    await assert_runtime_role_enforces_rls(get_engine())
+
     scheduler = create_scheduler()
     register_jobs(scheduler)
     scheduler.start()
