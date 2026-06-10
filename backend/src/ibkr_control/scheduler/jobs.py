@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ibkr_control.config import get_settings
+from ibkr_control.db.session import engine_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ async def _run_flex_for_all_orgs() -> None:
     from ibkr_control.ingest.lock import LockHeldError
 
     settings = get_settings()
-    engine = create_async_engine(settings.database_url, echo=False)
+    engine = create_async_engine(settings.database_url, echo=False, **engine_kwargs())
     session_local = async_sessionmaker(engine, expire_on_commit=False)
 
     try:
@@ -84,7 +85,7 @@ async def _run_trm_global() -> None:
     from ibkr_control.ingest.trm import job as trm_job
 
     settings = get_settings()
-    engine = create_async_engine(settings.database_url, echo=False)
+    engine = create_async_engine(settings.database_url, echo=False, **engine_kwargs())
     session_local = async_sessionmaker(engine, expire_on_commit=False)
     try:
         await trm_job.run(session_local, trigger="cron")

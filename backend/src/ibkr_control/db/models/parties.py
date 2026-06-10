@@ -12,6 +12,7 @@ class Party(Base):
     __tablename__ = "parties"
     __table_args__ = (
         Index(None, "organization_id"),
+        Index(None, "user_id"),
         {
             "comment": (
                 "Persona fiscal (contribuyente). Duena de cuentas via participations. "
