@@ -43,10 +43,13 @@ async def test_upsert_immutable_inserts_then_noop(
     )
     rows = [dict(base_row, transaction_id=f"TX-{i}") for i in range(3)]
 
-    n_new_first = await _upsert_immutable(db_session, Trade.__table__, rows, ["transaction_id"])
+    # Multi-home (spec 2026-06-10): la unique de trades es per-org
+    # (organization_id, transaction_id); el conflict target debe matchearla.
+    conflict = ["organization_id", "transaction_id"]
+    n_new_first = await _upsert_immutable(db_session, Trade.__table__, rows, conflict)
     assert n_new_first == 3
 
-    n_new_second = await _upsert_immutable(db_session, Trade.__table__, rows, ["transaction_id"])
+    n_new_second = await _upsert_immutable(db_session, Trade.__table__, rows, conflict)
     assert n_new_second == 0
 
 
@@ -133,12 +136,14 @@ async def test_upsert_immutable_returning_inserted_filters_noop(
         qty=Decimal("100"),
         transfer_type="ACATS",
     )
+    # Multi-home (spec 2026-06-10): la unique de transfers es per-org.
+    conflict = ["organization_id", "transaction_id"]
     rows_round1 = [dict(base, transaction_id="XFER-1"), dict(base, transaction_id="XFER-2")]
     inserted1 = await _upsert_immutable_returning_inserted(
         db_session,
         Transfer.__table__,
         rows_round1,
-        ["transaction_id"],
+        conflict,
         ["id", "transaction_id"],
     )
     assert {row.transaction_id for row in inserted1} == {"XFER-1", "XFER-2"}
@@ -148,7 +153,7 @@ async def test_upsert_immutable_returning_inserted_filters_noop(
         db_session,
         Transfer.__table__,
         rows_round2,
-        ["transaction_id"],
+        conflict,
         ["id", "transaction_id"],
     )
     assert {row.transaction_id for row in inserted2} == {"XFER-3"}
@@ -182,5 +187,7 @@ async def test_upsert_immutable_batches_large_input(
         raw_attrs={},
     )
     rows = [dict(base_row, transaction_id=f"TX-BATCH-{i}") for i in range(15)]
-    n_new = await _upsert_immutable(db_session, Trade.__table__, rows, ["transaction_id"])
+    n_new = await _upsert_immutable(
+        db_session, Trade.__table__, rows, ["organization_id", "transaction_id"]
+    )
     assert n_new == 15
