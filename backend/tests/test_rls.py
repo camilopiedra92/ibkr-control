@@ -2,7 +2,7 @@
 
 These tests connect as the non-superuser, non-bypass ``app_rls`` login role (via
 ``rls_session_factory``), so the FORCE'd row-level security policies created by
-the baseline migration ``05943d9efcdb`` actually apply. They exercise:
+the baseline migration ``a9977ac077e5`` actually apply. They exercise:
 
   1. default-deny without context (no error, zero rows) + visibility once
      ``app.current_org`` is set;

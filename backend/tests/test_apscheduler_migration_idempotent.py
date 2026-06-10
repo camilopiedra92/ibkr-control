@@ -1,5 +1,6 @@
-"""Dirty-volume regression: the apscheduler_jobs migration (7fdaf6528762) must
-converge even when the table already exists.
+"""Dirty-volume regression: the apscheduler_jobs DDL (now in the tier1 baseline
+a9977ac077e5, frozen from the old 7fdaf6528762) must converge even when the
+table already exists.
 
 APScheduler's SQLAlchemyJobStore lazily create_all()s apscheduler_jobs at
 runtime. The pre-split app chained `alembic upgrade head` into the uvicorn CMD
