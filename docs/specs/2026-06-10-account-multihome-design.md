@@ -4,7 +4,7 @@
 **Branch destino:** `saas/account-multihome` (desde `main`, post-merge PR #9 `2d6206a`)
 **Depende de:** SP1 completo (tenancy + RLS + runtime wiring + db-hardening) — todo en `main`.
 **Supersede:** la decisión "cuenta broker single-org por diseño" (`accounts.ibkr_account_id` UNIQUE global) y **H2** del spec `2026-06-03-sp1-hardening-close-gaps-design.md` (`AccountClaimedError` / 409 genérico).
-**Estado:** implementado (PR #N, CI verde — pending merge).
+**Estado:** implementado (PR #10, CI verde — pending merge).
 
 ## 1. Problema y decisión de producto
 
