@@ -18,6 +18,16 @@ class Settings(BaseSettings):
     # Rate limiting
     ingest_trigger_cooldown_seconds: int = 300  # 5 minutes
 
+    # DB connection pool (D2 sp1-db-hardening). Presupuesto total de
+    # conexiones por réplica = app (pool_size + max_overflow) + engines
+    # efímeros de crons (lazy, se disponen al final de cada run) + jobstore
+    # sync de APScheduler (psycopg, pool default chico). Tunables por env en
+    # Coolify sin redeploy. pool_pre_ping NO es configurable: siempre True
+    # (no hay caso legítimo para apagarlo).
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
+    db_pool_recycle: int = 1800
+
     @field_validator("backend_cors_origins")
     @classmethod
     def _no_cors_wildcard(cls, v: str) -> str:
