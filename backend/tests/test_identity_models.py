@@ -112,22 +112,6 @@ async def test_participation_is_party_anchored(db_session):
 
 
 @pytest.mark.asyncio
-async def test_flex_credentials_are_org_scoped(db_session):
-    from ibkr_control.db.models.flex_credentials import FlexCredentials
-    from ibkr_control.db.models.organizations import Organization
-
-    org = Organization(type="personal", name="H")
-    db_session.add(org)
-    await db_session.flush()
-    c = FlexCredentials(organization_id=org.id, token_encrypted=b"x", ytd_query_id="999")
-    db_session.add(c)
-    await db_session.flush()
-    got = await db_session.scalar(select(FlexCredentials).where(FlexCredentials.id == c.id))
-    assert got.organization_id == org.id
-    assert not hasattr(got, "user_id")
-
-
-@pytest.mark.asyncio
 async def test_all_tenant_tables_have_organization_id(db_session):
     from ibkr_control.db.base import Base
     from ibkr_control.db.rls import ORG_SCOPED_TABLES

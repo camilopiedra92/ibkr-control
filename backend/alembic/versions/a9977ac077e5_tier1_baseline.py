@@ -18,8 +18,7 @@ plane, sin RLS), ``connections`` + ``connection_ibkr_flex`` (org-scoped, RLS,
 patrón Plaid Item con subtipo enforced en SQL), la columna de linaje
 ``connection_id`` en ``flex_imports`` + ``ingest_log``, el seed de la
 institución ``ibkr``, y las 2 tablas nuevas sumadas al snapshot RLS
-``_ORG_SCOPED_TABLES``. ``flex_credentials`` SIGUE presente (un task posterior
-de W1 la migra/dropea). La sección autogenerada se regeneró canónicamente
+``_ORG_SCOPED_TABLES``. La sección autogenerada se regeneró canónicamente
 (container, DB virgen) y se trasplantó entre los marcadores.
 
 **Amendment #2 (W1 Task 4):** el cuerpo de ``system_credentialed_org_ids()`` se
@@ -27,6 +26,12 @@ repunta de ``flex_credentials`` a ``connections`` (``WHERE provider_type =
 'ibkr_flex' AND status <> 'disabled'``) — el cron Flex ahora itera connections
 activas, no las credenciales legacy. Frozen idéntico a
 ``db/rls.py::system_enum_function_sql()``.
+
+**Amendment #3 (W1 Task 7):** ``flex_credentials`` (tabla + modelo + entrada en
+el snapshot RLS) se eliminó por completo — todos los consumidores ya leen las
+tablas ``connections`` (Tasks 4-6). El baseline ya no la crea: el delta fue una
+sustracción a mano (los bloques de create_table/index/drop eran autocontenidos)
+validada por el drift test (Base.metadata == schema migrado).
 
 El DDL de ``upgrade()`` hasta el marcador ``end Alembic commands`` es
 autogenerado canónicamente (container, DB virgen, ``alembic revision
@@ -65,16 +70,16 @@ depends_on: Union[str, Sequence[str], None] = None
 # ---------------------------------------------------------------------------
 # Hand-written constants frozen inline (T1-D14: no live builder imports).
 # Snapshot of db/rls.py::ORG_SCOPED_TABLES + APP_ROLE at the time of this
-# baseline. INCLUYE flex_credentials todavía (un task posterior de W1 lo migra a
-# las tablas connections). Si la lista viva diverge, el drift test NO lo atrapa
-# (las policies no están en Base.metadata) — test_rls.py es la red de comportamiento.
+# baseline. flex_credentials fue eliminada (amendment #3, W1 Task 7) — el snapshot
+# ya solo cubre las tablas connections. Si la lista viva diverge, el drift test NO
+# lo atrapa (las policies no están en Base.metadata) — test_rls.py es la red de
+# comportamiento; test_tier1_baseline el lockstep guard.
 # ---------------------------------------------------------------------------
 _APP_ROLE = "app_rls"
 _ORG_SCOPED_TABLES = [
     "accounts",
     "parties",
     "participations",
-    "flex_credentials",
     "connections",
     "connection_ibkr_flex",
     "counterparties",
@@ -315,33 +320,6 @@ def upgrade() -> None:
     op.create_index(
         op.f("ix_counterparties_organization_id"),
         "counterparties",
-        ["organization_id"],
-        unique=False,
-    )
-    op.create_table(
-        "flex_credentials",
-        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
-        sa.Column("organization_id", sa.BigInteger(), nullable=False),
-        sa.Column("token_encrypted", sa.LargeBinary(), nullable=False),
-        sa.Column("ytd_query_id", sa.String(), nullable=False),
-        sa.Column(
-            "last_rotated_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.text("NOW()"),
-            nullable=False,
-        ),
-        sa.ForeignKeyConstraint(
-            ["organization_id"],
-            ["organizations.id"],
-            name=op.f("fk_flex_credentials_organization_id_organizations"),
-            ondelete="CASCADE",
-        ),
-        sa.PrimaryKeyConstraint("id", name=op.f("pk_flex_credentials")),
-        comment="Flex token del org (no del user). Org-scoped, RLS. >1 login IBKR por org permitido.",
-    )
-    op.create_index(
-        op.f("ix_flex_credentials_organization_id"),
-        "flex_credentials",
         ["organization_id"],
         unique=False,
     )
@@ -1424,8 +1402,6 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_parties_organization_id"), table_name="parties")
     op.drop_table("parties")
     op.drop_table("memberships")
-    op.drop_index(op.f("ix_flex_credentials_organization_id"), table_name="flex_credentials")
-    op.drop_table("flex_credentials")
     op.drop_index(op.f("ix_counterparties_organization_id"), table_name="counterparties")
     op.drop_table("counterparties")
     op.drop_index(op.f("ix_connections_organization_id"), table_name="connections")

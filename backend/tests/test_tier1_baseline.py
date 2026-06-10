@@ -10,9 +10,9 @@ disposable). These tests pin the invariants the squash must preserve:
     so the drift test (test_migrations.py) ignores it; THIS assert is its only
     net (the table is the APScheduler 3.x SQLAlchemyJobStore shape, pre-created
     by the migration because app_rls has no CREATE);
-  * ``system_credentialed_org_ids()`` is SECURITY DEFINER and still reads
-    ``flex_credentials`` (a later W1 task points it at the new connections
-    tables — today it must read flex_credentials).
+  * ``system_credentialed_org_ids()`` is SECURITY DEFINER and enumerates the
+    ``connections`` tables (repointed off the legacy flex_credentials in W1
+    Task 4; the legacy table itself was dropped in W1 Task 7).
 
 Behavioral RLS coverage lives in test_rls.py; structural drift in
 test_migrations.py. These three only guard the squash mechanics.

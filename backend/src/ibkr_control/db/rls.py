@@ -91,7 +91,6 @@ ORG_SCOPED_TABLES = [
     "accounts",
     "parties",
     "participations",
-    "flex_credentials",
     "connections",
     "connection_ibkr_flex",
     "counterparties",
