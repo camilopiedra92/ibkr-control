@@ -8,7 +8,7 @@ Enforcement of the grant (who may switch into whose org) is SP2.
 
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, CheckConstraint, Date, DateTime, ForeignKey, String, text
+from sqlalchemy import BigInteger, CheckConstraint, Date, DateTime, ForeignKey, Index, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ibkr_control.db.base import Base
@@ -23,6 +23,13 @@ class AccessGrant(Base):
         ),
         CheckConstraint("role IN ('read_only')", name="role"),
         CheckConstraint("valid_to IS NULL OR valid_to > valid_from", name="valid_range"),
+        # D1 sp1-db-hardening: la policy RLS grant_visibility evalúa
+        # grantor/grantee en CADA query a esta tabla, y SP2 la pone en el hot
+        # path de autorización.
+        Index(None, "grantor_party_id"),
+        Index(None, "grantee_organization_id"),
+        Index(None, "grantee_user_id"),
+        Index(None, "organization_id"),
         {"comment": "Grant cross-org party-scoped. RLS especial (grantor-org OR grantee)."},
     )
 
