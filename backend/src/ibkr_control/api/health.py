@@ -25,6 +25,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ibkr_control.api._context import org_context
+from ibkr_control.api._schemas import ConnectionStatus
 from ibkr_control.db.models.connections import Connection
 from ibkr_control.db.models.ingest_log import IngestLog
 from ibkr_control.db.models.trm import TrmImport
@@ -45,7 +46,9 @@ class IngestSourceHealth(BaseModel):
 class ConnectionHealth(BaseModel):
     id: int
     display_name: str | None
-    status: str
+    # ConnectionStatus Literal (no str): orval genera un union de strings en el
+    # cliente TS, habilitando switch exhaustivo sobre status en el frontend.
+    status: ConnectionStatus
     status_reason: str | None
     last_sync_at: datetime | None
 

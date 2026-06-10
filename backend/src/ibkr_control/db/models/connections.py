@@ -30,6 +30,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from ibkr_control.db.base import Base
 
 PROVIDER_IBKR_FLEX = "ibkr_flex"
+# DB-side source of truth (CHECK abajo). El Literal API-side
+# (api/_schemas.py::ConnectionStatus) debe mantenerse en lockstep.
 CONNECTION_STATUSES = ("active", "degraded", "reauth_required", "disabled")
 
 
