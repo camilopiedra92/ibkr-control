@@ -2384,10 +2384,11 @@ export function useUploadXmlApiImportsUploadPost<TData = Awaited<ReturnType<type
 /**
  * Trigger manual del ingest. Rate-limited via UPDATE atomico condicional.
  *
- * El UPDATE solo afecta una fila si el cooldown ya pasó; rowcount=0 indica
- * rate-limited y devolvemos 429 con el tiempo restante. Esto elimina el
- * race condition TOCTOU del patron check-then-set y persiste el estado en
- * DB (sobrevive container restart, multi-replica safe).
+ * El throttle es PER-ORG (D-CONV-3): el ingest es la unidad de operación del
+ * tenant, no del usuario. El UPDATE solo afecta una fila si el cooldown ya
+ * pasó; rowcount=0 indica rate-limited y devolvemos 429 con el tiempo
+ * restante. Esto elimina el race condition TOCTOU del patron check-then-set y
+ * persiste el estado en DB (sobrevive container restart, multi-replica safe).
  * @summary Trigger Manual Refresh
  */
 export const triggerManualRefreshApiIngestTriggerPost = (
