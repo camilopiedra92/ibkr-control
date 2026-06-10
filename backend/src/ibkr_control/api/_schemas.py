@@ -5,10 +5,11 @@ from decimal import Decimal
 from pydantic import BaseModel, Field
 
 
-# -- Credentials (legacy, solo FlexCredentialsValidate sobrevive hasta Task 6) -
-class FlexCredentialsValidate(BaseModel):
+# -- Setup connection payload (W1, wizard step1 opera sobre connections) -----
+class SetupConnectionPayload(BaseModel):
     token: str = Field(min_length=10, max_length=512)
     query_id: str = Field(min_length=1, max_length=64)
+    display_name: str | None = Field(default=None, max_length=120)
 
 
 # -- Connections (W1, reemplaza credentials) --------------------------------

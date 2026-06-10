@@ -28,8 +28,8 @@ from sqlalchemy.orm import attributes
 
 from ibkr_control.api._schemas import (
     DetectedAccount,
-    FlexCredentialsValidate,
     IngestCounters,
+    SetupConnectionPayload,
     Step2DetectFromXmlResponse,
     Step2DetectResponse,
     Step2SaveRequest,
@@ -46,12 +46,14 @@ from ibkr_control.auth.backend import current_active_user
 from ibkr_control.auth.models import User
 from ibkr_control.config import get_settings
 from ibkr_control.db.models.accounts import Account
-from ibkr_control.db.models.flex_credentials import FlexCredentials
+from ibkr_control.db.models.connections import Connection, ConnectionIbkrFlex
 from ibkr_control.db.models.flex_raw import FlexImport, FlexImportAccount
+from ibkr_control.db.models.institutions import Institution
 from ibkr_control.db.models.organizations import Organization
 from ibkr_control.db.models.parties import Party
 from ibkr_control.db.models.participations import Participation
 from ibkr_control.db.session import get_async_session, get_engine
+from ibkr_control.ingest import connection_state
 from ibkr_control.ingest.flex import client as flex_client_mod
 from ibkr_control.ingest.flex import crypto as flex_crypto_mod
 from ibkr_control.ingest.flex import parser as flex_parser_mod
@@ -88,6 +90,22 @@ async def _founding_party_id(session: AsyncSession, org_id: int, user_id: int) -
     if party_id is None:
         raise HTTPException(status_code=500, detail="NO_FOUNDING_PARTY")
     return party_id
+
+
+async def _ibkr_flex_connections(session: AsyncSession) -> list[Connection]:
+    """The org's ibkr_flex connections, ordered by id (RLS scopes by org).
+
+    Wizard treats the FIRST (lowest id) as the canonical setup connection
+    (step1 rotates it). detect iterates all that are not disabled."""
+    return list(
+        (
+            await session.scalars(
+                select(Connection)
+                .where(Connection.provider_type == "ibkr_flex")
+                .order_by(Connection.id)
+            )
+        ).all()
+    )
 
 
 def _to_detected_account(account: ParsedAccount) -> DetectedAccount:
@@ -214,7 +232,7 @@ async def get_state(
 ) -> WizardStateResponse:
     has_creds = (
         await session.scalar(
-            select(func.count(FlexCredentials.id)).where(FlexCredentials.organization_id == org_id)
+            select(func.count(Connection.id)).where(Connection.provider_type == "ibkr_flex")
         )
     ) > 0
     has_parts = (
@@ -254,26 +272,53 @@ async def get_state(
 
 @router.post("/step1/save")
 async def step1_save(
-    payload: FlexCredentialsValidate,
+    payload: SetupConnectionPayload,
     org_id: int = Depends(org_context),
     session: AsyncSession = Depends(get_async_session),
 ) -> dict:
-    """Save creds (encrypt token). Does NOT call IBKR per spec D5."""
-    creds = await session.scalar(
-        select(FlexCredentials).where(FlexCredentials.organization_id == org_id)
-    )
+    """Save the org's ibkr_flex connection (encrypt token). Does NOT call IBKR
+    per spec D5 — the wizard validates the token later in step2/detect.
+
+    No connection yet → create Connection (status='active') + ConnectionIbkrFlex
+    detail. Else → update the FIRST connection's detail (token/query_id/
+    last_rotated_at) and run mark_rotated (clears reauth_required back to active).
+    Idempotent: a re-save updates, never duplicates.
+    """
     encrypted = flex_crypto_mod.encrypt_token(payload.token)
-    if creds is None:
-        creds = FlexCredentials(
+    conns = await _ibkr_flex_connections(session)
+    if not conns:
+        inst_id = await session.scalar(select(Institution.id).where(Institution.code == "ibkr"))
+        if inst_id is None:
+            # Seed roto (la migracion baseline inserta 'ibkr') -- fail-loud.
+            raise HTTPException(status_code=500, detail="Institution 'ibkr' seed missing")
+        conn = Connection(
             organization_id=org_id,
-            token_encrypted=encrypted,
-            ytd_query_id=payload.query_id,
+            institution_id=inst_id,
+            provider_type="ibkr_flex",
+            display_name=payload.display_name,
         )
-        session.add(creds)
+        session.add(conn)
+        await session.flush()
+        session.add(
+            ConnectionIbkrFlex(
+                connection_id=conn.id,
+                organization_id=org_id,
+                token_encrypted=encrypted,
+                query_id=payload.query_id,
+            )
+        )
     else:
-        creds.token_encrypted = encrypted
-        creds.ytd_query_id = payload.query_id
-        creds.last_rotated_at = datetime.now(timezone.utc)
+        conn = conns[0]
+        detail = await session.get(ConnectionIbkrFlex, conn.id)
+        if detail is None:
+            # Invariante de subtipo roto -- fail-loud, no degradar en silencio.
+            raise HTTPException(status_code=500, detail="Connection detail missing")
+        detail.token_encrypted = encrypted
+        detail.query_id = payload.query_id
+        detail.last_rotated_at = datetime.now(timezone.utc)
+        if payload.display_name is not None:
+            conn.display_name = payload.display_name
+        connection_state.mark_rotated(conn)
     await session.commit()
     return {"ok": True}
 
@@ -284,84 +329,132 @@ async def step1_save(
 _DETECT_RETRY_DELAYS = [5, 15, 30]  # seconds; total max wait ~50s plus the calls themselves
 
 
+async def _fetch_statement_with_retry(client, query_id: str) -> bytes:
+    """SendRequest + GetStatement for one connection, retrying 1001 BUSY per
+    spec D10 (backoff [5,15,30]s). Raises the typed flex_client exception so the
+    detect loop can classify it (auth-class vs transient). On retry exhaustion
+    re-raises FlexBusyError (transient)."""
+    # _DETECT_RETRY_DELAYS produces 4 attempts: try, sleep 5, try, sleep 15,
+    # try, sleep 30, try. After the 4th attempt the BUSY propagates.
+    for delay in _DETECT_RETRY_DELAYS + [None]:
+        try:
+            ref = await client.send_request(query_id=query_id)
+            return await client.get_statement(reference_code=ref)
+        except flex_client_mod.FlexBusyError:
+            if delay is None:
+                raise
+            await asyncio.sleep(delay)
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
 @router.post("/step2/detect", response_model=Step2DetectResponse)
 async def step2_detect(
     org_id: int = Depends(org_context),
     session: AsyncSession = Depends(get_async_session),
 ) -> Step2DetectResponse:
-    """Fetch + parse + persist YTD. Returns detected accounts (sin F).
+    """Fetch + parse + persist YTD across ALL active connections (W1).
 
-    Retry policy per spec D10: server-side retry on 1001 with backoff [5, 15, 30]s.
+    Iterates the org's non-disabled ibkr_flex connections, accumulating detected
+    accounts deduped by ibkr_account_id. Per-connection failures are isolated:
+    an auth-class error (FlexAuthError/FlexQueryNotFoundError) transitions the
+    connection to reauth_required (connection_state.mark_auth_failed) and the
+    loop continues. Partial success returns the accumulated accounts. If every
+    connection failed: any auth-class failure → 401; else (all busy/transient)
+    → 503 IBKR_BUSY (same shape as before).
+
+    Retry policy per spec D10: server-side retry on 1001 with backoff [5,15,30]s
+    per connection.
     """
-    creds = await session.scalar(
-        select(FlexCredentials).where(FlexCredentials.organization_id == org_id)
-    )
-    if creds is None:
+    conns = await _ibkr_flex_connections(session)
+    conns = [c for c in conns if c.status != "disabled"]
+    if not conns:
         raise HTTPException(status_code=400, detail="MISSING_CREDENTIALS")
 
-    token = flex_crypto_mod.decrypt_token(creds.token_encrypted)
-    query_id = creds.ytd_query_id
+    detected_by_id: dict[str, DetectedAccount] = {}
+    last_import_id: int | None = None
+    last_counters: dict | None = None
+    auth_failure = False
+    any_success = False
 
-    client = flex_client_mod.FlexClient(token=token)
-
-    xml_bytes: bytes | None = None
-    # _DETECT_RETRY_DELAYS produces 4 attempts: try, sleep 5, try, sleep 15,
-    # try, sleep 30, try. After the 4th attempt we surface IBKR_BUSY.
-    for attempt_idx, delay in enumerate(_DETECT_RETRY_DELAYS + [None]):
+    for conn in conns:
+        detail = await session.get(ConnectionIbkrFlex, conn.id)
+        if detail is None:
+            # Invariante de subtipo roto -- fail-loud, no degradar en silencio.
+            raise HTTPException(status_code=500, detail="Connection detail missing")
+        token = flex_crypto_mod.decrypt_token(detail.token_encrypted)
+        client = flex_client_mod.FlexClient(token=token)
         try:
-            ref = await client.send_request(query_id=query_id)
-            xml_bytes = await client.get_statement(reference_code=ref)
-            break
+            xml_bytes = await _fetch_statement_with_retry(client, detail.query_id)
+        except (
+            flex_client_mod.FlexAuthError,
+            flex_client_mod.FlexQueryNotFoundError,
+        ) as e:
+            # CR-3: auth-class — user action required. Mark + commit + continue.
+            connection_state.mark_auth_failed(conn, reason=str(e), now=datetime.now(timezone.utc))
+            await session.commit()
+            auth_failure = True
+            continue
         except flex_client_mod.FlexBusyError:
-            if delay is None:
-                raise HTTPException(
-                    status_code=503,
-                    detail={"code": "IBKR_BUSY", "attempts": attempt_idx + 1},
-                )
-            await asyncio.sleep(delay)
-        except flex_client_mod.FlexAuthError as e:
-            raise HTTPException(status_code=401, detail="INVALID_TOKEN") from e
-        except flex_client_mod.FlexQueryNotFoundError as e:
-            raise HTTPException(status_code=400, detail="QUERY_NOT_FOUND") from e
-        except flex_client_mod.FlexClientError as e:
+            # Transient (1001 retries exhausted). Mark degraded + continue.
+            connection_state.mark_sync_failed(
+                conn, reason="IBKR_BUSY", now=datetime.now(timezone.utc)
+            )
+            await session.commit()
+            continue
+        except (
+            flex_client_mod.FlexClientError,
+            flex_client_mod.FlexPollTimeoutError,
+        ) as e:
+            # Other client/transport errors (IBKR_ERROR, timeout). Transient:
+            # mark degraded + continue so one connection's blip doesn't fail the
+            # whole detect; if it's the only/last failing one the all-busy 503
+            # path surfaces it.
+            connection_state.mark_sync_failed(conn, reason=str(e), now=datetime.now(timezone.utc))
+            await session.commit()
+            continue
+
+        try:
+            parsed = flex_parser_mod.parse(xml_bytes)
+        except Exception as e:  # noqa: BLE001 — surface as 422 for diagnosis
             raise HTTPException(
-                status_code=502,
-                detail={
-                    "code": "IBKR_ERROR",
-                    "ibkr_code": getattr(e, "code", None),
-                    "message": str(e)[:500],
-                },
+                status_code=422,
+                detail={"code": "PARSE_ERROR", "message": str(e)[:500]},
             ) from e
-        except flex_client_mod.FlexPollTimeoutError as e:
-            raise HTTPException(status_code=504, detail="IBKR_TIMEOUT") from e
 
-    assert xml_bytes is not None
-    try:
-        parsed = flex_parser_mod.parse(xml_bytes)
-    except Exception as e:  # noqa: BLE001 — surface as 422 for diagnosis
+        # Persist via the orchestrator-grade persister: it builds FlexImport
+        # internally, dedups by xml_hash, and skips F-shadow accounts. Returns
+        # (flex_import_id, counters_dict) per spec A5 (Task 8 persister rewrite).
+        flex_import_id, counters = await flex_persister_mod.persist(
+            session,
+            parsed=parsed,
+            organization_id=org_id,
+            xml_bytes=xml_bytes,
+            source="web_service",
+            connection_id=conn.id,
+        )
+        connection_state.mark_sync_ok(conn, now=datetime.now(timezone.utc))
+        await session.commit()
+
+        any_success = True
+        last_import_id = flex_import_id
+        last_counters = counters
+        for da in _detected_from_parsed(parsed):
+            detected_by_id.setdefault(da.ibkr_account_id, da)
+
+    if not any_success:
+        if auth_failure:
+            raise HTTPException(status_code=401, detail="INVALID_TOKEN")
+        # All transient/busy.
         raise HTTPException(
-            status_code=422,
-            detail={"code": "PARSE_ERROR", "message": str(e)[:500]},
-        ) from e
+            status_code=503,
+            detail={"code": "IBKR_BUSY", "attempts": len(_DETECT_RETRY_DELAYS) + 1},
+        )
 
-    # Persist via the orchestrator-grade persister: it builds FlexImport
-    # internally, dedups by xml_hash, and skips F-shadow accounts. Returns
-    # (flex_import_id, counters_dict) per spec A5 (Task 8 persister rewrite).
-    flex_import_id, counters = await flex_persister_mod.persist(
-        session,
-        parsed=parsed,
-        organization_id=org_id,
-        xml_bytes=xml_bytes,
-        source="web_service",
-    )
-    await session.commit()
-
-    detected = _detected_from_parsed(parsed)
-
+    assert last_import_id is not None and last_counters is not None
     return Step2DetectResponse(
-        detected_accounts=detected,
-        flex_import_id=flex_import_id,
-        ingest_summary=_counters_to_ingest(counters),
+        detected_accounts=list(detected_by_id.values()),
+        flex_import_id=last_import_id,
+        ingest_summary=_counters_to_ingest(last_counters),
     )
 
 
