@@ -33,6 +33,26 @@ def _revision_files() -> list[Path]:
     return sorted(p for p in _VERSIONS_DIR.glob("*.py") if p.name != "__init__.py")
 
 
+def test_org_scoped_snapshot_matches_live_ssot():
+    """The baseline's frozen _ORG_SCOPED_TABLES snapshot stays in lockstep with the
+    live SSOT (db/rls.py::ORG_SCOPED_TABLES).
+
+    Fast unit guard (no container): the baseline freezes the org-scoped table list
+    inline (T1-D14: no live builder imports), so a future amendment could update
+    db/rls.py but forget the snapshot. The RLS policies aren't in Base.metadata, so
+    the drift test cannot catch this. Same ORDER too (the migration iterates the
+    snapshot to CREATE POLICY)."""
+    import importlib.util
+
+    import ibkr_control.db.rls as rls
+
+    baseline_path = _VERSIONS_DIR / "a9977ac077e5_tier1_baseline.py"
+    spec = importlib.util.spec_from_file_location("_tier1_baseline_snapshot", baseline_path)
+    baseline = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(baseline)
+    assert baseline._ORG_SCOPED_TABLES == list(rls.ORG_SCOPED_TABLES)
+
+
 def test_baseline_is_single_revision():
     """Exactly one revision file, and it is a true baseline (down_revision None)."""
     from alembic.script import ScriptDirectory
@@ -102,3 +122,65 @@ def test_system_function_exists_and_is_security_definer(fresh_postgres, monkeypa
     assert "FROM flex_credentials" in prosrc, (
         "today the function body must still read flex_credentials (repointed in a later W1 task)"
     )
+
+
+def test_institutions_seeded(fresh_postgres, monkeypatch):
+    """The baseline seeds the global institutions catalog with the ibkr row
+    (control-plane data, not user input — W1 T1-D3)."""
+    sync_url = _upgrade_head(fresh_postgres, monkeypatch)
+    engine = create_engine(sync_url)
+    with engine.connect() as conn:
+        rows = conn.execute(text("SELECT code, name FROM institutions ORDER BY code")).all()
+    engine.dispose()
+    assert rows == [("ibkr", "Interactive Brokers")]
+
+
+def test_connections_subtype_integrity(fresh_postgres, monkeypatch):
+    """Subtype integrity (T1-D2): a connection_ibkr_flex detail can only hang off a
+    connection whose provider_type is 'ibkr_flex', and the detail's own CHECK
+    rejects any other literal.
+
+    The composite FK (connection_id, provider_type) -> connections(id,
+    provider_type) plus the CHECK provider_type = 'ibkr_flex' make it impossible to
+    attach an ibkr_flex detail to a connection of another provider."""
+    sync_url = _upgrade_head(fresh_postgres, monkeypatch)
+    engine = create_engine(sync_url)
+    with engine.begin() as conn:
+        # Seed an org + institution to satisfy the connection's FKs.
+        org_id = conn.execute(
+            text("INSERT INTO organizations (type, name) VALUES ('personal', 'Org') RETURNING id")
+        ).scalar_one()
+        inst_id = conn.execute(text("SELECT id FROM institutions WHERE code = 'ibkr'")).scalar_one()
+        # A valid ibkr_flex connection.
+        conn_id = conn.execute(
+            text(
+                "INSERT INTO connections "
+                "(organization_id, institution_id, provider_type) "
+                "VALUES (:o, :i, 'ibkr_flex') RETURNING id"
+            ).bindparams(o=org_id, i=inst_id)
+        ).scalar_one()
+        # The matching detail inserts fine.
+        conn.execute(
+            text(
+                "INSERT INTO connection_ibkr_flex "
+                "(connection_id, provider_type, organization_id, token_encrypted, query_id) "
+                "VALUES (:c, 'ibkr_flex', :o, :tok, 'q123')"
+            ).bindparams(c=conn_id, o=org_id, tok=b"x")
+        )
+
+    # The CHECK rejects a detail with any other provider_type literal.
+    from sqlalchemy.exc import IntegrityError
+
+    with engine.begin() as conn:
+        org_id = conn.execute(text("SELECT id FROM organizations LIMIT 1")).scalar_one()
+        conn_id = conn.execute(text("SELECT id FROM connections LIMIT 1")).scalar_one()
+    with pytest.raises(IntegrityError, match="ck_connection_ibkr_flex_provider_type"):
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO connection_ibkr_flex "
+                    "(connection_id, provider_type, organization_id, token_encrypted, query_id) "
+                    "VALUES (:c, 'other_provider', :o, :tok, 'q')"
+                ).bindparams(c=conn_id, o=org_id, tok=b"x")
+            )
+    engine.dispose()

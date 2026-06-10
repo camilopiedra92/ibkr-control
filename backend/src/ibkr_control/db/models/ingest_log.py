@@ -29,11 +29,18 @@ class IngestLog(Base):
         ),
         Index("ix_ingest_log_org_started_at", "organization_id", text("started_at DESC")),
         Index(None, "organization_id"),
+        Index(None, "connection_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     organization_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    # W1: linaje import/run -> connection. NULL para manual_upload (no hay
+    # conexión) y para rows que sobreviven al borrado de su conexión (SET NULL —
+    # append-only ledger: el hecho no muere con la credencial).
+    connection_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("connections.id", ondelete="SET NULL"), nullable=True
     )
     job_kind: Mapped[str] = mapped_column(Text, nullable=False)
     started_at: Mapped[datetime] = mapped_column(
