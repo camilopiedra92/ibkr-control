@@ -336,6 +336,15 @@ async def run(
             for conn in conns:
                 detail = await session.get(ConnectionIbkrFlex, conn.id)
                 try:
+                    # Fail-loud legible si el invariante de subtipo se rompió
+                    # (Connection sin su detail 1:1). Dentro del try a propósito:
+                    # el broad except lo captura -> mark_sync_failed con una
+                    # razón clara en status_reason, sin matar el loop.
+                    if detail is None:
+                        raise RuntimeError(
+                            f"Connection {conn.id} has no connection_ibkr_flex detail row "
+                            "(subtype invariant broken)"
+                        )
                     results[conn.id] = await _run_one_connection(
                         session,
                         organization_id=organization_id,

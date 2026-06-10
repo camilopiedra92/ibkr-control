@@ -83,9 +83,11 @@ async def test_app_rls_cannot_bypass(rls_session_factory):
         assert await _account_count(s) == 0
 
 
-async def _seed_connection_row(owner_factory, org_id: int, query_id: str) -> None:
-    """Insert one active ibkr_flex Connection (+detail) for ``org_id`` as OWNER
-    under context.
+async def _seed_connection_row(
+    owner_factory, org_id: int, query_id: str, *, status: str = "active"
+) -> None:
+    """Insert one ibkr_flex Connection (+detail) for ``org_id`` as OWNER under
+    context.
 
     FORCE RLS applies to the owner too, so set ``app.current_org`` to the org id
     before inserting (the org-scoped WITH CHECK requires organization_id =
@@ -104,7 +106,7 @@ async def _seed_connection_row(owner_factory, org_id: int, query_id: str) -> Non
             organization_id=org_id,
             institution_id=inst_id,
             provider_type="ibkr_flex",
-            status="active",
+            status=status,
         )
         s.add(conn)
         await s.flush()
@@ -131,18 +133,23 @@ async def test_system_enum_function_returns_cross_tenant_org_ids(
     SECURITY DEFINER function, owned by the migration role (which bypasses RLS),
     sees all orgs.
 
-    This test seeds two orgs each with an active connection (as OWNER), then
-    connects as ``app_rls`` (no context) and asserts:
+    This test seeds two orgs each with an active connection, plus a third org
+    whose ONLY connection is disabled (as OWNER), then connects as ``app_rls``
+    (no context) and asserts:
       - the raw cross-tenant query returns 0 (locks in WHY the function is needed);
-      - the SECURITY DEFINER function returns BOTH org ids (the fix).
+      - the SECURITY DEFINER function returns BOTH active org ids (the fix);
+      - the disabled-only org is EXCLUDED (the ``status <> 'disabled'`` clause is
+        behavioral, not just string-pinned in test_tier1_baseline).
     """
     app_factory, seed = rls_session_factory
     owner_factory = ephemeral_session_factory
 
     org_a = await seed("Org A", "U10000001")
     org_b = await seed("Org B", "U20000002")
+    org_off = await seed("Org Disabled", "U30000003")
     await _seed_connection_row(owner_factory, org_a, "qa")
     await _seed_connection_row(owner_factory, org_b, "qb")
+    await _seed_connection_row(owner_factory, org_off, "qoff", status="disabled")
 
     async with app_factory() as s:
         # The OLD broken behavior: cross-tenant read as app_rls without context
@@ -159,6 +166,9 @@ async def test_system_enum_function_returns_cross_tenant_org_ids(
             (await s.execute(text("SELECT * FROM system_credentialed_org_ids()"))).scalars().all()
         )
         assert set(enumerated) == {org_a, org_b}
+        # Behavioral lock of the status <> 'disabled' clause: an org whose only
+        # connection is disabled must NOT be enumerated (the cron skips it).
+        assert org_off not in enumerated
 
 
 async def test_access_grants_visible_to_grantor_and_grantee(rls_session_factory):
