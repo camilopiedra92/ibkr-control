@@ -15,25 +15,34 @@ logger = logging.getLogger(__name__)
 
 
 async def _run_flex_for_all_orgs() -> None:
-    """Itera sobre cada org con flex_credentials y corre flex_job.run.
+    """Itera sobre cada org con una connection ibkr_flex activa y corre flex_job.run.
 
-    flex_credentials es per-org (no per-user) → el cron itera organizaciones.
+    Las connections son per-org (no per-user) → el cron itera organizaciones.
     El ingest es puramente org-scoped (D-CONV-3): no hay usuario disparador.
 
-    Enumeracion CROSS-TENANT (RESUELTO, H1): "que orgs tienen credenciales" es una
-    lectura de CONTROL PLANE. Bajo el rol sin-bypass `app_rls` (FORCE RLS) sin
-    `app.current_org`, un `SELECT DISTINCT organization_id FROM flex_credentials`
-    default-deny → 0 orgs → el cron no fetcheaba nada en silencio. Se cierra con la
-    funcion `system_credentialed_org_ids()` SECURITY DEFINER (least-privilege: una
-    sola capacidad cross-tenant acotada y auditada, owned por el rol de migracion
-    que bypassea RLS, EXECUTE solo para `app_rls`; ver db/rls.py). Ya NO hay no-op
-    silencioso. El trabajo per-org (`flex_job.run`) sigue 100% RLS-enforced: se
-    auto-setea `SET LOCAL app.current_org`. La cola durable + el rate-limit por org
-    siguen siendo sofisticacion de SP5/SP7 — esto solo arregla la enumeracion.
+    Enumeracion CROSS-TENANT (RESUELTO, H1): "que orgs tienen una connection
+    activa" es una lectura de CONTROL PLANE. Bajo el rol sin-bypass `app_rls`
+    (FORCE RLS) sin `app.current_org`, un `SELECT DISTINCT organization_id FROM
+    connections` default-deny → 0 orgs → el cron no fetcheaba nada en silencio. Se
+    cierra con la funcion `system_credentialed_org_ids()` SECURITY DEFINER
+    (least-privilege: una sola capacidad cross-tenant acotada y auditada, owned por
+    el rol de migracion que bypassea RLS, EXECUTE solo para `app_rls`; ver
+    db/rls.py). Ya NO hay no-op silencioso. El trabajo per-org (`flex_job.run`)
+    sigue 100% RLS-enforced: se auto-setea `SET LOCAL app.current_org`. La cola
+    durable + el rate-limit por org siguen siendo sofisticacion de SP5/SP7 — esto
+    solo arregla la enumeracion.
 
     Cada run crea su propio engine + SessionLocal y lo dispone al final.
     LockHeldError  -> skip org con warning (manual trigger ya corriendo).
-    FlexAuthError  -> log + continuar (credenciales invalidas para este org).
+
+    W1: `flex_job.run` ahora itera las connections del org y transiciona el estado
+    DE CADA conexion (connection_state) per-connection; solo re-lanza si TODAS
+    fallaron. Por eso los catches de FlexAuthError/httpx.HTTPError de abajo son
+    DEFENSA RESIDUAL (el estado ya se transiciono adentro del run; aqui solo
+    evitamos que una excepcion all-failed mate el loop o el scheduler) — se
+    conservan porque run() re-lanza cuando ninguna conexion del org tuvo exito.
+
+    FlexAuthError  -> log + continuar (todas las conexiones del org sin auth).
     httpx.HTTPError -> log + continuar (red / IBKR down).
     Exception (outer) -> log con traceback completo; no propaga para no matar
                          el scheduler. Se mantiene broad porque este es el

@@ -108,8 +108,9 @@ def test_apscheduler_jobs_exists_after_upgrade(fresh_postgres, monkeypatch):
 
 
 def test_system_function_exists_and_is_security_definer(fresh_postgres, monkeypatch):
-    """system_credentialed_org_ids() is SECURITY DEFINER and reads flex_credentials
-    (a later W1 task repoints it; today it must still read flex_credentials)."""
+    """system_credentialed_org_ids() is SECURITY DEFINER and enumerates orgs with
+    a non-disabled ibkr_flex connection (repointed from flex_credentials in W1
+    Task 4: the cron now iterates connections, not legacy credentials)."""
     sync_url = _upgrade_head(fresh_postgres, monkeypatch)
     engine = create_engine(sync_url)
     with engine.connect() as conn:
@@ -121,8 +122,12 @@ def test_system_function_exists_and_is_security_definer(fresh_postgres, monkeypa
     engine.dispose()
     prosecdef, prosrc = row
     assert prosecdef is True, "system_credentialed_org_ids() must be SECURITY DEFINER"
-    assert "FROM flex_credentials" in prosrc, (
-        "today the function body must still read flex_credentials (repointed in a later W1 task)"
+    assert "FROM connections" in prosrc, "the function body must enumerate connections"
+    assert "status <> 'disabled'" in prosrc, (
+        "the function must skip disabled connections (only credentialed/active orgs)"
+    )
+    assert "flex_credentials" not in prosrc, (
+        "the function must no longer reference legacy flex_credentials"
     )
 
 

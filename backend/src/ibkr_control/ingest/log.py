@@ -17,6 +17,7 @@ async def ingest_log_entry(
     job_kind: str,
     organization_id: int,
     trigger: str,
+    connection_id: int | None = None,
 ):
     """Crea un row en ingest_log con status='running' y lo cierra al salir.
 
@@ -29,6 +30,8 @@ async def ingest_log_entry(
         organization_id: tenant dueño del run (NOT NULL + RLS en ingest_log).
                  El org es la unidad de tenancy/operación — sin user_id (D-CONV-3).
         trigger: 'cron' | 'manual' | 'wizard'
+        connection_id: conexión que produjo el run (flex); None para
+                 manual_upload/TRM (no hay conexión asociada).
     """
     from ibkr_control.db.models.ingest_log import IngestLog
 
@@ -37,6 +40,7 @@ async def ingest_log_entry(
         organization_id=organization_id,
         trigger=trigger,
         status="running",
+        connection_id=connection_id,
     )
     session.add(row)
     await session.flush()

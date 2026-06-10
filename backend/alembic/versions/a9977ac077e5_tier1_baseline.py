@@ -22,6 +22,12 @@ institución ``ibkr``, y las 2 tablas nuevas sumadas al snapshot RLS
 de W1 la migra/dropea). La sección autogenerada se regeneró canónicamente
 (container, DB virgen) y se trasplantó entre los marcadores.
 
+**Amendment #2 (W1 Task 4):** el cuerpo de ``system_credentialed_org_ids()`` se
+repunta de ``flex_credentials`` a ``connections`` (``WHERE provider_type =
+'ibkr_flex' AND status <> 'disabled'``) — el cron Flex ahora itera connections
+activas, no las credenciales legacy. Frozen idéntico a
+``db/rls.py::system_enum_function_sql()``.
+
 El DDL de ``upgrade()`` hasta el marcador ``end Alembic commands`` es
 autogenerado canónicamente (container, DB virgen, ``alembic revision
 --autogenerate``). Las SECCIONES HAND-WRITTEN que autogenerate NO captura
@@ -1311,8 +1317,9 @@ def upgrade() -> None:
     )
 
     # --- (5) system_credentialed_org_ids() SECURITY DEFINER function --------
-    # Frozen from db/rls.py::system_enum_function_sql() — body reads
-    # flex_credentials TODAY (a later W1 task repoints it at connections).
+    # Frozen from db/rls.py::system_enum_function_sql() (amendment #2, W1 Task 4):
+    # the body enumerates orgs with a non-disabled ibkr_flex connection (repointed
+    # from the legacy flex_credentials — the cron now iterates connections).
     # SECURITY DEFINER (owner is the migration superuser, RLS-exempt) so the
     # Flex cron can enumerate credentialed orgs (a cross-tenant control-plane
     # read that would default-deny to 0 rows as app_rls). SET search_path pins
@@ -1322,7 +1329,8 @@ def upgrade() -> None:
         "CREATE OR REPLACE FUNCTION system_credentialed_org_ids() "
         "RETURNS SETOF bigint LANGUAGE sql STABLE SECURITY DEFINER "
         "SET search_path = pg_catalog, public AS $$ "
-        "SELECT DISTINCT organization_id FROM flex_credentials $$"
+        "SELECT DISTINCT organization_id FROM connections "
+        "WHERE provider_type = 'ibkr_flex' AND status <> 'disabled' $$"
     )
     op.execute("REVOKE EXECUTE ON FUNCTION system_credentialed_org_ids() FROM PUBLIC")
     op.execute(f"GRANT EXECUTE ON FUNCTION system_credentialed_org_ids() TO {_APP_ROLE}")

@@ -69,6 +69,7 @@ async def persist(
     organization_id: int,
     xml_bytes: bytes,
     source: str,  # 'web_service' | 'manual_upload'
+    connection_id: int | None = None,
 ) -> tuple[int, dict]:
     """Idempotent persist. Devuelve `(flex_import_id, counters_dict)`.
 
@@ -147,6 +148,7 @@ async def persist(
 
     fi = FlexImport(
         organization_id=organization_id,
+        connection_id=connection_id,  # W1: linaje import -> connection (None=manual_upload)
         anyo=parsed.anyo,
         xml_hash=h,
         xml_size_bytes=len(xml_bytes),
