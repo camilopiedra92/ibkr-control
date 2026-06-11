@@ -37,6 +37,18 @@ def swap_dsn_credentials(async_dsn: str, user: str, password: str) -> str:
     return f"{scheme}://{user}:{password}@{hostpart}"
 
 
+def swap_dsn_database(dsn: str, dbname: str) -> str:
+    """Return ``dsn`` with its database (last path segment) replaced by ``dbname``.
+
+    Sibling of ``swap_dsn_credentials``: used to point a maintenance/clone engine
+    at a specific database on the same container (e.g. ``postgres`` for DDL,
+    ``template_migrated`` for the template, ``test_<n>`` for a per-test clone).
+    Assumes no path segments after the database name (true for our DSNs).
+    """
+    head, _old_db = dsn.rsplit("/", 1)
+    return f"{head}/{dbname}"
+
+
 def build_alembic_config() -> Config:
     """Build an Alembic ``Config`` pointing at this backend's alembic dir.
 
