@@ -13,6 +13,7 @@ import { XmlUploadSection } from "@/components/settings/XmlUploadSection";
 import { IngestLogTable } from "@/components/settings/IngestLogTable";
 import { ManualRefreshButton } from "@/components/settings/ManualRefreshButton";
 import { IngestHealthTable } from "@/components/settings/IngestHealthTable";
+import { RestatementsPanel } from "@/components/settings/RestatementsPanel";
 import {
   getIngestHealthApiHealthIngestGet,
   listLogsApiIngestLogsGet,
@@ -140,6 +141,8 @@ export default function SettingsPage() {
         ) : (
           <p className="text-sm text-muted-foreground">Cargando…</p>
         )}
+        {/* W3: restatement signal — hidden when there are none */}
+        <RestatementsPanel />
       </section>
     </div>
   );

@@ -47,10 +47,16 @@ class FlexRunSummary(NamedTuple):
       transitorio). Permite a _run_manual emitir un SSE 'partial' con el conteo
       sin perder cuales fallaron. El contrato de raise NO cambia: run() solo
       re-lanza si results quedo vacio Y failures no.
+    - n_restatements: total de restatements detectados (value_update + sibling_row)
+      a traves de TODAS las conexiones OK de este run (W3). Se surface en el SSE
+      flex_ytd ok/partial; un total simple basta para el contador de la UI (el
+      detalle por fila vive en restatement_log, via GET /api/ingest/restatements).
+      Default 0 — campo aditivo, los callers que leen .results/.failures no cambian.
     """
 
     results: dict[int, int | None]
     failures: dict[int, str]
+    n_restatements: int = 0
 
 
 async def _insert_poison_row(
@@ -217,9 +223,10 @@ async def _run_one_connection(
     connection_id: int,
     token_encrypted: bytes,
     query_id: str,
-) -> int | None:
-    """Fetchea + ingiere UNA connection. Devuelve flex_import_id, o None si el
-    hash ya era conocido (dedup, sin cambios).
+) -> tuple[int | None, int]:
+    """Fetchea + ingiere UNA connection. Devuelve (flex_import_id, n_restatements);
+    flex_import_id es None si el hash ya era conocido (dedup, sin cambios) y en ese
+    caso n_restatements es 0.
 
     Envuelto en su PROPIO ingest_log_entry para que un fallo marque SU row
     'failed' (y lo commitee) sin afectar a las demás conexiones del loop. Usa el
@@ -245,7 +252,7 @@ async def _run_one_connection(
             logger.info("flex: duplicate hash %s..., skipped (items_processed=0)", h[:12])
             log_row = await session.scalar(select(IngestLog).where(IngestLog.id == log_id))
             log_row.items_processed = 0
-            return None
+            return None, 0
         if status == "poison":
             logger.warning(
                 "flex: previously poisoned hash %s..., skipped. "
@@ -256,7 +263,7 @@ async def _run_one_connection(
             )
             log_row = await session.scalar(select(IngestLog).where(IngestLog.id == log_id))
             log_row.items_processed = 0
-            return None
+            return None, 0
         # status == "absent": proceed with normal flow
 
         # Usar SAVEPOINT igual que en ingest_xml para aislar fallas del persister
@@ -302,7 +309,7 @@ async def _run_one_connection(
                 + _counters["n_observed_cash_tx"]
                 + _counters["n_observed_transfers"]
             )
-        return flex_import_id
+        return flex_import_id, _counters.get("n_restatements", 0)
 
 
 async def run(
@@ -333,6 +340,7 @@ async def run(
     """
     results: dict[int, int | None] = {}
     failures: dict[int, str] = {}
+    n_restatements_total = 0
     last_exc: Exception | None = None
 
     async with session_factory() as session:
@@ -366,7 +374,7 @@ async def run(
                             f"Connection {conn.id} has no connection_ibkr_flex detail row "
                             "(subtype invariant broken)"
                         )
-                    results[conn.id] = await _run_one_connection(
+                    flex_import_id, n_restatements = await _run_one_connection(
                         session,
                         organization_id=organization_id,
                         trigger=trigger,
@@ -374,6 +382,8 @@ async def run(
                         token_encrypted=detail.token_encrypted,
                         query_id=detail.query_id,
                     )
+                    results[conn.id] = flex_import_id
+                    n_restatements_total += n_restatements
                 except (
                     flex_client_mod.FlexAuthError,
                     flex_client_mod.FlexQueryNotFoundError,
@@ -403,4 +413,4 @@ async def run(
 
     if not results and last_exc is not None:
         raise last_exc
-    return FlexRunSummary(results=results, failures=failures)
+    return FlexRunSummary(results=results, failures=failures, n_restatements=n_restatements_total)

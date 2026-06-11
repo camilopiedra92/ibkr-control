@@ -26,6 +26,7 @@ from ibkr_control.db.models.flex_raw import (  # noqa: F401
     OpenDividendAccrual,
 )
 from ibkr_control.db.models.ingest_log import IngestLog  # noqa: F401
+from ibkr_control.db.models.restatements import RestatementLog  # noqa: F401
 from ibkr_control.db.models.organizations import Organization  # noqa: F401
 from ibkr_control.db.models.memberships import Membership  # noqa: F401
 from ibkr_control.db.models.parties import Party  # noqa: F401
@@ -55,6 +56,7 @@ __all__ = [
     "ChangeInDividendAccrual",
     "OpenDividendAccrual",
     "IngestLog",
+    "RestatementLog",
     "Organization",
     "Membership",
     "Party",

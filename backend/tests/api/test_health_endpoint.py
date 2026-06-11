@@ -324,3 +324,108 @@ async def test_health_endpoint_connections_scoped_per_org(
     conns_b = resp_b.json()["connections"]
     assert len(conns_b) == 1
     assert conns_b[0]["display_name"] == "Org B conn"
+
+
+async def _seed_restatement(app_owner_engine, *, org_name: str, **values) -> int:
+    """Seed a restatement_log row (owner-side, RLS) for the org named ``org_name``."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    session_maker = async_sessionmaker(
+        app_owner_engine, expire_on_commit=False, class_=AsyncSession
+    )
+    async with session_maker() as session:
+        org_id = await session.scalar(
+            text("SELECT id FROM organizations WHERE name = :n").bindparams(n=org_name)
+        )
+        await session.execute(
+            text("SELECT set_config('app.current_org', :o, true)").bindparams(o=str(org_id))
+        )
+        cols = {
+            "organization_id": org_id,
+            "table_name": "open_position_lots",
+            "column_name": "qty",
+            "kind": "value_update",
+            **values,
+        }
+        col_names = ", ".join([*cols, "natural_key"])
+        placeholders = ", ".join([*(f":{c}" for c in cols), "'{}'::JSONB"])
+        new_id = await session.scalar(
+            text(
+                f"INSERT INTO restatement_log ({col_names}) VALUES ({placeholders}) RETURNING id"
+            ).bindparams(**cols)
+        )
+        await session.commit()
+    return new_id
+
+
+async def test_health_endpoint_restatement_counts_7d_window(
+    client: AsyncClient,
+    auth_headers_with_org: dict,
+    app_owner_engine,
+):
+    """Health gains restatements: {recent_count, sealed_count} over the last 7 days.
+
+    recent: detected_at >= now - 7d (counts everything in window);
+    sealed_count: subset of the window with sealed_year=True;
+    a row older than 7d is excluded from both.
+    """
+    now = datetime.now(timezone.utc)
+    # 1 recent non-sealed + 1 recent sealed → recent_count 2, sealed_count 1.
+    await _seed_restatement(
+        app_owner_engine,
+        org_name="Org Owner Household",
+        detected_at=now - timedelta(days=1),
+        sealed_year=False,
+    )
+    await _seed_restatement(
+        app_owner_engine,
+        org_name="Org Owner Household",
+        detected_at=now - timedelta(days=2),
+        sealed_year=True,
+    )
+    # 1 OLD (>7 days) → excluded from both counts.
+    await _seed_restatement(
+        app_owner_engine,
+        org_name="Org Owner Household",
+        detected_at=now - timedelta(days=10),
+        sealed_year=True,
+    )
+
+    resp = await client.get("/api/health/ingest", headers=auth_headers_with_org)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "restatements" in data
+    assert data["restatements"]["recent_count"] == 2
+    assert data["restatements"]["sealed_count"] == 1
+
+
+async def test_health_endpoint_restatement_counts_default_zero(
+    client: AsyncClient,
+    auth_headers_with_org: dict,
+):
+    """No restatements → both counts zero (additive field always present)."""
+    resp = await client.get("/api/health/ingest", headers=auth_headers_with_org)
+    data = resp.json()
+    assert data["restatements"] == {"recent_count": 0, "sealed_count": 0}
+
+
+async def test_health_endpoint_restatement_counts_scoped_per_org(
+    client: AsyncClient,
+    auth_headers_with_org: dict,
+    second_auth_headers_with_org: dict,
+    app_owner_engine,
+):
+    """RLS: org B's restatements do not leak into org A's counts."""
+    now = datetime.now(timezone.utc)
+    await _seed_restatement(
+        app_owner_engine,
+        org_name="Org Owner 2 Household",
+        detected_at=now - timedelta(days=1),
+    )
+
+    resp_a = await client.get("/api/health/ingest", headers=auth_headers_with_org)
+    assert resp_a.json()["restatements"]["recent_count"] == 0
+
+    resp_b = await client.get("/api/health/ingest", headers=second_auth_headers_with_org)
+    assert resp_b.json()["restatements"]["recent_count"] == 1

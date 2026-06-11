@@ -104,6 +104,7 @@ ORG_SCOPED_TABLES = [
     "change_in_dividend_accruals",
     "open_dividend_accruals",
     "ingest_log",
+    "restatement_log",
 ]
 
 APP_ROLE = "app_rls"

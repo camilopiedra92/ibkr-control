@@ -96,3 +96,42 @@ describe("ManualRefreshButton — partial failure", () => {
     ).toBeNull();
   });
 });
+
+describe("ManualRefreshButton — restatements (W3)", () => {
+  it("surfaces the restatement line when ok carries n_restatements > 0", async () => {
+    streamState.events = [
+      { step: "trm_backfill", status: "ok", n_days: 5 },
+      { step: "flex_ytd", status: "ok", n_connections_ok: 2, n_restatements: 3 },
+      { step: "done" },
+    ];
+    streamState.isDone = true;
+
+    renderButton();
+    fireEvent.click(screen.getByRole("button", { name: "Ejecutar ahora" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/3 valor\(es\) restateado\(s\) — revisá Salud de ingesta/i)
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("does NOT surface the line when n_restatements is 0 or absent", async () => {
+    streamState.events = [
+      { step: "trm_backfill", status: "ok", n_days: 5 },
+      { step: "flex_ytd", status: "ok", n_connections_ok: 2, n_restatements: 0 },
+      { step: "done" },
+    ];
+    streamState.isDone = true;
+
+    renderButton();
+    fireEvent.click(screen.getByRole("button", { name: "Ejecutar ahora" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Refresh completado correctamente/i)
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/valor\(es\) restateado/i)).toBeNull();
+  });
+});

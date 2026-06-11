@@ -188,9 +188,20 @@ export interface IngestSourceHealth {
   last_error: string | null;
 }
 
+/**
+ * Conteos de restatements recientes (W3). recent_count = filas detectadas en
+ * los últimos 7 días; sealed_count = subconjunto que cae en un año con
+ * declaración sellada (máxima severidad). Org-scoped vía RLS.
+ */
+export interface RestatementHealth {
+  recent_count: number;
+  sealed_count: number;
+}
+
 export interface IngestHealthResponse {
   sources: IngestSourceHealth[];
   connections: ConnectionHealth[];
+  restatements: RestatementHealth;
   checked_at: string;
 }
 
@@ -212,6 +223,38 @@ export interface IngestLogRead {
 export interface IngestTrigger {
   /** @pattern ^(flex|trm|both)$ */
   kind: string;
+}
+
+export type RestatementReadNaturalKey = { [key: string]: unknown };
+
+export type RestatementReadKind = typeof RestatementReadKind[keyof typeof RestatementReadKind];
+
+
+export const RestatementReadKind = {
+  value_update: 'value_update',
+  sibling_row: 'sibling_row',
+} as const;
+
+/**
+ * Una fila de restatement_log (W3): IBKR mutó un valor material de un hecho
+ * ya persistido (value_update) o emitió un sibling con distinto fifo_pnl
+ * (sibling_row). Org-scoped vía RLS — el endpoint no filtra org explícitamente.
+ *
+ * `kind` es un Literal (no str) para que orval genere un union de strings en el
+ * cliente TS, habilitando switch exhaustivo en el frontend (precedente W1 Task 8
+ * con ConnectionStatus). column_name es '*' para sibling_row.
+ */
+export interface RestatementRead {
+  id: number;
+  flex_import_id: number | null;
+  table_name: string;
+  natural_key: RestatementReadNaturalKey;
+  column_name: string;
+  old_value: string | null;
+  new_value: string | null;
+  kind: RestatementReadKind;
+  sealed_year: boolean;
+  detected_at: string;
 }
 
 export interface SetupConnectionPayload {
@@ -353,6 +396,21 @@ export type ListLogsApiIngestLogsGetParams = {
  * @maximum 100
  */
 limit?: number;
+};
+
+export type ListRestatementsApiIngestRestatementsGetParams = {
+/**
+ * @minimum 1
+ * @maximum 200
+ */
+limit?: number;
+/**
+ * @minimum 0
+ */
+offset?: number;
+flex_import_id?: number | null;
+table_name?: string | null;
+sealed_only?: boolean;
 };
 
 /**
@@ -3163,4 +3221,74 @@ export const useListLogsApiIngestLogsGet = <TError = HTTPValidationError,
         TContext
       > => {
       return useMutation(getListLogsApiIngestLogsGetMutationOptions(options), queryClient);
+    }
+
+/**
+ * Lista las filas de restatement_log del org (RLS scopea — sin filtro org
+ * explícito, house style).
+ *
+ * Orden determinista (detected_at DESC, id DESC) para que la paginación por
+ * offset sea estable ante empates de detected_at (un mismo ingest inserta el
+ * batch con NOW() idéntico). sealed_only=True filtra a las filas que caen en un
+ * año con declaración sellada ("tu declaración pudo haber cambiado").
+ * @summary List Restatements
+ */
+export const listRestatementsApiIngestRestatementsGet = (
+    params?: ListRestatementsApiIngestRestatementsGetParams,
+ signal?: AbortSignal
+) => {
+
+
+      return axiosMutator<RestatementRead[]>(
+      {url: `/api/ingest/restatements`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+
+
+
+export const getListRestatementsApiIngestRestatementsGetMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof listRestatementsApiIngestRestatementsGet>>, TError,{params?: ListRestatementsApiIngestRestatementsGetParams}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof listRestatementsApiIngestRestatementsGet>>, TError,{params?: ListRestatementsApiIngestRestatementsGetParams}, TContext> => {
+
+const mutationKey = ['listRestatementsApiIngestRestatementsGet'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof listRestatementsApiIngestRestatementsGet>>, {params?: ListRestatementsApiIngestRestatementsGetParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  listRestatementsApiIngestRestatementsGet(params,)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ListRestatementsApiIngestRestatementsGetMutationResult = NonNullable<Awaited<ReturnType<typeof listRestatementsApiIngestRestatementsGet>>>
+
+    export type ListRestatementsApiIngestRestatementsGetMutationError = HTTPValidationError
+
+    /**
+ * @summary List Restatements
+ */
+export const useListRestatementsApiIngestRestatementsGet = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof listRestatementsApiIngestRestatementsGet>>, TError,{params?: ListRestatementsApiIngestRestatementsGetParams}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof listRestatementsApiIngestRestatementsGet>>,
+        TError,
+        {params?: ListRestatementsApiIngestRestatementsGetParams},
+        TContext
+      > => {
+      return useMutation(getListRestatementsApiIngestRestatementsGetMutationOptions(options), queryClient);
     }

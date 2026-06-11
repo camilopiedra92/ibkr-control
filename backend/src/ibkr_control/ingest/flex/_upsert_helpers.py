@@ -5,10 +5,11 @@ con _BATCH_SIZE para respetar el techo de asyncpg de 32767 bind params per
 statement (mismo patrón que TRM bulk_upsert_days post-commit 989652d).
 """
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
-from sqlalchemy import Table, text
+from sqlalchemy import Table, select, text, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,13 @@ _BATCH_SIZE = 5000
 # Margin del techo asyncpg 32767 bind params. Con ~20 cols por trade ~250
 # params/row → ~125 rows/batch worst case; 5000 dejamos espacio holgado para
 # entities chicas (~5 cols).
+
+_MAX_BIND_PARAMS = 30000
+# Techo de bind params para chunking key-count-aware (W3): los chunks que expanden
+# N params POR ITEM (tuple_-IN de natural keys de 8 columnas, INSERTs multi-col)
+# deben dividir este techo por el ancho del item — _BATCH_SIZE plano con keys de
+# 8 cols daría 40k params, sobre el límite int16 de asyncpg (32767) que el repo
+# ya quemó en TRM bulk_upsert (989652d).
 
 
 def _chunks(rows: Sequence[dict[str, Any]], size: int) -> Iterable[list[dict[str, Any]]]:
@@ -74,6 +82,103 @@ async def _upsert_snapshot(
         result = await session.execute(stmt)
         n_touched += result.rowcount
     return n_touched
+
+
+def _quantize_to_scale(value: Decimal, scale: int | None) -> Decimal:
+    """Cuantiza un Decimal a la escala de la columna (como lo guardaría Postgres).
+
+    El persister recibe valores full-precision del XML (e.g. 255.869378) pero la
+    columna es NUMERIC(20,4), así que Postgres trunca/redondea a 255.8694. Comparar
+    el valor STORED (ya cuantizado, leído de la DB) contra el INCOMING crudo daría
+    un falso positivo en cada re-ingest. Cuantizamos el incoming igual que la DB
+    antes de diffear. scale None (sin escala declarada) => sin cuantizar.
+    """
+    if scale is None:
+        return value
+    # PG NUMERIC redondea HALF_UP; el default de Decimal es HALF_EVEN — sin esto
+    # un valor en el boundary exacto (e.g. 255.86945 a escala 4) produce un falso positivo.
+    return value.quantize(Decimal(1).scaleb(-scale), rounding=ROUND_HALF_UP)
+
+
+def _values_differ(old: Any, new: Any, *, scale: int | None = None) -> bool:
+    """Comparación material-aware de dos valores de columna.
+
+    Numeric/Decimal: cuantiza ambos a la escala de la columna (lo que la DB
+    guardaría) y compara por valor numérico — así un re-ingest del mismo valor
+    de fuente NO marca restatement por la pérdida de precisión del NUMERIC(p,s).
+    El resto: igualdad directa de Python. None vs no-None => difieren.
+    """
+    if isinstance(old, Decimal) or isinstance(new, Decimal):
+        if old is None or new is None:
+            return old is not new
+        return _quantize_to_scale(Decimal(old), scale) != _quantize_to_scale(Decimal(new), scale)
+    return old != new
+
+
+# audit_sink(table_name, natural_key_dict, column_name, old_value, new_value)
+AuditSink = Callable[[str, dict[str, Any], str, Any, Any], None]
+
+
+async def _upsert_snapshot_with_audit(
+    session: AsyncSession,
+    table: Table,
+    rows: Sequence[dict[str, Any]],
+    conflict_cols: list[str],
+    update_cols: list[str],
+    *,
+    material_cols: list[str],
+    natural_key_cols: list[str],
+    audit_sink: AuditSink,
+) -> int:
+    """Igual que _upsert_snapshot pero detecta restatements ANTES de upsertear (W3).
+
+    (1) SELECT batched de las filas existentes por natural key (tuple_-IN, soportado
+        limpio en Postgres); (2) para cada fila entrante cuyo key ya existe, compara
+        las columnas materiales (Decimal-aware vía _values_differ) contra el valor
+        almacenado; (3) por cada columna material que cambió, invoca audit_sink con
+        el natural key + old/new; (4) delega a _upsert_snapshot sin cambios.
+
+    Detection-only: no muta restatement_log acá (el caller acumula vía audit_sink y
+    escribe al final) ni altera la semántica del upsert. Re-run idéntico => 0
+    invocaciones del sink (las columnas materiales no cambian).
+    """
+    if not rows:
+        return 0
+
+    # Index entrante por natural key (tupla en el orden de natural_key_cols).
+    incoming_by_key: dict[tuple, dict[str, Any]] = {}
+    for r in rows:
+        key = tuple(r[c] for c in natural_key_cols)
+        # Last-seen gana dentro del batch (espeja la semántica del DO UPDATE).
+        incoming_by_key[key] = r
+
+    key_cols = [table.c[c] for c in natural_key_cols]
+    existing_by_key: dict[tuple, Row] = {}
+    keys = list(incoming_by_key.keys())
+    select_cols = [*key_cols, *(table.c[c] for c in material_cols)]
+    # Chunk key-count-aware: cada key expande len(key_cols) bind params (8 en los
+    # accruals) — el tamaño del chunk debe dividir el techo por ese ancho.
+    chunk_size = max(1, _MAX_BIND_PARAMS // max(1, len(key_cols)))
+    for batch in _chunks(keys, chunk_size):  # type: ignore[arg-type]
+        stmt = select(*select_cols).where(tuple_(*key_cols).in_(batch))
+        result = await session.execute(stmt)
+        for row in result.all():
+            existing_by_key[tuple(getattr(row, c) for c in natural_key_cols)] = row
+
+    for key, incoming in incoming_by_key.items():
+        existing = existing_by_key.get(key)
+        if existing is None:
+            continue  # INSERT path — no restatement (la fila no existía)
+        nk = dict(zip(natural_key_cols, key, strict=True))
+        for col in material_cols:
+            old = getattr(existing, col)
+            new = incoming.get(col)
+            # Escala de la columna NUMERIC(p,s) para cuantizar el incoming como la DB.
+            scale = getattr(table.c[col].type, "scale", None)
+            if _values_differ(old, new, scale=scale):
+                audit_sink(table.name, nk, col, old, new)
+
+    return await _upsert_snapshot(session, table, rows, conflict_cols, update_cols)
 
 
 async def _upsert_immutable_returning_inserted(
