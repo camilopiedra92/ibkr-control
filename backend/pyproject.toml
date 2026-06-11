@@ -38,6 +38,11 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Paralelo por defecto (local + CI). Override para debug/medición serial: -n0.
+# Tope opcional de workers via env PYTEST_XDIST_AUTO_NUM_WORKERS (no pin numérico:
+# con aislamiento real por test, el worker-count no afecta correctitud, solo
+# velocidad — pinear envejece cuando GitHub cambia los runners).
+addopts = ["-n", "auto"]
 
 [tool.ruff]
 line-length = 100
