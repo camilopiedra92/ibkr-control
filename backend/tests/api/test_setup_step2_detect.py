@@ -59,16 +59,14 @@ async def _seed_creds(client: AsyncClient, auth_headers_with_org: dict, *, query
     assert r.status_code == 200, r.text
 
 
-async def _seed_second_connection(app_owner_engine, *, query_id="QID-2") -> int:
+async def _seed_second_connection(owner_engine, *, query_id="QID-2") -> int:
     """Add a SECOND ibkr_flex connection to the same org (owner-side, bypasses RLS).
 
     Used to exercise the multi-connection detect loop. Returns its id.
     """
     from ibkr_control.ingest.flex.crypto import encrypt_token
 
-    session_maker = async_sessionmaker(
-        app_owner_engine, expire_on_commit=False, class_=AsyncSession
-    )
+    session_maker = async_sessionmaker(owner_engine, expire_on_commit=False, class_=AsyncSession)
     async with session_maker() as session:
         org_id = await session.scalar(
             text("SELECT id FROM organizations WHERE name = 'Org Owner Household'")
@@ -96,10 +94,8 @@ async def _seed_second_connection(app_owner_engine, *, query_id="QID-2") -> int:
     return conn_id
 
 
-async def _connection_statuses(app_owner_engine) -> list[str]:
-    session_maker = async_sessionmaker(
-        app_owner_engine, expire_on_commit=False, class_=AsyncSession
-    )
+async def _connection_statuses(owner_engine) -> list[str]:
+    session_maker = async_sessionmaker(owner_engine, expire_on_commit=False, class_=AsyncSession)
     async with session_maker() as session:
         rows = (
             await session.execute(
@@ -109,11 +105,9 @@ async def _connection_statuses(app_owner_engine) -> list[str]:
     return [r[0] for r in rows]
 
 
-async def _connection_sync_states(app_owner_engine) -> list[tuple[str, str | None]]:
+async def _connection_sync_states(owner_engine) -> list[tuple[str, str | None]]:
     """(status, last_sync_status) per ibkr_flex connection, ordered by id."""
-    session_maker = async_sessionmaker(
-        app_owner_engine, expire_on_commit=False, class_=AsyncSession
-    )
+    session_maker = async_sessionmaker(owner_engine, expire_on_commit=False, class_=AsyncSession)
     async with session_maker() as session:
         rows = (
             await session.execute(
@@ -154,11 +148,11 @@ async def test_step2_detect_happy_path_returns_accounts_filtering_f(
 
 
 async def test_step2_detect_unions_accounts_across_connections(
-    client: AsyncClient, auth_headers_with_org: dict, app_owner_engine, monkeypatch
+    client: AsyncClient, auth_headers_with_org: dict, owner_engine, monkeypatch
 ):
     """Two active connections with different accounts → union, deduped by id."""
     await _seed_creds(client, auth_headers_with_org)
-    await _seed_second_connection(app_owner_engine)
+    await _seed_second_connection(owner_engine)
 
     monkeypatch.setattr(flex_client_mod.FlexClient, "send_request", AsyncMock(return_value="ref"))
     # First connection returns XML A, second returns XML B (distinct accounts ->
@@ -176,12 +170,12 @@ async def test_step2_detect_unions_accounts_across_connections(
 
 
 async def test_step2_detect_partial_success_marks_failed_conn_and_returns(
-    client: AsyncClient, auth_headers_with_org: dict, app_owner_engine, monkeypatch
+    client: AsyncClient, auth_headers_with_org: dict, owner_engine, monkeypatch
 ):
     """One conn auth-fails, the other succeeds → 200 with the successful
     accounts; the failing connection transitions to reauth_required."""
     await _seed_creds(client, auth_headers_with_org)
-    await _seed_second_connection(app_owner_engine)
+    await _seed_second_connection(owner_engine)
 
     # First connection: auth fail. Second: success.
     monkeypatch.setattr(
@@ -200,7 +194,7 @@ async def test_step2_detect_partial_success_marks_failed_conn_and_returns(
     ids = [a["ibkr_account_id"] for a in r.json()["detected_accounts"]]
     assert ids == ["U88888888"]
 
-    statuses = await _connection_statuses(app_owner_engine)
+    statuses = await _connection_statuses(owner_engine)
     assert statuses == ["reauth_required", "active"]
 
 
@@ -246,7 +240,7 @@ async def test_step2_detect_503_after_max_retries(
 
 
 async def test_step2_detect_401_on_invalid_token(
-    client: AsyncClient, auth_headers_with_org: dict, app_owner_engine, monkeypatch
+    client: AsyncClient, auth_headers_with_org: dict, owner_engine, monkeypatch
 ):
     """FlexAuthError on the only connection → 401 INVALID_TOKEN + reauth_required."""
     await _seed_creds(client, auth_headers_with_org)
@@ -259,7 +253,7 @@ async def test_step2_detect_401_on_invalid_token(
     assert r.status_code == 401
     assert r.json()["detail"] == "INVALID_TOKEN"
 
-    assert await _connection_statuses(app_owner_engine) == ["reauth_required"]
+    assert await _connection_statuses(owner_engine) == ["reauth_required"]
 
 
 async def test_step2_detect_400_when_no_connection(
@@ -272,13 +266,13 @@ async def test_step2_detect_400_when_no_connection(
 
 
 async def test_step2_detect_partial_tolerant_on_parse_failure(
-    client: AsyncClient, auth_headers_with_org: dict, app_owner_engine, monkeypatch
+    client: AsyncClient, auth_headers_with_org: dict, owner_engine, monkeypatch
 ):
     """detect es partial-tolerant: primera conn devuelve XML que no parsea,
     segunda OK → 200 con las cuentas de la segunda; la primera transiciona via
     mark_sync_failed (last_sync_status='failed'), espejo del job loop de Task 4."""
     await _seed_creds(client, auth_headers_with_org)
-    await _seed_second_connection(app_owner_engine)
+    await _seed_second_connection(owner_engine)
 
     monkeypatch.setattr(flex_client_mod.FlexClient, "send_request", AsyncMock(return_value="ref"))
     monkeypatch.setattr(
@@ -292,13 +286,13 @@ async def test_step2_detect_partial_tolerant_on_parse_failure(
     ids = [a["ibkr_account_id"] for a in r.json()["detected_accounts"]]
     assert ids == ["U88888888"]
 
-    states = await _connection_sync_states(app_owner_engine)
+    states = await _connection_sync_states(owner_engine)
     assert states[0][1] == "failed", "parse failure transitioned the first connection"
     assert states[1] == ("active", "ok")
 
 
 async def test_step2_detect_422_when_only_connection_has_unparseable_xml(
-    client: AsyncClient, auth_headers_with_org: dict, app_owner_engine, monkeypatch
+    client: AsyncClient, auth_headers_with_org: dict, owner_engine, monkeypatch
 ):
     """Single conn with poison XML → 422 PARSE_ERROR (old single-connection UX
     preserved) + the connection transitions (mark_sync_failed)."""
@@ -315,12 +309,12 @@ async def test_step2_detect_422_when_only_connection_has_unparseable_xml(
     assert r.status_code == 422
     assert r.json()["detail"]["code"] == "PARSE_ERROR"
 
-    states = await _connection_sync_states(app_owner_engine)
+    states = await _connection_sync_states(owner_engine)
     assert states[0][1] == "failed"
 
 
 async def test_step2_detect_persist_failure_transitions_and_aggregates(
-    client: AsyncClient, auth_headers_with_org: dict, app_owner_engine, monkeypatch
+    client: AsyncClient, auth_headers_with_org: dict, owner_engine, monkeypatch
 ):
     """Persist failure shares the same per-connection catch as parse: the conn
     transitions (mark_sync_failed) and, with zero successes, the aggregate is
@@ -344,5 +338,5 @@ async def test_step2_detect_persist_failure_transitions_and_aggregates(
     assert body["detail"]["code"] == "PARSE_ERROR"
     assert "simulated persist failure" in body["detail"]["message"]
 
-    states = await _connection_sync_states(app_owner_engine)
+    states = await _connection_sync_states(owner_engine)
     assert states[0][1] == "failed", "persist failure transitioned the connection"

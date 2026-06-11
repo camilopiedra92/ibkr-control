@@ -217,7 +217,7 @@ async def test_health_endpoint_requires_auth(client: AsyncClient):
     assert resp.status_code == 401
 
 
-async def _seed_connection(app_owner_engine, *, org_name: str, status: str, **values) -> int:
+async def _seed_connection(owner_engine, *, org_name: str, status: str, **values) -> int:
     """Seed a connection (owner-side, bypassing RLS) for the org named ``org_name``.
 
     parties/connections are org-scoped under FORCE RLS; set app.current_org so the
@@ -227,9 +227,7 @@ async def _seed_connection(app_owner_engine, *, org_name: str, status: str, **va
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    session_maker = async_sessionmaker(
-        app_owner_engine, expire_on_commit=False, class_=AsyncSession
-    )
+    session_maker = async_sessionmaker(owner_engine, expire_on_commit=False, class_=AsyncSession)
     async with session_maker() as session:
         org_id = await session.scalar(
             text("SELECT id FROM organizations WHERE name = :n").bindparams(n=org_name)
@@ -259,13 +257,13 @@ async def _seed_connection(app_owner_engine, *, org_name: str, status: str, **va
 async def test_health_endpoint_includes_connections(
     client: AsyncClient,
     auth_headers_with_org: dict,
-    app_owner_engine,
+    owner_engine,
 ):
     """connections plane: active + reauth_required connections both appear, with
     their status/status_reason/last_sync_at, ordered by id."""
     now = datetime.now(timezone.utc)
     id_active = await _seed_connection(
-        app_owner_engine,
+        owner_engine,
         org_name="Org Owner Household",
         status="active",
         display_name="Cuenta A",
@@ -273,7 +271,7 @@ async def test_health_endpoint_includes_connections(
         last_sync_status="ok",
     )
     id_reauth = await _seed_connection(
-        app_owner_engine,
+        owner_engine,
         org_name="Org Owner Household",
         status="reauth_required",
         display_name="Cuenta B",
@@ -305,11 +303,11 @@ async def test_health_endpoint_connections_scoped_per_org(
     client: AsyncClient,
     auth_headers_with_org: dict,
     second_auth_headers_with_org: dict,
-    app_owner_engine,
+    owner_engine,
 ):
     """Org B's connections do not leak into org A's response (RLS)."""
     await _seed_connection(
-        app_owner_engine,
+        owner_engine,
         org_name="Org Owner 2 Household",
         status="active",
         display_name="Org B conn",
@@ -326,14 +324,12 @@ async def test_health_endpoint_connections_scoped_per_org(
     assert conns_b[0]["display_name"] == "Org B conn"
 
 
-async def _seed_restatement(app_owner_engine, *, org_name: str, **values) -> int:
+async def _seed_restatement(owner_engine, *, org_name: str, **values) -> int:
     """Seed a restatement_log row (owner-side, RLS) for the org named ``org_name``."""
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    session_maker = async_sessionmaker(
-        app_owner_engine, expire_on_commit=False, class_=AsyncSession
-    )
+    session_maker = async_sessionmaker(owner_engine, expire_on_commit=False, class_=AsyncSession)
     async with session_maker() as session:
         org_id = await session.scalar(
             text("SELECT id FROM organizations WHERE name = :n").bindparams(n=org_name)
@@ -362,7 +358,7 @@ async def _seed_restatement(app_owner_engine, *, org_name: str, **values) -> int
 async def test_health_endpoint_restatement_counts_7d_window(
     client: AsyncClient,
     auth_headers_with_org: dict,
-    app_owner_engine,
+    owner_engine,
 ):
     """Health gains restatements: {recent_count, sealed_count} over the last 7 days.
 
@@ -373,20 +369,20 @@ async def test_health_endpoint_restatement_counts_7d_window(
     now = datetime.now(timezone.utc)
     # 1 recent non-sealed + 1 recent sealed → recent_count 2, sealed_count 1.
     await _seed_restatement(
-        app_owner_engine,
+        owner_engine,
         org_name="Org Owner Household",
         detected_at=now - timedelta(days=1),
         sealed_year=False,
     )
     await _seed_restatement(
-        app_owner_engine,
+        owner_engine,
         org_name="Org Owner Household",
         detected_at=now - timedelta(days=2),
         sealed_year=True,
     )
     # 1 OLD (>7 days) → excluded from both counts.
     await _seed_restatement(
-        app_owner_engine,
+        owner_engine,
         org_name="Org Owner Household",
         detected_at=now - timedelta(days=10),
         sealed_year=True,
@@ -414,12 +410,12 @@ async def test_health_endpoint_restatement_counts_scoped_per_org(
     client: AsyncClient,
     auth_headers_with_org: dict,
     second_auth_headers_with_org: dict,
-    app_owner_engine,
+    owner_engine,
 ):
     """RLS: org B's restatements do not leak into org A's counts."""
     now = datetime.now(timezone.utc)
     await _seed_restatement(
-        app_owner_engine,
+        owner_engine,
         org_name="Org Owner 2 Household",
         detected_at=now - timedelta(days=1),
     )

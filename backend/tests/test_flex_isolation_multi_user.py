@@ -30,8 +30,8 @@ async def _org_id_of(session, user) -> int:
 
 @pytest.mark.asyncio
 async def test_persister_isolation_two_orgs_sequential(
-    db_engine,
-    db_session,
+    owner_engine,
+    owner_session,
     sample_org,
     second_sample_user,
 ):
@@ -44,9 +44,9 @@ async def test_persister_isolation_two_orgs_sequential(
     UNIQUE(organization_id, xml_hash) constraint enables.
     """
     xml_bytes = FIXTURE_XML.read_bytes()
-    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    session_factory = async_sessionmaker(owner_engine, expire_on_commit=False)
 
-    org_b_id = await _org_id_of(db_session, second_sample_user)
+    org_b_id = await _org_id_of(owner_session, second_sample_user)
 
     async def persist_for(organization_id: int) -> int:
         async with session_factory() as session:
@@ -78,15 +78,15 @@ async def test_persister_isolation_two_orgs_sequential(
 
 @pytest.mark.asyncio
 async def test_advisory_lock_is_per_org(
-    db_engine,
-    db_session,
+    owner_engine,
+    owner_session,
     sample_org,
     second_sample_user,
 ):
     """SP1: Org A holds (source='flex', scope_id=A) lock -> Org B acquires
     (source='flex', scope_id=B) without conflict."""
-    org_b_id = await _org_id_of(db_session, second_sample_user)
-    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    org_b_id = await _org_id_of(owner_session, second_sample_user)
+    session_factory = async_sessionmaker(owner_engine, expire_on_commit=False)
     async with session_factory() as session_a, session_factory() as session_b:
         async with advisory_lock(session_a, scope_id=sample_org.id, source="flex"):
             # Org B should be able to acquire ITS OWN lock
@@ -113,16 +113,16 @@ async def test_advisory_lock_same_org_two_sessions_conflict(
 
 @pytest.mark.asyncio
 async def test_same_xml_hash_two_orgs_no_unique_collision(
-    db_engine,
-    db_session,
+    owner_engine,
+    owner_session,
     sample_org,
     second_sample_user,
 ):
     """SP1: UNIQUE(organization_id, xml_hash) allows the same hash for two orgs."""
     xml_bytes = FIXTURE_XML.read_bytes()
-    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    session_factory = async_sessionmaker(owner_engine, expire_on_commit=False)
 
-    org_b_id = await _org_id_of(db_session, second_sample_user)
+    org_b_id = await _org_id_of(owner_session, second_sample_user)
 
     # Org A persist
     async with session_factory() as session:

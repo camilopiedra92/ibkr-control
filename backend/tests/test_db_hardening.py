@@ -77,21 +77,28 @@ async def test_delete_account_with_trades_is_restricted(db_session, sample_org, 
     await db_session.rollback()
 
 
-async def test_delete_organization_cascades_full_tenant(db_session, sample_org, sample_account):
-    """D4-bis: tenant wipe via DELETE org funciona pese al RESTRICT (multi-path)."""
-    iid = await _make_instrument(db_session)
-    db_session.add(_trade_row(sample_org.id, sample_account.id, "T-CASCADE-1", iid))
-    await db_session.flush()
+async def test_delete_organization_cascades_full_tenant(owner_session, sample_org, sample_account):
+    """D4-bis: tenant wipe via DELETE org funciona pese al RESTRICT (multi-path).
 
-    await db_session.execute(delete(Organization).where(Organization.id == sample_org.id))
+    Tenant-wipe (DELETE FROM organizations + cascade) → usa ``owner_session``
+    (bypass RLS)."""
+    iid = await _make_instrument(owner_session)
+    owner_session.add(_trade_row(sample_org.id, sample_account.id, "T-CASCADE-1", iid))
+    await owner_session.flush()
+
+    await owner_session.execute(delete(Organization).where(Organization.id == sample_org.id))
 
     remaining_accounts = (
-        (await db_session.execute(select(Account).where(Account.organization_id == sample_org.id)))
+        (
+            await owner_session.execute(
+                select(Account).where(Account.organization_id == sample_org.id)
+            )
+        )
         .scalars()
         .all()
     )
     remaining_trades = (
-        (await db_session.execute(select(Trade).where(Trade.organization_id == sample_org.id)))
+        (await owner_session.execute(select(Trade).where(Trade.organization_id == sample_org.id)))
         .scalars()
         .all()
     )

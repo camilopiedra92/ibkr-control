@@ -109,6 +109,24 @@ async def db_session(test_db):  # noqa: F811 — parámetro de fixture pytest in
 
 
 @pytest.fixture
+async def owner_session(test_db):  # noqa: F811 — test_db es fixture importada, no redefinida
+    """Sesion OWNER (bypass RLS) sobre un clon migrado — EXCEPCION nombrada.
+
+    Para los tests que genuinamente necesitan bypassear RLS: seeding cross-tenant
+    (multiples orgs), operaciones control-plane (enumeracion del cron), y
+    tenant-wipe (DELETE FROM organizations + cascade). El default del model world
+    es ``db_session`` (app_rls); esto es la salida explicita per D2/D4 del spec.
+    """
+    engine = create_async_engine(test_db)
+    session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    try:
+        async with session_maker() as session:
+            yield session
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture
 async def db_engine(test_db):  # noqa: F811 — parámetro de fixture pytest inyecta test_db; sombrea el import a propósito
     """OWNER engine sobre el mismo clon migrado, para tests que abren multiples
     sesiones concurrentes (p.ej. contencion de advisory locks).
@@ -124,19 +142,15 @@ async def db_engine(test_db):  # noqa: F811 — parámetro de fixture pytest iny
 
 
 @pytest.fixture
-async def app_owner_engine(test_db):  # noqa: F811 — parámetro de fixture pytest inyecta test_db; sombrea el import a propósito
-    """OWNER engine on the SAME migrated DB the endpoint app (``app_with_db``) uses.
+async def owner_engine(test_db):  # noqa: F811 — parámetro de fixture pytest inyecta test_db; sombrea el import a propósito
+    """OWNER engine sobre un clon migrado — EXCEPCION nombrada (bypass RLS).
 
-    Used by the endpoint seeding fixtures (``auth_headers_with_org`` &c.) to
-    insert users/orgs/memberships/parties against the very DB ``app_with_db``
-    serves requests from. Connects as the container OWNER (superuser → bypasses
-    RLS; identity tables have no org-RLS anyway), so the seed is unconstrained.
-
-    Both ``app_owner_engine`` and the model-world ``db_engine``/``db_session`` now
-    connect (as owner) to a ``test_db`` migrated clone — one source of schema. This
-    fixture exists for the ENDPOINT seeding path (``auth_headers_with_org`` &c.),
-    which seeds the same DB ``app_with_db`` serves; ``db_engine``/``db_session`` are
-    the direct-model path.
+    Engine OWNER (container superuser → bypassa RLS aun bajo FORCE) sobre el mismo
+    ``test_db`` migrado. Lo consumen tanto el seeding de endpoints
+    (``auth_headers_with_org`` &c., que seedea la DB que ``app_with_db`` sirve)
+    como los tests model-world que genuinamente necesitan bypassear RLS: seeding
+    cross-tenant, control-plane (enumeracion del cron), tenant-wipe. El default del
+    model world es ``db_engine`` (app_rls); esto es la salida explicita per D2/D4.
     """
     engine = create_async_engine(test_db, echo=False)
     try:
@@ -224,12 +238,15 @@ async def sample_party(db_session: AsyncSession, sample_org):
 
 
 @pytest.fixture
-async def second_sample_user(db_session: AsyncSession):
+async def second_sample_user(owner_session: AsyncSession):
     """A second User for multi-user isolation tests.
 
     Crea su PROPIO org + UserSettings + membership + party (tenant separado de
     sample_org) para escenarios de aislamiento cross-tenant. Incluye UserSettings
     (que en prod siempre existe vía on_after_register) para ser una identidad fiel.
+
+    Inherentemente cross-tenant (crea un org distinto de sample_org) → usa
+    ``owner_session`` (bypass RLS): inserta el Party sin necesitar contexto RLS.
     """
     from ibkr_control.auth.models import User
     from ibkr_control.db.models.memberships import Membership
@@ -238,21 +255,23 @@ async def second_sample_user(db_session: AsyncSession):
     from ibkr_control.settings.models import UserSettings
 
     org = Organization(type="personal", name="Second Fixture Org")
-    db_session.add(org)
-    await db_session.flush()
+    owner_session.add(org)
+    await owner_session.flush()
     u = User(
         email="second_fixture@t.com",
         hashed_password="x",
         is_active=True,
         name="Second Fixture User",
     )
-    db_session.add(u)
-    await db_session.flush()
-    db_session.add(UserSettings(user_id=u.id))
-    db_session.add(Membership(user_id=u.id, organization_id=org.id, role="owner"))
-    db_session.add(Party(organization_id=org.id, display_name="Second Fixture User", user_id=u.id))
-    await db_session.commit()
-    await db_session.refresh(u)
+    owner_session.add(u)
+    await owner_session.flush()
+    owner_session.add(UserSettings(user_id=u.id))
+    owner_session.add(Membership(user_id=u.id, organization_id=org.id, role="owner"))
+    owner_session.add(
+        Party(organization_id=org.id, display_name="Second Fixture User", user_id=u.id)
+    )
+    await owner_session.commit()
+    await owner_session.refresh(u)
     return u
 
 
@@ -291,7 +310,7 @@ async def second_auth_headers(client: AsyncClient) -> dict:
 
 
 @pytest.fixture
-async def auth_headers_with_org(client: AsyncClient, app_owner_engine) -> dict:
+async def auth_headers_with_org(client: AsyncClient, owner_engine) -> dict:
     """Registra un usuario via API, le provisiona un org + membership(owner) +
     party, y devuelve headers JWT.
 
@@ -301,7 +320,7 @@ async def auth_headers_with_org(client: AsyncClient, app_owner_engine) -> dict:
     via la API (dispara on_after_register → UserSettings) y luego inserta el
     org/membership/party PARA ese usuario ya registrado.
 
-    Comparte la DB migrada del app vía app_owner_engine (mismo `test_db` que
+    Comparte la DB migrada del app vía owner_engine (mismo `test_db` que
     app_with_db). Seedea como OWNER (superuser → bypassa RLS); `parties` está bajo
     FORCE RLS, así que setea `app.current_org` antes de insertar el Party para que
     pase el WITH CHECK (mismo patrón que rls_session_factory.seed).
@@ -318,9 +337,7 @@ async def auth_headers_with_org(client: AsyncClient, app_owner_engine) -> dict:
         json={"email": email, "password": "supersecret123", "name": "Org Owner"},
     )
 
-    session_maker = async_sessionmaker(
-        app_owner_engine, expire_on_commit=False, class_=AsyncSession
-    )
+    session_maker = async_sessionmaker(owner_engine, expire_on_commit=False, class_=AsyncSession)
     async with session_maker() as session:
         user = await session.scalar(select(User).where(User.email == email))
         org = Organization(type="personal", name="Org Owner Household")
@@ -343,12 +360,12 @@ async def auth_headers_with_org(client: AsyncClient, app_owner_engine) -> dict:
 
 
 @pytest.fixture
-async def second_auth_headers_with_org(client: AsyncClient, app_owner_engine) -> dict:
+async def second_auth_headers_with_org(client: AsyncClient, owner_engine) -> dict:
     """A second org-having user for cross-tenant isolation tests.
 
     Mirrors auth_headers_with_org but with a distinct email/org so the two
     can detect disjoint accounts and assert that one org cannot claim the
-    other's. Shares the migrated app DB via app_owner_engine (same lifecycle as
+    other's. Shares the migrated app DB via owner_engine (same lifecycle as
     auth_headers_with_org)."""
     from sqlalchemy import select, text
     from ibkr_control.auth.models import User
@@ -362,9 +379,7 @@ async def second_auth_headers_with_org(client: AsyncClient, app_owner_engine) ->
         json={"email": email, "password": "supersecret123", "name": "Org Owner 2"},
     )
 
-    session_maker = async_sessionmaker(
-        app_owner_engine, expire_on_commit=False, class_=AsyncSession
-    )
+    session_maker = async_sessionmaker(owner_engine, expire_on_commit=False, class_=AsyncSession)
     async with session_maker() as session:
         user = await session.scalar(select(User).where(User.email == email))
         org = Organization(type="personal", name="Org Owner 2 Household")

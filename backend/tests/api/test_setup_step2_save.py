@@ -276,7 +276,7 @@ async def test_step2_save_response_includes_trm_backfill_job_id(
 
 
 async def test_step2_save_creates_party_anchored_participation(
-    client: AsyncClient, auth_headers_with_org: dict, app_owner_engine, monkeypatch
+    client: AsyncClient, auth_headers_with_org: dict, owner_engine, monkeypatch
 ):
     """SP1: the participation step2/save writes must be anchored to the org's
     founding party (Party.user_id == the saving user, in this org) and carry
@@ -298,7 +298,7 @@ async def test_step2_save_creates_party_anchored_participation(
 
     # Verify against the migrated app DB (where the endpoint wrote), connecting
     # as OWNER (bypasses RLS) so the participation row is fully inspectable.
-    Session = async_sessionmaker(app_owner_engine, expire_on_commit=False)
+    Session = async_sessionmaker(owner_engine, expire_on_commit=False)
     async with Session() as s:
         user = await s.scalar(select(User).where(User.email == "org_owner@test.com"))
         org_id = await s.scalar(

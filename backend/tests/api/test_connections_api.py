@@ -115,7 +115,7 @@ async def test_patch_connection_display_name(
 
 
 async def test_rotate_token_advances_and_clears_reauth(
-    client: AsyncClient, auth_headers_with_org: dict, app_owner_engine, monkeypatch
+    client: AsyncClient, auth_headers_with_org: dict, owner_engine, monkeypatch
 ):
     """rotate-token actualiza last_rotated_at y, si la conexion estaba en
     reauth_required, la transiciona a active (mark_rotated)."""
@@ -127,9 +127,7 @@ async def test_rotate_token_advances_and_clears_reauth(
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    session_maker = async_sessionmaker(
-        app_owner_engine, expire_on_commit=False, class_=AsyncSession
-    )
+    session_maker = async_sessionmaker(owner_engine, expire_on_commit=False, class_=AsyncSession)
     async with session_maker() as session:
         await session.execute(
             text("UPDATE connections SET status = 'reauth_required' WHERE id = :i").bindparams(
@@ -169,7 +167,7 @@ async def test_disable_then_enable(client: AsyncClient, auth_headers_with_org: d
 
 
 async def test_delete_connection_sets_import_connection_id_null(
-    client: AsyncClient, auth_headers_with_org: dict, app_owner_engine, monkeypatch
+    client: AsyncClient, auth_headers_with_org: dict, owner_engine, monkeypatch
 ):
     created = await _create_connection(client, auth_headers_with_org, monkeypatch)
     conn_id = created["id"]
@@ -177,9 +175,7 @@ async def test_delete_connection_sets_import_connection_id_null(
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    session_maker = async_sessionmaker(
-        app_owner_engine, expire_on_commit=False, class_=AsyncSession
-    )
+    session_maker = async_sessionmaker(owner_engine, expire_on_commit=False, class_=AsyncSession)
 
     # Insert a flex_import linked to the connection (need its org_id first).
     async with session_maker() as session:
@@ -297,7 +293,7 @@ async def test_create_connection_unknown_query_id_400(
 
 
 async def test_list_connection_without_detail_500_fail_loud(
-    client: AsyncClient, auth_headers_with_org: dict, app_owner_engine
+    client: AsyncClient, auth_headers_with_org: dict, owner_engine
 ):
     """Connection sin su detail 1:1 = invariante de subtipo roto -> 500 fail-loud
     (no degradar en silencio). Se seedea owner-side porque la API nunca puede
@@ -305,9 +301,7 @@ async def test_list_connection_without_detail_500_fail_loud(
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    session_maker = async_sessionmaker(
-        app_owner_engine, expire_on_commit=False, class_=AsyncSession
-    )
+    session_maker = async_sessionmaker(owner_engine, expire_on_commit=False, class_=AsyncSession)
     async with session_maker() as session:
         org_id = await session.scalar(
             text("SELECT id FROM organizations WHERE name = 'Org Owner Household'")
