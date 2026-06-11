@@ -9,10 +9,7 @@ import os
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET", "test-secret-32-chars-minimum-please-ok")
 
-import asyncio
-
 import pytest
-from alembic import command
 from httpx import ASGITransport, AsyncClient
 from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -28,7 +25,6 @@ from tests.conftest_ephemeral_db import (  # noqa: F401
     ephemeral_db_url,
     ephemeral_session_factory,
     rls_session_factory,
-    build_alembic_config,
     swap_dsn_credentials,
 )
 from tests.conftest_template_db import (  # noqa: F401
@@ -54,53 +50,15 @@ def postgres_container():
 
 
 @pytest.fixture
-async def _migrated_app_db(monkeypatch):
-    """A fresh, MIGRATED postgres for the endpoint app — own per-test container.
-
-    This is the world-class RLS path: the schema is built via ``alembic upgrade
-    head`` (NOT ``Base.metadata.create_all``), so the FORCE'd RLS policies + the
-    non-superuser ``app_rls`` login role created by the baseline migration exist.
-    The app (``app_with_db``) then connects as ``app_rls``, so every request is
-    exercised under RLS instead of as the bypass owner.
-
-    It is its OWN container, fully isolated from ``postgres_container`` (which
-    ``db_session`` + the ``sample_*`` model fixtures keep on owner +
-    ``create_all``). That isolation is what avoids the ``create_all`` /
-    ``alembic`` collision on a shared session-scoped container.
-
-    Yields the OWNER async DSN of the migrated DB. ``app_with_db`` derives the
-    ``app_rls`` DSN from it; ``db_engine`` / seeding fixtures connect with it as
-    OWNER (the container superuser bypasses RLS, and identity tables have no
-    org-RLS anyway) to seed users/orgs/memberships/parties.
-    """
-    with PostgresContainer("postgres:16-alpine", driver="asyncpg") as pg:
-        owner_url = pg.get_connection_url()
-        monkeypatch.setenv("DATABASE_URL", owner_url)
-        monkeypatch.setenv("JWT_SECRET", "test-secret-32-chars-minimum-please-ok")
-        monkeypatch.setenv("JWT_LIFETIME_SECONDS", "3600")
-        monkeypatch.setenv("BACKEND_CORS_ORIGINS", "")
-
-        from ibkr_control.config import get_settings
-
-        get_settings.cache_clear()
-
-        cfg = build_alembic_config()
-        # alembic command.upgrade is sync — run in thread to not block event loop.
-        await asyncio.to_thread(command.upgrade, cfg, "head")
-
-        yield owner_url
-
-
-@pytest.fixture
-async def app_with_db(_migrated_app_db, monkeypatch):
-    """The endpoint app, wired to a MIGRATED DB and connecting as ``app_rls``.
+async def app_with_db(test_db, monkeypatch):  # noqa: F811 — test_db es fixture importada, no redefinida
+    """The endpoint app, wired to a MIGRATED clone DB and connecting as ``app_rls``.
 
     The app's ``get_async_session`` is overridden to yield sessions on an engine
     that authenticates as the non-bypass ``app_rls`` role. Each request's
     ``org_context`` dependency ``SET LOCAL``s ``app.current_org`` / ``current_user``
     on that session, so RLS scopes every org-scoped query to the request's org.
     """
-    owner_url = _migrated_app_db
+    owner_url = test_db
     app_dsn = swap_dsn_credentials(owner_url, "app_rls", app_rls_password())
 
     engine = create_async_engine(app_dsn)
@@ -188,7 +146,7 @@ async def db_engine(postgres_container):
 
 
 @pytest.fixture
-async def app_owner_engine(_migrated_app_db):
+async def app_owner_engine(test_db):  # noqa: F811 — test_db es fixture importada, no redefinida
     """OWNER engine on the SAME migrated DB the endpoint app (``app_with_db``) uses.
 
     Used by the endpoint seeding fixtures (``auth_headers_with_org`` &c.) to
@@ -200,7 +158,7 @@ async def app_owner_engine(_migrated_app_db):
     owner/create_all ``db_session`` world). Endpoint seeding targets the migrated
     DB; model-level tests stay on the create_all DB.
     """
-    engine = create_async_engine(_migrated_app_db, echo=False)
+    engine = create_async_engine(test_db, echo=False)
     try:
         yield engine
     finally:
@@ -208,13 +166,13 @@ async def app_owner_engine(_migrated_app_db):
 
 
 @pytest.fixture
-async def app_rls_db_session(_migrated_app_db):
+async def app_rls_db_session(test_db):  # noqa: F811 — test_db es fixture importada, no redefinida
     """A direct session on the migrated app DB, connecting as ``app_rls``.
 
     For assertions about the role the endpoint app runs under (e.g. it is NOT
     the bypass owner). Same non-superuser role + DB as ``app_with_db``.
     """
-    app_dsn = swap_dsn_credentials(_migrated_app_db, "app_rls", app_rls_password())
+    app_dsn = swap_dsn_credentials(test_db, "app_rls", app_rls_password())
     engine = create_async_engine(app_dsn, echo=False)
     session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     try:
@@ -363,7 +321,7 @@ async def auth_headers_with_org(client: AsyncClient, app_owner_engine) -> dict:
     via la API (dispara on_after_register → UserSettings) y luego inserta el
     org/membership/party PARA ese usuario ya registrado.
 
-    Comparte la DB migrada del app vía app_owner_engine (mismo `_migrated_app_db` que
+    Comparte la DB migrada del app vía app_owner_engine (mismo `test_db` que
     app_with_db). Seedea como OWNER (superuser → bypassa RLS); `parties` está bajo
     FORCE RLS, así que setea `app.current_org` antes de insertar el Party para que
     pase el WITH CHECK (mismo patrón que rls_session_factory.seed).
