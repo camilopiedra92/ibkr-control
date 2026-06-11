@@ -41,6 +41,16 @@ async def _seed_account_and_cp(db_session, org_id):
 
 
 async def _insert_transfer(db_session, org_id, **overrides):
+    # TL-D5 (spec 2026-06-11): el CHECK bicondicional exige instrument_id
+    # non-NULL para securities (asset_class != 'CASH'). El FOP GLOB de estos
+    # tests es STK, así que seedeamos su instrument (control-plane) primero.
+    instrument_id = (
+        await db_session.execute(
+            text(
+                "INSERT INTO instruments (symbol, asset_class) VALUES ('GLOB', 'STK') RETURNING id"
+            )
+        )
+    ).scalar_one()
     cols = {
         "organization_id": org_id,
         "transaction_id": "T-ARC-1",
@@ -50,6 +60,9 @@ async def _insert_transfer(db_session, org_id, **overrides):
         "src_counterparty_id": None,
         "dst_account_id": None,
         "dst_counterparty_id": None,
+        "instrument_id": instrument_id,
+        "asset_class": "STK",
+        "conid": "160756766",
         "symbol": "GLOB",
         "qty": Decimal("94"),
         "transfer_type": "FOP",
@@ -59,9 +72,11 @@ async def _insert_transfer(db_session, org_id, **overrides):
         text(
             """INSERT INTO transfers
            (organization_id, transaction_id, transfer_date, direction, src_account_id,
-            src_counterparty_id, dst_account_id, dst_counterparty_id, symbol, qty, transfer_type)
+            src_counterparty_id, dst_account_id, dst_counterparty_id, instrument_id,
+            asset_class, conid, symbol, qty, transfer_type)
            VALUES (:organization_id, :transaction_id, :transfer_date, :direction, :src_account_id,
-            :src_counterparty_id, :dst_account_id, :dst_counterparty_id, :symbol, :qty, :transfer_type)"""
+            :src_counterparty_id, :dst_account_id, :dst_counterparty_id, :instrument_id,
+            :asset_class, :conid, :symbol, :qty, :transfer_type)"""
         ),
         cols,
     )

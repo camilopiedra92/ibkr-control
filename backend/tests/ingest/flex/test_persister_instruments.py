@@ -2,8 +2,10 @@
 
 Cubre la cadena conid -> identifier -> instrument -> FK en los hechos, la
 idempotencia (re-persist no crea instruments nuevos), el ticker change (mismo
-conid, symbol last-seen), y la semántica resolver-only de cash/transfers
-(conid ausente o sin instrument => instrument_id NULL, NUNCA crea).
+conid, symbol last-seen), la semántica resolver-only de cash (conid ausente o
+sin instrument => instrument_id NULL, NUNCA crea) y el rol creator de los
+transfers de securities (TL-D1, spec 2026-06-11: assetCategory != 'CASH' trae
+spec completo de instrumento y crea el instrument; CASH => NULL por diseño).
 """
 
 from datetime import date, datetime
@@ -11,7 +13,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ibkr_control.db.models.flex_raw import CashTransaction, Trade
@@ -21,6 +23,7 @@ from ibkr_control.ingest.flex._models import (
     ParsedCashTransaction,
     ParsedClosedLot,
     ParsedTrade,
+    ParsedTransfer,
     ParsedXML,
 )
 from ibkr_control.ingest.flex.parser import parse
@@ -318,14 +321,11 @@ async def test_fop_closed_lot_creates_instrument(db_session: AsyncSession, sampl
 
 
 @pytest.mark.asyncio
-async def test_fop_transfer_instrument_id_null_resolver_no_creator(
-    db_session: AsyncSession, sample_org
-):
-    """End-to-end on the real FOP fixture: the FOP transfer carries a conid
-    (160756766) that appears ONLY on <Transfer> (no creator). The resolver does
-    NOT create an instrument for it, so the transfer's instrument_id stays NULL."""
-    from sqlalchemy import text
-
+async def test_fop_transfer_creates_instrument_and_resolves(db_session: AsyncSession, sample_org):
+    """TL-D1 end-to-end contra el fixture FOP real: el transfer de security ES
+    creator — crea el instrument GLOB (conid 160756766 + isin) y el transfer
+    queda con instrument_id non-NULL. Flip del test pre-spec-2026-06-11 que
+    lockeaba el NULL (supersede T1-D8/CR-1)."""
     xml = (FIXTURE_DIR / "ACTIVITY_2026_FOP_sanitized.xml").read_bytes()
     parsed = parse(xml)
     await persist(
@@ -335,18 +335,67 @@ async def test_fop_transfer_instrument_id_null_resolver_no_creator(
         xml_bytes=xml,
         source="manual_upload",
     )
-    # No instrument was created for the transfer-only conid.
     ident = await db_session.scalar(
         select(InstrumentIdentifier).where(InstrumentIdentifier.id_value == "160756766")
     )
-    assert ident is None
-    # The FOP transfer row has a NULL instrument_id.
-    fop_iid = (
+    assert ident is not None
+    isin_ident = await db_session.scalar(
+        select(InstrumentIdentifier).where(InstrumentIdentifier.id_value == "LU0974299876")
+    )
+    assert isin_ident is not None
+    assert isin_ident.instrument_id == ident.instrument_id
+    # El transfer es el ÚNICO creator de GLOB en este fixture: su spec
+    # (_merge con name=tr.description) debe poblar la fila Instrument completa.
+    inst = await db_session.scalar(select(Instrument).where(Instrument.id == ident.instrument_id))
+    assert inst.symbol == "GLOB"
+    assert inst.asset_class == "STK"
+    assert inst.name == "GLOBANT SA"
+    rows = (
         await db_session.execute(
-            text("SELECT instrument_id FROM transfers WHERE transaction_id = '39584831194'")
+            text("SELECT instrument_id, asset_class, conid FROM transfers ORDER BY transaction_id")
         )
-    ).scalar_one()
-    assert fop_iid is None
+    ).all()
+    assert len(rows) == 2  # FOP IN + INTERNAL OUT, ambos GLOB
+    for instrument_id, asset_class, conid in rows:
+        assert instrument_id == ident.instrument_id
+        assert asset_class == "STK"
+        assert conid == "160756766"
+
+
+@pytest.mark.asyncio
+async def test_cash_transfer_no_instrument_no_creation(db_session: AsyncSession, sample_org):
+    """TL-D1: CASH interno -> instrument_id NULL, conid NULL, cero instruments."""
+    transfer = ParsedTransfer(
+        transaction_id="XFER-CASH-1",
+        transfer_date=date(2026, 5, 1),
+        direction="OUT",
+        src_ibkr_account_id="U99999001",
+        dst_ibkr_account_id="U99999002",
+        symbol="--",
+        qty=Decimal("0"),
+        transfer_type="INTERNAL",
+        asset_class="CASH",
+        conid=None,
+    )
+    p = _xml("U99999001", [])
+    p.accounts.append(ParsedAccount(ibkr_account_id="U99999002", currency="USD"))
+    p.transfers = [transfer]
+    await persist(
+        db_session,
+        parsed=p,
+        organization_id=sample_org.id,
+        xml_bytes=b"<cash-xfer/>",
+        source="manual_upload",
+    )
+    n_instruments = await db_session.scalar(select(func.count()).select_from(Instrument))
+    assert n_instruments == 0
+    row = (
+        await db_session.execute(
+            text("SELECT instrument_id, conid FROM transfers WHERE transaction_id = 'XFER-CASH-1'")
+        )
+    ).one()
+    assert row.instrument_id is None
+    assert row.conid is None
 
 
 @pytest.mark.asyncio

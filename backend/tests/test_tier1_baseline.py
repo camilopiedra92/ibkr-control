@@ -214,6 +214,74 @@ def test_instruments_tables_exist_no_rls(fresh_postgres, monkeypatch):
     ], rows
 
 
+def test_transfer_cash_iff_no_instrument_check(fresh_postgres, monkeypatch):
+    """TL-D5 (spec 2026-06-11): CHECK bicondicional en transfers —
+    (asset_class = 'CASH') = (instrument_id IS NULL). Los transfers de securities
+    son creators (instrument_id NOT NULL de facto); los CASH internos no tienen
+    instrumento. El invariante vive en SQL (precedente T1-D2 / exclusive arcs):
+    un writer futuro que lo viole rebota en la DB, no solo en el persister."""
+    from sqlalchemy.exc import IntegrityError
+
+    sync_url = _upgrade_head(fresh_postgres, monkeypatch)
+    engine = create_engine(sync_url)
+    with engine.connect() as conn:
+        constraint = conn.execute(
+            text(
+                "SELECT conname FROM pg_constraint"
+                " WHERE conrelid = 'transfers'::regclass"
+                " AND conname = 'ck_transfers_transfer_cash_iff_no_instrument'"
+            )
+        ).scalar()
+    assert constraint is not None
+
+    # Behavioral leg: a security transfer (STK) with NULL instrument_id violates
+    # the biconditional and is rejected by the DB itself.
+    with engine.begin() as conn:
+        org_id = conn.execute(
+            text("INSERT INTO organizations (type, name) VALUES ('personal', 'Org') RETURNING id")
+        ).scalar_one()
+        acct_id = conn.execute(
+            text(
+                "INSERT INTO accounts (organization_id, ibkr_account_id, currency) "
+                "VALUES (:o, 'U99999001', 'USD') RETURNING id"
+            ).bindparams(o=org_id)
+        ).scalar_one()
+    with pytest.raises(IntegrityError, match="ck_transfers_transfer_cash_iff_no_instrument"):
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO transfers "
+                    "(organization_id, transaction_id, transfer_date, direction, "
+                    " src_account_id, dst_account_id, instrument_id, asset_class, "
+                    " conid, symbol, qty, transfer_type) "
+                    "VALUES (:o, 'T-1', '2026-04-30', 'IN', :a, :a, NULL, 'STK', "
+                    " '160756766', 'GLOB', 94, 'FOP')"
+                ).bindparams(o=org_id, a=acct_id)
+            )
+
+    # Inverse leg: a CASH transfer with a non-NULL instrument_id also violates
+    # the biconditional (the leg a buggy backfill script would hit).
+    with engine.begin() as conn:
+        iid = conn.execute(
+            text(
+                "INSERT INTO instruments (symbol, asset_class) VALUES ('GLOB', 'STK') RETURNING id"
+            )
+        ).scalar_one()
+    with pytest.raises(IntegrityError, match="ck_transfers_transfer_cash_iff_no_instrument"):
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO transfers "
+                    "(organization_id, transaction_id, transfer_date, direction, "
+                    " src_account_id, dst_account_id, instrument_id, asset_class, "
+                    " conid, symbol, qty, transfer_type) "
+                    "VALUES (:o, 'T-2', '2026-05-01', 'OUT', :a, :a, :i, 'CASH', "
+                    " NULL, '--', 0, 'INTERNAL')"
+                ).bindparams(o=org_id, a=acct_id, i=iid)
+            )
+    engine.dispose()
+
+
 def test_instrument_identifiers_unique(fresh_postgres, monkeypatch):
     """W2 (T1-D7): UNIQUE(id_type, id_value) — the same conid cannot map to two
     instruments. A second ('conid','265598') row violates

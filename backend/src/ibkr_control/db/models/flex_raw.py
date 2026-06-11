@@ -308,6 +308,10 @@ class Transfer(Base):
             "(dst_account_id IS NOT NULL) <> (dst_counterparty_id IS NOT NULL)",
             name="dst_arc",
         ),
+        CheckConstraint(
+            "(asset_class = 'CASH') = (instrument_id IS NULL)",
+            name="transfer_cash_iff_no_instrument",
+        ),
         UniqueConstraint(
             "organization_id", "transaction_id", name="uq_transfers_org_transaction_id"
         ),
@@ -349,13 +353,18 @@ class Transfer(Base):
     dst_counterparty_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("counterparties.id", ondelete="RESTRICT"), nullable=True
     )
-    # W2 (T1-D8): FK al securities master, NULLABLE por CR-1. Los FOP de GLOB
-    # (STK) no traen conid y los CASH internos (symbol="--") menos; resolver-only
-    # (lookup por conid si está, NUNCA crea). El linaje instrumento<->transfer FOP
-    # se reconstruye en el domain layer Phase 3 (join por symbol contra lots).
+    # TL-D1 (spec 2026-06-11, supersede T1-D8/CR-1): los transfers de securities
+    # (asset_class != 'CASH') son CREATORS del securities master — el tag trae
+    # conid+isin+description 100% en data real (el comentario anterior "los FOP
+    # no traen conid" era un error del grep inicial). instrument_id es NULL SOLO
+    # para los CASH internos (symbol="--", sin conid): plata, no instrumento.
+    # Invariante lockeado por el CHECK bicondicional (TL-D5).
     instrument_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("instruments.id", ondelete="RESTRICT"), nullable=True
     )
+    # TL-D4: fidelidad de fuente (simetría con accruals — conid crudo conservado).
+    asset_class: Mapped[str] = mapped_column(String, nullable=False)
+    conid: Mapped[str | None] = mapped_column(String, nullable=True)
     symbol: Mapped[str] = mapped_column(String, nullable=False)
     qty: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
     transfer_type: Mapped[str] = mapped_column(String, nullable=False)
@@ -397,6 +406,10 @@ class CashTransaction(Base):
     instrument_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("instruments.id", ondelete="RESTRICT"), nullable=True
     )
+    # TL-D4: conid crudo, fidelidad de fuente — un instrument_id NULL es
+    # auditable sin re-parsear xml_bytes. Nullable real: la Flex Query 2024 ni
+    # trae la columna; fees/intereses no tienen instrumento.
+    conid: Mapped[str | None] = mapped_column(String, nullable=True)
     type: Mapped[str] = mapped_column(String, nullable=False)
     currency: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'USD'"))
     amount_usd: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)

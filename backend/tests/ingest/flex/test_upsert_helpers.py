@@ -139,6 +139,9 @@ async def test_upsert_immutable_returning_inserted_filters_noop(
     """Returning helper para Transfers: solo rows insertadas, no NO-OP."""
     # src_account_id must be non-NULL (exclusive arc: exactly one of
     # src_account_id / src_counterparty_id required per ck_transfers_src_arc).
+    # TL-D5: security transfer (STK) => instrument_id non-NULL (CHECK
+    # bicondicional ck_transfers_transfer_cash_iff_no_instrument).
+    iid = await _make_instrument(db_session)
     base = dict(
         organization_id=sample_account.organization_id,
         flex_import_id=sample_flex_import.id,
@@ -146,7 +149,10 @@ async def test_upsert_immutable_returning_inserted_filters_noop(
         direction="IN",
         src_account_id=sample_account.id,
         dst_account_id=sample_account.id,
-        symbol="MSFT",
+        instrument_id=iid,
+        asset_class="STK",
+        conid="265598",
+        symbol="AAPL",
         qty=Decimal("100"),
         transfer_type="ACATS",
     )

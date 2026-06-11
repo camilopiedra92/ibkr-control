@@ -39,7 +39,9 @@ NO van en ``_ORG_SCOPED_TABLES``, como ``trm_days``/``institutions``) y la
 columna ``instrument_id`` FK ``RESTRICT`` en los 7 hechos: NOT NULL en
 trades/closed_lots/open_position_lots/accruals×2 (CR-1: conid 100% presente),
 nullable en cash_transactions/transfers (la Flex Query 2024 no trae conid en
-cash; los FOP STK tampoco). Se agrega el índice ``(account_id, instrument_id)``
+cash; los FOP STK tampoco — dato corregido en amendment #6: los FOP STK SÍ
+traen conid, era un error del grep inicial). Se agrega el índice
+``(account_id, instrument_id)``
 en los 5 creators y ``instrument_id`` simple en cash/transfers. La sección
 autogenerada se regeneró canónicamente (container, DB virgen) y se trasplantó
 entre los marcadores — los columnas/índices/FK se fold-earon dentro de cada
@@ -54,6 +56,18 @@ container, DB virgen, splice entre marcadores) + entrada en
 ``_ORG_SCOPED_TABLES`` (su policy RLS sale del loop de la sección hand-written
 3) — los tres en lockstep con ``db/rls.py::ORG_SCOPED_TABLES`` (el guard
 ``test_org_scoped_snapshot_matches_live_ssot`` lo exige).
+
+**Amendment #6 (transfer↔instrument lineage, TL-D1/D4/D5 — spec 2026-06-11):**
+los transfers de securities pasan a CREATORS del securities master (el split
+creator/resolver va por calidad de evidencia, no por tag). Delta: columnas
+``transfers.asset_class`` (NOT NULL) + ``transfers.conid`` (nullable) +
+``cash_transactions.conid`` (nullable, fidelidad de fuente TL-D4) y el CHECK
+bicondicional ``ck_transfers_transfer_cash_iff_no_instrument``
+(``(asset_class = 'CASH') = (instrument_id IS NULL)``, TL-D5). Delta editado a
+mano dentro de los ``create_table`` existentes (3 columnas + 1 CHECK,
+autocontenido — mismo criterio que la sustracción del amendment #3) y validado
+por el drift test (Base.metadata == schema migrado). SIN cambios RLS
+(``_ORG_SCOPED_TABLES`` intacto).
 
 El DDL de ``upgrade()`` hasta el marcador ``end Alembic commands`` es
 autogenerado canónicamente (container, DB virgen, ``alembic revision
@@ -749,6 +763,7 @@ def upgrade() -> None:
         sa.Column("transaction_id", sa.String(), nullable=False),
         sa.Column("account_id", sa.BigInteger(), nullable=False),
         sa.Column("instrument_id", sa.BigInteger(), nullable=True),
+        sa.Column("conid", sa.String(), nullable=True),
         sa.Column("type", sa.String(), nullable=False),
         sa.Column("currency", sa.String(), server_default=sa.text("'USD'"), nullable=False),
         sa.Column("amount_usd", sa.Numeric(precision=20, scale=4), nullable=False),
@@ -1206,6 +1221,8 @@ def upgrade() -> None:
         sa.Column("dst_account_id", sa.BigInteger(), nullable=True),
         sa.Column("dst_counterparty_id", sa.BigInteger(), nullable=True),
         sa.Column("instrument_id", sa.BigInteger(), nullable=True),
+        sa.Column("asset_class", sa.String(), nullable=False),
+        sa.Column("conid", sa.String(), nullable=True),
         sa.Column("symbol", sa.String(), nullable=False),
         sa.Column("qty", sa.Numeric(precision=20, scale=8), nullable=False),
         sa.Column("transfer_type", sa.String(), nullable=False),
@@ -1217,6 +1234,10 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "(src_account_id IS NOT NULL) <> (src_counterparty_id IS NOT NULL)",
             name=op.f("ck_transfers_src_arc"),
+        ),
+        sa.CheckConstraint(
+            "(asset_class = 'CASH') = (instrument_id IS NULL)",
+            name=op.f("ck_transfers_transfer_cash_iff_no_instrument"),
         ),
         sa.ForeignKeyConstraint(
             ["dst_account_id"],
