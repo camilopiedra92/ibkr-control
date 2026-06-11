@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from testcontainers.postgres import PostgresContainer
 
 from ibkr_control.main import create_app
-from ibkr_control.db.base import Base
+from ibkr_control.db.base import Base  # noqa: F401 — TODO Task 3: huérfano tras quitar create_all de db_session/db_engine
 from ibkr_control.db.rls import app_rls_password
 from ibkr_control.db.session import get_async_session
 
@@ -85,47 +85,28 @@ async def client(app_with_db):
 
 
 @pytest.fixture
-async def db_session(postgres_container, monkeypatch):
-    """Sesion de DB directa para tests de schema/modelos (sin HTTP layer).
+async def db_session(test_db):  # noqa: F811 — test_db es fixture importada, no redefinida
+    """Sesion de DB directa (OWNER) sobre un clon migrado del template.
 
-    Crea las tablas via Base.metadata.create_all (misma ruta que app_with_db),
-    pero expone la sesion directamente para hacer DML/DDL checks.
-    Cada test obtiene una sesion limpia; las tablas se recrean por test.
+    Para tests de schema/modelos sin HTTP layer. El schema viene del template
+    migrado via ``alembic upgrade head`` (NO de ``Base.metadata.create_all``), asi
+    que estos tests corren contra el schema que se deploya: constraints,
+    server_defaults, las policies RLS con FORCE, el rol ``app_rls`` y la funcion
+    SECURITY DEFINER, y los seeds de control-plane (p.ej. ``institutions.ibkr``)
+    existen igual que en prod. Conecta como el OWNER del contenedor (superuser ->
+    bypassa RLS aun bajo FORCE), igual que antes; el flip a ``app_rls`` es PR-C.
+
+    Cada test recibe su propio clon (``test_db`` es function-scoped), asi que el
+    aislamiento ya no necesita ``create_all``/``drop_all``: el clon nace pristino
+    y se dropea en el teardown de ``test_db``.
     """
-    url = postgres_container.get_connection_url()
-    monkeypatch.setenv("DATABASE_URL", url)
-    monkeypatch.setenv("JWT_SECRET", "test-secret-32-chars-minimum-please-ok")
-
-    from ibkr_control.config import get_settings
-
-    get_settings.cache_clear()
-
-    import ibkr_control.db  # noqa: F401 — registra todos los modelos en Base.metadata
-
-    engine = create_async_engine(url)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        # create_all builds tables but NOT roles/functions (those live only in
-        # migrations). Apply the app_rls role grants (idempotent CREATE ROLE) +
-        # the SECURITY DEFINER enum function (H1) so cron tests exercising
-        # _run_flex_for_all_orgs against this create_all world can call
-        # system_credentialed_org_ids() (its GRANT targets app_rls). SQL is the
-        # SSOT in db/rls.py.
-        from sqlalchemy import text as _text
-
-        from ibkr_control.db.rls import app_role_grants_sql, system_enum_function_sql
-
-        for _stmt in [*app_role_grants_sql(), *system_enum_function_sql()]:
-            await conn.execute(_text(_stmt))
-
+    engine = create_async_engine(test_db)
     session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-
-    async with session_maker() as session:
-        yield session
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-    await engine.dispose()
+    try:
+        async with session_maker() as session:
+            yield session
+    finally:
+        await engine.dispose()
 
 
 @pytest.fixture
