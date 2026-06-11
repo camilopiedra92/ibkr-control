@@ -14,6 +14,8 @@ from ibkr_control.ingest.flex._models import (
     ParsedXML,
 )
 
+from tests.conftest import scope_session_to_org
+
 FIXTURE_DIR = __import__("pathlib").Path(__file__).parent.parent.parent / "fixtures" / "xml"
 
 
@@ -841,6 +843,9 @@ async def test_persist_stamps_organization_id_on_all_rows(db_session):
     org = Organization(type="personal", name="H")
     db_session.add(org)
     await db_session.flush()
+    # Inline org (no sample_org) → scope the session to it (stash + apply to the
+    # already-open transaction the flush above started).
+    await scope_session_to_org(db_session, org.id)
     parsed = _make_parsed(account_id="U99999001", n_trades=2)
     fi_id, _ = await persist(
         db_session,

@@ -38,12 +38,15 @@ def test_flex_daily_references_per_org_runner():
 
 @pytest.mark.asyncio
 async def test_run_flex_for_all_orgs_iterates_distinct_orgs(
-    db_session, sample_org, sample_user, monkeypatch
+    owner_session, sample_org, sample_user, monkeypatch
 ):
     """The Flex cron iterates distinct organization_ids with an active ibkr_flex
     connection (via system_credentialed_org_ids()) and calls
     flex_job.run(organization_id=<org>, trigger='cron') for each — the ingest is
-    purely org-scoped (D-CONV-3), no triggering user."""
+    purely org-scoped (D-CONV-3), no triggering user.
+
+    Control-plane (enumeracion cross-tenant del cron) → usa ``owner_session``
+    (bypass RLS) para seedear dos orgs con su connection."""
     import base64
 
     from ibkr_control.db.models.organizations import Organization
@@ -56,12 +59,12 @@ async def test_run_flex_for_all_orgs_iterates_distinct_orgs(
 
     # Second tenant with its own connection.
     org2 = Organization(type="personal", name="Org Two")
-    db_session.add(org2)
-    await db_session.flush()
-    await db_session.commit()
+    owner_session.add(org2)
+    await owner_session.flush()
+    await owner_session.commit()
 
-    await _seed_connection(db_session, sample_org.id, query_id="q1")
-    await _seed_connection(db_session, org2.id, query_id="q2")
+    await _seed_connection(owner_session, sample_org.id, query_id="q1")
+    await _seed_connection(owner_session, org2.id, query_id="q2")
 
     calls: list[dict] = []
 

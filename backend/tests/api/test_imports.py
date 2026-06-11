@@ -43,7 +43,7 @@ async def test_upload_duplicate_returns_409(client: AsyncClient, auth_headers_wi
 
 async def test_upload_same_xml_two_orgs_isolated_universes(
     client: AsyncClient,
-    app_owner_engine,
+    owner_engine,
     auth_headers_with_org: dict,
     second_auth_headers_with_org: dict,
 ):
@@ -83,9 +83,7 @@ async def test_upload_same_xml_two_orgs_isolated_universes(
     # copia del import y de la cuenta para el mismo hash / mismo ibkr_account_id.
     from ibkr_control.ingest.hash_dedup import xml_hash
 
-    session_maker = async_sessionmaker(
-        app_owner_engine, expire_on_commit=False, class_=AsyncSession
-    )
+    session_maker = async_sessionmaker(owner_engine, expire_on_commit=False, class_=AsyncSession)
     h = xml_hash(xml)
     async with session_maker() as s:
         n_imports_for_hash = await s.scalar(

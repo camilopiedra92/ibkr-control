@@ -14,6 +14,8 @@ from ibkr_control.ingest.flex import job as flex_job
 from ibkr_control.db.models.flex_raw import FlexImport
 from ibkr_control.db.models.ingest_log import IngestLog
 
+from tests.conftest import scope_session_to_org
+
 FIXTURE_DIR = Path(__file__).parent.parent.parent / "fixtures" / "xml"
 
 
@@ -90,6 +92,7 @@ async def test_ingest_xml_logs_failure_on_parse_error(
 
     maker2 = async_sessionmaker(db_engine, expire_on_commit=False, class_=AS2)
     async with maker2() as s2:
+        await scope_session_to_org(s2, sample_org.id)
         row = await s2.scalar(
             select(IngestLog)
             .where(
@@ -184,6 +187,7 @@ async def test_ingest_xml_rolls_back_persister_on_failure(
 
     maker2 = async_sessionmaker(db_engine, expire_on_commit=False, class_=AS2)
     async with maker2() as s2:
+        await scope_session_to_org(s2, sample_org.id)
         # Post-Task-7: a poison FlexImport row must exist (R2 contract).
         # The SAVEPOINT rollback still reverts partial persister writes (e.g.
         # no CashTransaction rows), but the poison row itself is written outside
@@ -271,6 +275,7 @@ async def test_run_happy_path_with_mocked_flex_client(
     assert summary.n_restatements == 0
 
     async with SessionLocal() as s2:
+        await scope_session_to_org(s2, sample_org.id)
         fi = await s2.get(FlexImport, flex_import_id)
         assert fi is not None
         assert fi.organization_id == sample_org.id
@@ -348,6 +353,7 @@ async def test_run_iterates_all_active_connections(
     assert results[conn_a] != results[conn_b]
 
     async with SessionLocal() as s2:
+        await scope_session_to_org(s2, sample_org.id)
         n_fi = await s2.scalar(
             select(func.count(FlexImport.id)).where(FlexImport.organization_id == sample_org.id)
         )
@@ -414,6 +420,7 @@ async def test_run_skips_disabled_connections(
     assert set(results.keys()) == {conn_active}
 
     async with SessionLocal() as s2:
+        await scope_session_to_org(s2, sample_org.id)
         n_fi = await s2.scalar(
             select(func.count(FlexImport.id)).where(FlexImport.organization_id == sample_org.id)
         )
@@ -471,6 +478,7 @@ async def test_run_auth_error_transitions_reauth_required(
     assert conn_b not in summary.failures
 
     async with SessionLocal() as s2:
+        await scope_session_to_org(s2, sample_org.id)
         a = await s2.get(Connection, conn_a)
         assert a.status == "reauth_required"
         assert "1018" in (a.status_reason or "")
@@ -602,6 +610,7 @@ async def test_run_idempotent_across_different_xmls_with_overlapping_trades(
     assert fi_id_2 != fi_id_1, "Different XML bytes should create a new FlexImport"
 
     async with SessionLocal() as s2:
+        await scope_session_to_org(s2, sample_org.id)
         n_ok = await s2.scalar(
             select(func.count(IngestLog.id)).where(
                 IngestLog.job_kind == "flex",
@@ -676,6 +685,7 @@ async def test_run_returns_none_if_hash_already_known(
     assert res_2[conn_id] is None
 
     async with SessionLocal() as s2:
+        await scope_session_to_org(s2, sample_org.id)
         n_fi = await s2.scalar(
             select(func.count(FlexImport.id)).where(FlexImport.organization_id == sample_org.id)
         )

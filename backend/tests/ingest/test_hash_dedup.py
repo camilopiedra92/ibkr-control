@@ -99,7 +99,7 @@ async def test_check_hash_status_poison_when_hash_marked_poison(
 
 @pytest.mark.asyncio
 async def test_check_hash_status_absent_when_hash_exists_for_different_org(
-    db_session: AsyncSession,
+    owner_session: AsyncSession,
     sample_org,
     sample_user,
     second_sample_user,
@@ -108,6 +108,9 @@ async def test_check_hash_status_absent_when_hash_exists_for_different_org(
 
     second_sample_user founds its own org (Membership owner); we read its
     organization_id from the membership to scope the cross-tenant check.
+
+    Inherentemente cross-tenant (escribe y consulta dos orgs) → usa
+    ``owner_session`` (bypass RLS).
     """
     from sqlalchemy import select
 
@@ -115,12 +118,12 @@ async def test_check_hash_status_absent_when_hash_exists_for_different_org(
     from ibkr_control.db.models.memberships import Membership
     from ibkr_control.ingest.hash_dedup import check_hash_status, xml_hash
 
-    org_b_id = await db_session.scalar(
+    org_b_id = await owner_session.scalar(
         select(Membership.organization_id).where(Membership.user_id == second_sample_user.id)
     )
 
     h = xml_hash(b"<xml-org-a/>")
-    db_session.add(
+    owner_session.add(
         FlexImport(
             organization_id=sample_org.id,
             anyo=2026,
@@ -134,12 +137,12 @@ async def test_check_hash_status_absent_when_hash_exists_for_different_org(
             status="ok",
         )
     )
-    await db_session.commit()
+    await owner_session.commit()
 
     # Org B no debe ver el hash de Org A
-    status_b = await check_hash_status(db_session, org_b_id, h)
+    status_b = await check_hash_status(owner_session, org_b_id, h)
     assert status_b == "absent"
 
     # Org A sí lo ve
-    status_a = await check_hash_status(db_session, sample_org.id, h)
+    status_a = await check_hash_status(owner_session, sample_org.id, h)
     assert status_a == "ok"

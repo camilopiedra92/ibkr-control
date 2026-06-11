@@ -9,7 +9,7 @@ from pathlib import Path
 
 from sqlalchemy import text
 
-from ibkr_control.db.rls import apply_org_context, set_session_org_context
+from tests.conftest import scope_session_to_org
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "xml"
 
@@ -58,8 +58,7 @@ async def test_same_xml_ingested_by_two_orgs_isolated_universes(rls_session_fact
     counts: dict[int, int] = {}
     for org_id in (org_a, org_b):
         async with app_factory() as s:
-            set_session_org_context(s, org_id=org_id, user_id=None)
-            await apply_org_context(s, org_id=org_id, user_id=None)
+            await scope_session_to_org(s, org_id)
             await flex_persister.persist(
                 s,
                 parsed=parsed,
@@ -90,8 +89,7 @@ async def test_reingest_same_org_stays_idempotent(rls_session_factory):
 
     for _ in range(2):
         async with app_factory() as s:
-            set_session_org_context(s, org_id=org_a, user_id=None)
-            await apply_org_context(s, org_id=org_a, user_id=None)
+            await scope_session_to_org(s, org_a)
             await flex_persister.persist(
                 s,
                 parsed=flex_parser.parse(xml_bytes),
