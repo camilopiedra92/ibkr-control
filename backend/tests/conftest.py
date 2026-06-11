@@ -110,16 +110,14 @@ async def db_session(test_db):  # noqa: F811 — test_db es fixture importada, n
 
 
 @pytest.fixture
-async def db_engine(postgres_container):
-    """Engine sharing the testcontainer with db_session; used by tests that need to
-    open multiple concurrent sessions (e.g. advisory lock contention) on the
-    owner + create_all world.
+async def db_engine(test_db):  # noqa: F811 — test_db es fixture importada, no redefinida
+    """OWNER engine sobre el mismo clon migrado, para tests que abren multiples
+    sesiones concurrentes (p.ej. contencion de advisory locks).
 
-    Function-scoped (not session-scoped) so it does not outlive per-test DB state.
-    Uses the same postgres_container URL as db_session (asyncpg driver included).
-    """
-    url = postgres_container.get_connection_url()
-    engine = create_async_engine(url, echo=False)
+    Multi-conexion real: ``test_db`` es una base de datos independiente, asi que
+    dos engines/conexiones se comportan como en prod. Function-scoped: un clon por
+    test (compartido con ``db_session`` si el test pide ambos -> misma DB)."""
+    engine = create_async_engine(test_db, echo=False)
     try:
         yield engine
     finally:
