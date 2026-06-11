@@ -85,21 +85,19 @@ async def client(app_with_db):
 
 @pytest.fixture
 async def db_session(test_db):  # noqa: F811 — parámetro de fixture pytest inyecta test_db; sombrea el import a propósito
-    """Sesion de DB directa (OWNER) sobre un clon migrado del template.
+    """Sesion del model world como ``app_rls`` (NO bypass) sobre un clon migrado.
 
-    Para tests de schema/modelos sin HTTP layer. El schema viene del template
-    migrado via ``alembic upgrade head`` (NO de ``Base.metadata.create_all``), asi
-    que estos tests corren contra el schema que se deploya: constraints,
-    server_defaults, las policies RLS con FORCE, el rol ``app_rls`` y la funcion
-    SECURITY DEFINER, y los seeds de control-plane (p.ej. ``institutions.ibkr``)
-    existen igual que en prod. Conecta como el OWNER del contenedor (superuser ->
-    bypassa RLS aun bajo FORCE), igual que antes; el flip a ``app_rls`` es PR-C.
-
-    Cada test recibe su propio clon (``test_db`` es function-scoped), asi que el
-    aislamiento ya no necesita ``create_all``/``drop_all``: el clon nace pristino
-    y se dropea en el teardown de ``test_db``.
+    RLS se enforce­a igual que en prod: cada query org-scoped se filtra por
+    ``app.current_org``. El contexto lo centraliza ``sample_org`` (via
+    ``set_session_org_context`` + el listener ``after_begin`` de db/rls.py), asi
+    que los tests single-tenant que cuelgan de ``sample_*`` quedan scopeados sin
+    boilerplate. Tests sin ``sample_org`` que escriben filas org-scoped deben
+    setear contexto ellos mismos; los cross-tenant/control-plane usan
+    ``owner_session``. Default fail-closed: sin contexto, las tablas org-scoped
+    devuelven 0 filas / el WITH CHECK rechaza el insert.
     """
-    engine = create_async_engine(test_db)
+    app_dsn = swap_dsn_credentials(test_db, "app_rls", app_rls_password())
+    engine = create_async_engine(app_dsn)
     session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     try:
         async with session_maker() as session:
@@ -109,7 +107,7 @@ async def db_session(test_db):  # noqa: F811 — parámetro de fixture pytest in
 
 
 @pytest.fixture
-async def owner_session(test_db):  # noqa: F811 — test_db es fixture importada, no redefinida
+async def owner_session(test_db):  # noqa: F811 — parámetro de fixture pytest inyecta test_db; sombrea el import a propósito
     """Sesion OWNER (bypass RLS) sobre un clon migrado — EXCEPCION nombrada.
 
     Para los tests que genuinamente necesitan bypassear RLS: seeding cross-tenant
@@ -149,8 +147,10 @@ async def owner_engine(test_db):  # noqa: F811 — parámetro de fixture pytest 
     ``test_db`` migrado. Lo consumen tanto el seeding de endpoints
     (``auth_headers_with_org`` &c., que seedea la DB que ``app_with_db`` sirve)
     como los tests model-world que genuinamente necesitan bypassear RLS: seeding
-    cross-tenant, control-plane (enumeracion del cron), tenant-wipe. El default del
-    model world es ``db_engine`` (app_rls); esto es la salida explicita per D2/D4.
+    cross-tenant, control-plane (enumeracion del cron), tenant-wipe. El flip de
+    db_engine a app_rls es Task 3 de PR-C; el default del model world apunta a
+    ``db_engine`` (app_rls) una vez hecho ese flip. Esto es la salida explicita
+    per D2/D4.
     """
     engine = create_async_engine(test_db, echo=False)
     try:
@@ -186,11 +186,18 @@ async def sample_org(db_session: AsyncSession):
     obtienen de aquí.
     """
     from ibkr_control.db.models.organizations import Organization
+    from ibkr_control.db.rls import apply_org_context, set_session_org_context
 
     org = Organization(type="personal", name="Fixture Org")
     db_session.add(org)
     await db_session.commit()
     await db_session.refresh(org)
+    # Stash on session.info so the after_begin listener re-applies the GUC on every
+    # subsequent transaction (gold-standard pattern, test_account_multihome) ...
+    set_session_org_context(db_session, org_id=org.id, user_id=None)
+    # ... and apply to the transaction the refresh above already opened (the
+    # listener only fires on a NEW tx begin, so the currently-open one needs it).
+    await apply_org_context(db_session, org_id=org.id, user_id=None)
     return org
 
 

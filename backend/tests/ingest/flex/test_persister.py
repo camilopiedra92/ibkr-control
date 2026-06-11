@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ibkr_control.db.rls import apply_org_context, set_session_org_context
 from ibkr_control.ingest.flex.persister import persist
 from ibkr_control.ingest.flex._models import (
     ParsedAccount,
@@ -841,6 +842,10 @@ async def test_persist_stamps_organization_id_on_all_rows(db_session):
     org = Organization(type="personal", name="H")
     db_session.add(org)
     await db_session.flush()
+    # Inline org (no sample_org) → set RLS context for the rest of this session,
+    # and apply to the already-open transaction the flush above started.
+    set_session_org_context(db_session, org_id=org.id, user_id=None)
+    await apply_org_context(db_session, org_id=org.id, user_id=None)
     parsed = _make_parsed(account_id="U99999001", n_trades=2)
     fi_id, _ = await persist(
         db_session,
