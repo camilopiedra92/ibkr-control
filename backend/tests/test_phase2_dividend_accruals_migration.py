@@ -8,6 +8,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
+async def _make_instrument(db_session: AsyncSession) -> int:
+    """Seed a control-plane Instrument (W2 NOT NULL FK on accrual facts)."""
+    from ibkr_control.db.models.instruments import Instrument
+
+    inst = Instrument(symbol="AAPL", asset_class="STK")
+    db_session.add(inst)
+    await db_session.flush()
+    return inst.id
+
+
 @pytest.mark.asyncio
 async def test_dividend_accrual_tables_exist(db_session: AsyncSession):
     for t in ("change_in_dividend_accruals", "open_dividend_accruals"):
@@ -59,11 +69,13 @@ async def test_change_in_dividend_accruals_orphaned_on_flex_import_delete(
     await db_session.commit()
     fi_id = fi.id
 
+    iid = await _make_instrument(db_session)
     db_session.add(
         ChangeInDividendAccrual(
             organization_id=sample_org.id,
             flex_import_id=fi_id,
             account_id=sample_account.id,
+            instrument_id=iid,
             symbol="AAPL",
             currency="USD",
             report_date=date(2025, 3, 15),
@@ -114,11 +126,13 @@ async def test_open_dividend_accruals_orphaned_on_flex_import_delete(
     await db_session.commit()
     fi_id = fi.id
 
+    iid = await _make_instrument(db_session)
     db_session.add(
         OpenDividendAccrual(
             organization_id=sample_org.id,
             flex_import_id=fi_id,
             account_id=sample_account.id,
+            instrument_id=iid,
             symbol="NKE",
             currency="USD",
             report_date=date(2025, 12, 31),
@@ -166,11 +180,13 @@ async def test_change_in_dividend_accruals_report_date_not_null(
     db_session.add(fi)
     await db_session.commit()
 
+    iid = await _make_instrument(db_session)
     db_session.add(
         ChangeInDividendAccrual(
             organization_id=sample_org.id,
             flex_import_id=fi.id,
             account_id=sample_account.id,
+            instrument_id=iid,
             symbol="AAPL",
             currency="USD",
             report_date=None,  # violates NOT NULL
@@ -206,11 +222,13 @@ async def test_open_dividend_accruals_report_date_not_null(
     db_session.add(fi)
     await db_session.commit()
 
+    iid = await _make_instrument(db_session)
     db_session.add(
         OpenDividendAccrual(
             organization_id=sample_org.id,
             flex_import_id=fi.id,
             account_id=sample_account.id,
+            instrument_id=iid,
             symbol="NKE",
             currency="USD",
             report_date=None,  # violates NOT NULL

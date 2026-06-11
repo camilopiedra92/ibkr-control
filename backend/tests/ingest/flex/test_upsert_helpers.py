@@ -14,6 +14,16 @@ from ibkr_control.ingest.flex._upsert_helpers import (
 )
 
 
+async def _make_instrument(db_session: AsyncSession) -> int:
+    """Seed a control-plane Instrument (W2 NOT NULL FK on trades/lots)."""
+    from ibkr_control.db.models.instruments import Instrument
+
+    inst = Instrument(symbol="AAPL", asset_class="STK")
+    db_session.add(inst)
+    await db_session.flush()
+    return inst.id
+
+
 def test_chunks_splits_iterable():
     assert list(_chunks([1, 2, 3, 4, 5], 2)) == [[1, 2], [3, 4], [5]]
     assert list(_chunks([], 10)) == []
@@ -25,10 +35,12 @@ async def test_upsert_immutable_inserts_then_noop(
     db_session: AsyncSession, sample_account, sample_flex_import
 ):
     """Primera ronda inserta N rows, segunda devuelve 0 (DO NOTHING)."""
+    iid = await _make_instrument(db_session)
     base_row = dict(
         organization_id=sample_account.organization_id,
         flex_import_id=sample_flex_import.id,
         account_id=sample_account.id,
+        instrument_id=iid,
         symbol="AAPL",
         asset_class="STK",
         trade_date=date(2025, 1, 15),
@@ -58,10 +70,12 @@ async def test_upsert_snapshot_inserts_then_updates(
     db_session: AsyncSession, sample_account, sample_flex_import
 ):
     """Snapshot UPSERT: insert nuevo, update si conflicto, mantiene n_touched."""
+    iid = await _make_instrument(db_session)
     base_row = dict(
         organization_id=sample_account.organization_id,
         flex_import_id=sample_flex_import.id,
         account_id=sample_account.id,
+        instrument_id=iid,
         symbol="AAPL",
         asset_class="STK",
         open_date=date(2025, 1, 15),
@@ -170,10 +184,12 @@ async def test_upsert_immutable_batches_large_input(
     from ibkr_control.ingest.flex import _upsert_helpers as mod
 
     monkeypatch.setattr(mod, "_BATCH_SIZE", 4)
+    iid = await _make_instrument(db_session)
     base_row = dict(
         organization_id=sample_account.organization_id,
         flex_import_id=sample_flex_import.id,
         account_id=sample_account.id,
+        instrument_id=iid,
         symbol="AAPL",
         asset_class="STK",
         trade_date=date(2025, 1, 15),

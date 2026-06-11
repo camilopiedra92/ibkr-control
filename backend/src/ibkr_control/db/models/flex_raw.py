@@ -120,6 +120,7 @@ class Trade(Base):
         CheckConstraint("buy_sell IN ('BUY', 'SELL')", name="buy_sell"),
         UniqueConstraint("organization_id", "transaction_id", name="uq_trades_org_transaction_id"),
         Index(None, "account_id", "symbol"),
+        Index(None, "account_id", "instrument_id"),
         Index(None, "trade_date"),
         Index(None, "flex_import_id"),
         {
@@ -143,6 +144,13 @@ class Trade(Base):
     account_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False
     )
+    # W2 (T1-D8): FK al securities master. NOT NULL fail-loud - CR-1 verificó
+    # conid 100% presente en este tag contra los 3 fixtures reales. symbol y
+    # asset_class se conservan como fidelidad de fuente; el agrupado canónico
+    # (FIFO Phase 3) es por (account_id, instrument_id) - inmune a ticker changes.
+    instrument_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("instruments.id", ondelete="RESTRICT"), nullable=False
+    )
     symbol: Mapped[str] = mapped_column(String, nullable=False)
     asset_class: Mapped[str] = mapped_column(String, nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -162,6 +170,7 @@ class ClosedLot(Base):
     __tablename__ = "closed_lots"
     __table_args__ = (
         Index(None, "account_id", "symbol"),
+        Index(None, "account_id", "instrument_id"),
         Index(None, "flex_import_id"),
         Index(None, "source_trade_id"),
         UniqueConstraint(
@@ -193,6 +202,11 @@ class ClosedLot(Base):
     transaction_id: Mapped[str] = mapped_column(String, nullable=False)
     account_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False
+    )
+    # W2 (T1-D8): FK al securities master. NOT NULL fail-loud - CR-1 verificó
+    # conid 100% presente en este tag contra los 3 fixtures reales.
+    instrument_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("instruments.id", ondelete="RESTRICT"), nullable=False
     )
     symbol: Mapped[str] = mapped_column(String, nullable=False)
     asset_class: Mapped[str] = mapped_column(String, nullable=False)
@@ -227,6 +241,7 @@ class OpenPositionLot(Base):
     __tablename__ = "open_position_lots"
     __table_args__ = (
         Index(None, "account_id", "symbol"),
+        Index(None, "account_id", "instrument_id"),
         Index(None, "organization_id"),
         Index(None, "flex_import_id"),
         # A3 amendment 2026-05-25: extended natural key with
@@ -262,6 +277,11 @@ class OpenPositionLot(Base):
     account_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False
     )
+    # W2 (T1-D8): FK al securities master. NOT NULL fail-loud - CR-1 verificó
+    # conid 100% presente en este tag contra los 3 fixtures reales.
+    instrument_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("instruments.id", ondelete="RESTRICT"), nullable=False
+    )
     symbol: Mapped[str] = mapped_column(String, nullable=False)
     asset_class: Mapped[str] = mapped_column(String, nullable=False)
     open_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -292,6 +312,7 @@ class Transfer(Base):
             "organization_id", "transaction_id", name="uq_transfers_org_transaction_id"
         ),
         Index(None, "flex_import_id"),
+        Index(None, "instrument_id"),
         Index(None, "src_account_id"),
         Index(None, "dst_account_id"),
         Index(None, "src_counterparty_id"),
@@ -328,6 +349,13 @@ class Transfer(Base):
     dst_counterparty_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("counterparties.id", ondelete="RESTRICT"), nullable=True
     )
+    # W2 (T1-D8): FK al securities master, NULLABLE por CR-1. Los FOP de GLOB
+    # (STK) no traen conid y los CASH internos (symbol="--") menos; resolver-only
+    # (lookup por conid si está, NUNCA crea). El linaje instrumento<->transfer FOP
+    # se reconstruye en el domain layer Phase 3 (join por symbol contra lots).
+    instrument_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("instruments.id", ondelete="RESTRICT"), nullable=True
+    )
     symbol: Mapped[str] = mapped_column(String, nullable=False)
     qty: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
     transfer_type: Mapped[str] = mapped_column(String, nullable=False)
@@ -340,6 +368,7 @@ class CashTransaction(Base):
             "organization_id", "transaction_id", name="uq_cash_transactions_org_transaction_id"
         ),
         Index(None, "date"),
+        Index(None, "instrument_id"),
         Index(None, "flex_import_id"),
         {
             "comment": (
@@ -362,6 +391,12 @@ class CashTransaction(Base):
     account_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False
     )
+    # W2 (T1-D8): FK al securities master, NULLABLE por CR-1. La Flex Query 2024
+    # ni trae la columna conid en cash; fees/intereses no tienen instrumento;
+    # resolver-only (lookup por conid si está, NUNCA crea).
+    instrument_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("instruments.id", ondelete="RESTRICT"), nullable=True
+    )
     type: Mapped[str] = mapped_column(String, nullable=False)
     currency: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'USD'"))
     amount_usd: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
@@ -375,6 +410,7 @@ class ChangeInDividendAccrual(Base):
     __table_args__ = (
         Index(None, "report_date"),
         Index(None, "account_id", "symbol"),
+        Index(None, "account_id", "instrument_id"),
         Index(None, "organization_id"),
         Index(None, "flex_import_id"),
         # A3 amendment #2 (2026-05-25): extended natural key with
@@ -413,6 +449,12 @@ class ChangeInDividendAccrual(Base):
     account_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False
     )
+    # W2 (T1-D8): FK al securities master. NOT NULL fail-loud - CR-1 verificó
+    # conid 100% presente en este tag contra los fixtures reales. La columna
+    # conid raw se conserva como fidelidad de fuente.
+    instrument_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("instruments.id", ondelete="RESTRICT"), nullable=False
+    )
     symbol: Mapped[str] = mapped_column(String, nullable=False)
     conid: Mapped[str | None] = mapped_column(String, nullable=True)
     isin: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -446,6 +488,7 @@ class OpenDividendAccrual(Base):
     __table_args__ = (
         Index(None, "report_date"),
         Index(None, "account_id", "symbol"),
+        Index(None, "account_id", "instrument_id"),
         Index(None, "organization_id"),
         Index(None, "flex_import_id"),
         # A3 amendment #2 preemptive mirror (2026-05-25): extended natural key
@@ -480,6 +523,12 @@ class OpenDividendAccrual(Base):
     )
     account_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False
+    )
+    # W2 (T1-D8): FK al securities master. NOT NULL fail-loud - CR-1 verificó
+    # conid 100% presente en este tag contra los fixtures reales. La columna
+    # conid raw se conserva como fidelidad de fuente.
+    instrument_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("instruments.id", ondelete="RESTRICT"), nullable=False
     )
     symbol: Mapped[str] = mapped_column(String, nullable=False)
     conid: Mapped[str | None] = mapped_column(String, nullable=True)

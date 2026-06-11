@@ -191,3 +191,60 @@ def test_connections_subtype_integrity(fresh_postgres, monkeypatch):
                 ).bindparams(c=conn_id, o=org_id, tok=b"x")
             )
     engine.dispose()
+
+
+def test_instruments_tables_exist_no_rls(fresh_postgres, monkeypatch):
+    """W2 (T1-D7/D9): instruments + instrument_identifiers exist after upgrade and
+    are CONTROL PLANE — RLS is OFF (relrowsecurity = false), mirror of the
+    institutions catalog. They must NOT be in _ORG_SCOPED_TABLES (no
+    organization_id, AAPL is AAPL for every tenant)."""
+    sync_url = _upgrade_head(fresh_postgres, monkeypatch)
+    engine = create_engine(sync_url)
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT relname, relrowsecurity FROM pg_class "
+                "WHERE relname IN ('instruments', 'instrument_identifiers') ORDER BY relname"
+            )
+        ).all()
+    engine.dispose()
+    assert rows == [
+        ("instrument_identifiers", False),
+        ("instruments", False),
+    ], rows
+
+
+def test_instrument_identifiers_unique(fresh_postgres, monkeypatch):
+    """W2 (T1-D7): UNIQUE(id_type, id_value) — the same conid cannot map to two
+    instruments. A second ('conid','265598') row violates
+    uq_instrument_identifiers_id_type_id_value."""
+    from sqlalchemy.exc import IntegrityError
+
+    sync_url = _upgrade_head(fresh_postgres, monkeypatch)
+    engine = create_engine(sync_url)
+    with engine.begin() as conn:
+        iid1 = conn.execute(
+            text(
+                "INSERT INTO instruments (symbol, asset_class) VALUES ('AAPL', 'STK') RETURNING id"
+            )
+        ).scalar_one()
+        iid2 = conn.execute(
+            text(
+                "INSERT INTO instruments (symbol, asset_class) VALUES ('AAPL2', 'STK') RETURNING id"
+            )
+        ).scalar_one()
+        conn.execute(
+            text(
+                "INSERT INTO instrument_identifiers (instrument_id, id_type, id_value) "
+                "VALUES (:i, 'conid', '265598')"
+            ).bindparams(i=iid1)
+        )
+    with pytest.raises(IntegrityError, match="uq_instrument_identifiers_id_type_id_value"):
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO instrument_identifiers (instrument_id, id_type, id_value) "
+                    "VALUES (:i, 'conid', '265598')"
+                ).bindparams(i=iid2)
+            )
+    engine.dispose()
