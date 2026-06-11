@@ -18,6 +18,8 @@ function substepColor(status: string | undefined): string {
       return "text-blue-600";
     case "ok":
       return "text-green-600";
+    case "partial":
+      return "text-amber-600";
     case "failed":
       return "text-red-600";
     default:
@@ -31,6 +33,8 @@ function substepIcon(status: string | undefined): string {
       return "⏳";
     case "ok":
       return "✓";
+    case "partial":
+      return "⚠";
     case "failed":
       return "✗";
     default:
@@ -39,7 +43,7 @@ function substepIcon(status: string | undefined): string {
 }
 
 interface SubstepState {
-  status: "pending" | "running" | "ok" | "failed";
+  status: "pending" | "running" | "ok" | "partial" | "failed";
   detail?: string;
 }
 
@@ -57,6 +61,8 @@ function buildSubstepStates(events: StreamEvent[]): Record<string, SubstepState>
           ? `${ev.n_days} dias`
           : ev.status === "ok" && ev.n_trades !== undefined
           ? `${ev.n_trades} trades`
+          : ev.status === "partial"
+          ? `${ev.n_connections_failed ?? 0} conexión/es fallaron`
           : ev.status === "failed"
           ? ev.error
           : undefined;
@@ -103,15 +109,27 @@ export function ManualRefreshButton({ onDone }: ManualRefreshButtonProps) {
   // useEffects read each other's stale state when the failed+done events land
   // in the same React batch (then finished would latch true alongside a red row).
   const hasFailed = events.some((ev) => ev.status === "failed");
-  const finished = isDone && !hasFailed && !streamError;
+  const hasPartial = events.some((ev) => ev.status === "partial");
+  // Partial is a terminal-but-not-clean state: the run reached step=done with
+  // >=1 connection OK and >=1 failed. We must NOT show the green all-clear; we
+  // surface an amber warning instead (see below).
+  const finished = isDone && !hasFailed && !hasPartial && !streamError;
+  const partialDone = isDone && hasPartial && !hasFailed && !streamError;
+  const partialFailedCount = events.reduce(
+    (acc, ev) =>
+      ev.status === "partial" ? acc + (ev.n_connections_failed ?? 0) : acc,
+    0
+  );
   const isRunning = jobId !== null && !isDone && !hasFailed;
   const substepStates = buildSubstepStates(events);
   const showSubsteps = jobId !== null;
 
   useEffect(() => {
-    if (finished) onDone?.();
+    // Both a clean finish and a partial finish wrote new ingest rows, so the
+    // log table should refresh in either case.
+    if (finished || partialDone) onDone?.();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finished]);
+  }, [finished, partialDone]);
 
   function handleTrigger() {
     setJobId(null);
@@ -171,6 +189,13 @@ export function ManualRefreshButton({ onDone }: ManualRefreshButtonProps) {
       {finished && (
         <p className="text-sm text-green-600 font-medium">
           ✓ Refresh completado correctamente.
+        </p>
+      )}
+
+      {partialDone && (
+        <p className="text-sm text-amber-600 font-medium">
+          ⚠ Completado con advertencias ({partialFailedCount} conexión/es
+          fallaron). Revisá Conexiones en Settings.
         </p>
       )}
 

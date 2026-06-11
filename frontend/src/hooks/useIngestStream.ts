@@ -5,9 +5,12 @@ import { getToken } from "@/lib/auth/storeToken";
 
 export interface StreamEvent {
   step: string;
-  status?: "running" | "ok" | "failed";
+  status?: "running" | "ok" | "partial" | "failed";
   n_days?: number;
   n_trades?: number;
+  // W1: partial-failure surfacing for flex_ytd (some connections OK, some failed).
+  n_connections_ok?: number;
+  n_connections_failed?: number;
   // Phase 2.5 idempotent persister counters (spec A5)
   n_observed_trades?: number;
   n_observed_lots_closed?: number;

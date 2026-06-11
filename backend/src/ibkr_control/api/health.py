@@ -6,9 +6,14 @@ Two planes, two sources (D-CONV-1):
   ingest_log). TRM only records successful imports, so failure observability is
   staleness of max(fetched_at) here; rich failure tracking is SP8.
 
-The IngestSourceHealth / IngestHealthResponse shapes stay identical (frontend
-contract): both sources surface last_success_at / last_failure_at /
-consecutive_failures / last_error.
+The IngestSourceHealth shape stays identical (frontend contract): both sources
+surface last_success_at / last_failure_at / consecutive_failures / last_error.
+
+The connections plane (additive): per-connection state from the W4 state machine
+(connection.status / status_reason / last_sync_at). This is the durable signal of
+a partial failure — when an org has multiple connections and one fails while
+another succeeds, the manual-refresh SSE collapses to "ok"; the per-connection
+status here is what makes that partial failure VISIBLE to the frontend.
 """
 
 from datetime import datetime, timezone
@@ -20,6 +25,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ibkr_control.api._context import org_context
+from ibkr_control.api._schemas import ConnectionStatus
+from ibkr_control.db.models.connections import Connection
 from ibkr_control.db.models.ingest_log import IngestLog
 from ibkr_control.db.models.trm import TrmImport
 from ibkr_control.db.session import get_async_session
@@ -36,8 +43,19 @@ class IngestSourceHealth(BaseModel):
     last_error: str | None
 
 
+class ConnectionHealth(BaseModel):
+    id: int
+    display_name: str | None
+    # ConnectionStatus Literal (no str): orval genera un union de strings en el
+    # cliente TS, habilitando switch exhaustivo sobre status en el frontend.
+    status: ConnectionStatus
+    status_reason: str | None
+    last_sync_at: datetime | None
+
+
 class IngestHealthResponse(BaseModel):
     sources: list[IngestSourceHealth]
+    connections: list[ConnectionHealth]
     checked_at: datetime
 
 
@@ -107,6 +125,25 @@ async def _trm_health(session: AsyncSession) -> IngestSourceHealth:
     )
 
 
+async def _connection_health(session: AsyncSession) -> list[ConnectionHealth]:
+    """Per-connection state from the W4 state machine (RLS scopes to the org).
+
+    Ordered by id for a deterministic response. Surfaces the durable
+    partial-failure signal (status / status_reason / last_sync_at).
+    """
+    rows = await session.scalars(select(Connection).order_by(Connection.id))
+    return [
+        ConnectionHealth(
+            id=c.id,
+            display_name=c.display_name,
+            status=c.status,
+            status_reason=c.status_reason,
+            last_sync_at=c.last_sync_at,
+        )
+        for c in rows
+    ]
+
+
 @router.get("/ingest", response_model=IngestHealthResponse)
 async def get_ingest_health(
     org_id: int = Depends(org_context),
@@ -114,7 +151,9 @@ async def get_ingest_health(
 ) -> IngestHealthResponse:
     flex = await _flex_health(session, organization_id=org_id)
     trm = await _trm_health(session)
+    connections = await _connection_health(session)
     return IngestHealthResponse(
         sources=[flex, trm],
+        connections=connections,
         checked_at=datetime.now(timezone.utc),
     )

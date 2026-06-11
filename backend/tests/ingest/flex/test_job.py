@@ -214,38 +214,38 @@ async def test_ingest_xml_rolls_back_persister_on_failure(
 
 
 # ---------------------------------------------------------------------------
-# Tests for run() — the cron entry point
+# Tests for run() — the cron entry point (W1: iterates connections)
 # ---------------------------------------------------------------------------
+#
+# run() now returns dict[connection_id, flex_import_id | None] and iterates ALL
+# active ibkr_flex connections of the org, isolating per-connection failures
+# (each transitions its own connection_state + writes its own ingest_log row).
+
+
+def _set_token_key(monkeypatch, seed: bytes = b"Y") -> None:
+    import base64
+
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", base64.b64encode(seed * 32).decode("ascii"))
 
 
 @pytest.mark.asyncio
 async def test_run_happy_path_with_mocked_flex_client(
     monkeypatch, db_session: AsyncSession, db_engine, sample_org
 ):
-    """run() fetches from Flex WS (mocked), persists XML, marks log ok."""
-    import base64
+    """run() fetches from Flex WS (mocked) for the org's single connection,
+    persists XML, marks log ok, and returns {connection_id: flex_import_id}."""
     from sqlalchemy.ext.asyncio import async_sessionmaker
-    from ibkr_control.db.models.flex_credentials import FlexCredentials
+
     from ibkr_control.db.models.flex_raw import FlexImport
     from ibkr_control.db.models.ingest_log import IngestLog
     from ibkr_control.ingest.flex import client as client_mod
-    from ibkr_control.ingest.flex import crypto as crypto_mod
+    from ibkr_control.ingest.flex import job as flex_job_mod
 
-    # Set TOKEN_ENCRYPTION_KEY before calling encrypt_token
-    test_key = base64.b64encode(b"Y" * 32).decode("ascii")
-    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", test_key)
+    from tests.ingest.flex.conftest import _seed_connection
 
-    # Write FlexCredentials for sample_org (creds are per-org now)
-    encrypted = crypto_mod.encrypt_token("test-token-real")
-    creds = FlexCredentials(
-        organization_id=sample_org.id,
-        token_encrypted=encrypted,
-        ytd_query_id="QUERY-123",
-    )
-    db_session.add(creds)
-    await db_session.commit()
+    _set_token_key(monkeypatch)
+    conn_id = await _seed_connection(db_session, sample_org.id, query_id="QUERY-123")
 
-    # Prepare canned XML from fixture
     xml_bytes = (FIXTURE_DIR / "empty_query_response.xml").read_bytes()
 
     async def fake_send_request(self, query_id):
@@ -259,36 +259,291 @@ async def test_run_happy_path_with_mocked_flex_client(
     monkeypatch.setattr(client_mod.FlexClient, "send_request", fake_send_request)
     monkeypatch.setattr(client_mod.FlexClient, "poll_statement", fake_poll_statement)
 
-    # session_factory backed by same test DB (schema already up via db_session fixture)
     SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
 
-    from ibkr_control.ingest.flex import job as flex_job_mod
-
-    flex_import_id = await flex_job_mod.run(
-        SessionLocal, organization_id=sample_org.id, trigger="cron"
-    )
+    results = (
+        await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    ).results
+    assert set(results.keys()) == {conn_id}
+    flex_import_id = results[conn_id]
     assert flex_import_id is not None
 
-    # Verify FlexImport row was created correctly
     async with SessionLocal() as s2:
         fi = await s2.get(FlexImport, flex_import_id)
         assert fi is not None
-        # The persister stamps organization_id on the FlexImport. The ingest path
-        # is purely org-scoped (D-CONV-3) — no user_id on operational tables.
         assert fi.organization_id == sample_org.id
         assert fi.source == "web_service"
         assert fi.status == "ok"
+        assert fi.connection_id == conn_id
 
-        # Verify ingest_log row was created with correct metadata (org-scoped)
         n_logs = await s2.scalar(
             select(func.count(IngestLog.id)).where(
                 IngestLog.job_kind == "flex",
                 IngestLog.organization_id == sample_org.id,
                 IngestLog.status == "ok",
                 IngestLog.trigger == "cron",
+                IngestLog.connection_id == conn_id,
             )
         )
         assert n_logs >= 1
+
+        # Connection ended active + last_sync_status='ok'.
+        from ibkr_control.db.models.connections import Connection
+
+        conn = await s2.get(Connection, conn_id)
+        assert conn.status == "active"
+        assert conn.last_sync_status == "ok"
+
+
+@pytest.mark.asyncio
+async def test_run_iterates_all_active_connections(
+    monkeypatch, db_session: AsyncSession, db_engine, sample_org
+):
+    """Two active connections in the org -> two flex_imports (each stamped with
+    its own connection_id), two ok ingest_log rows, both connections active."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from ibkr_control.db.models.connections import Connection
+    from ibkr_control.db.models.flex_raw import FlexImport
+    from ibkr_control.db.models.ingest_log import IngestLog
+    from ibkr_control.ingest.flex import client as client_mod
+    from ibkr_control.ingest.flex import job as flex_job_mod
+
+    from tests.ingest.flex.conftest import _seed_connection
+
+    _set_token_key(monkeypatch)
+    conn_a = await _seed_connection(db_session, sample_org.id, query_id="Q-A")
+    conn_b = await _seed_connection(db_session, sample_org.id, query_id="Q-B")
+
+    # DIFFERENT fixtures (distinct anyo) per connection so each produces its own
+    # import: distinct bytes escape the per-org hash dedup
+    # (uq_flex_imports_org_xml_hash), and distinct anyo escapes the R1 latest-1
+    # rolling cleanup (keyed on (org, anyo, source)) — otherwise the second
+    # persist would evict the first.
+    xml_by_query = {
+        "Q-A": (FIXTURE_DIR / "ACTIVITY_2024_sanitized.xml").read_bytes(),
+        "Q-B": (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes(),
+    }
+    seen_query = {"current": None}
+
+    async def fake_send_request(self, query_id):
+        seen_query["current"] = query_id
+        return f"REF-{query_id}"
+
+    async def fake_poll_statement(self, reference_code, max_wait_seconds=300):
+        return xml_by_query[seen_query["current"]]
+
+    monkeypatch.setattr(client_mod.FlexClient, "send_request", fake_send_request)
+    monkeypatch.setattr(client_mod.FlexClient, "poll_statement", fake_poll_statement)
+
+    SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
+    results = (
+        await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    ).results
+
+    assert set(results.keys()) == {conn_a, conn_b}
+    assert all(v is not None for v in results.values())
+    assert results[conn_a] != results[conn_b]
+
+    async with SessionLocal() as s2:
+        n_fi = await s2.scalar(
+            select(func.count(FlexImport.id)).where(FlexImport.organization_id == sample_org.id)
+        )
+        assert n_fi == 2
+        # Each import stamped with the right connection_id.
+        fi_a = await s2.get(FlexImport, results[conn_a])
+        fi_b = await s2.get(FlexImport, results[conn_b])
+        assert fi_a.connection_id == conn_a
+        assert fi_b.connection_id == conn_b
+
+        n_logs = await s2.scalar(
+            select(func.count(IngestLog.id)).where(
+                IngestLog.job_kind == "flex",
+                IngestLog.organization_id == sample_org.id,
+                IngestLog.status == "ok",
+            )
+        )
+        assert n_logs == 2
+
+        for cid in (conn_a, conn_b):
+            conn = await s2.get(Connection, cid)
+            assert conn.status == "active"
+            assert conn.last_sync_status == "ok"
+
+
+@pytest.mark.asyncio
+async def test_run_skips_disabled_connections(
+    monkeypatch, db_session: AsyncSession, db_engine, sample_org
+):
+    """A disabled connection is not iterated; only the active one produces an
+    import, and the disabled one is left untouched (no sync timestamp)."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from ibkr_control.db.models.connections import Connection
+    from ibkr_control.db.models.flex_raw import FlexImport
+    from ibkr_control.ingest.flex import client as client_mod
+    from ibkr_control.ingest.flex import job as flex_job_mod
+
+    from tests.ingest.flex.conftest import _seed_connection
+
+    _set_token_key(monkeypatch)
+    conn_active = await _seed_connection(db_session, sample_org.id, query_id="Q-ON")
+    conn_off = await _seed_connection(
+        db_session, sample_org.id, query_id="Q-OFF", status="disabled"
+    )
+
+    xml_bytes = (FIXTURE_DIR / "empty_query_response.xml").read_bytes()
+
+    async def fake_send_request(self, query_id):
+        assert query_id == "Q-ON", "disabled connection must not be fetched"
+        return "REF-ON"
+
+    async def fake_poll_statement(self, reference_code, max_wait_seconds=300):
+        return xml_bytes
+
+    monkeypatch.setattr(client_mod.FlexClient, "send_request", fake_send_request)
+    monkeypatch.setattr(client_mod.FlexClient, "poll_statement", fake_poll_statement)
+
+    SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
+    results = (
+        await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    ).results
+
+    assert set(results.keys()) == {conn_active}
+
+    async with SessionLocal() as s2:
+        n_fi = await s2.scalar(
+            select(func.count(FlexImport.id)).where(FlexImport.organization_id == sample_org.id)
+        )
+        assert n_fi == 1
+        off = await s2.get(Connection, conn_off)
+        assert off.status == "disabled"
+        assert off.last_sync_at is None
+
+
+@pytest.mark.asyncio
+async def test_run_auth_error_transitions_reauth_required(
+    monkeypatch, db_session: AsyncSession, db_engine, sample_org
+):
+    """Connection A raises FlexAuthError -> reauth_required + its ingest_log row
+    failed; connection B still succeeds. run() does NOT raise (>=1 success)."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from ibkr_control.db.models.connections import Connection
+    from ibkr_control.db.models.flex_raw import FlexImport
+    from ibkr_control.db.models.ingest_log import IngestLog
+    from ibkr_control.ingest.flex import client as client_mod
+    from ibkr_control.ingest.flex import job as flex_job_mod
+
+    from tests.ingest.flex.conftest import _seed_connection
+
+    _set_token_key(monkeypatch)
+    conn_a = await _seed_connection(db_session, sample_org.id, query_id="Q-BAD")
+    conn_b = await _seed_connection(db_session, sample_org.id, query_id="Q-GOOD")
+
+    xml_bytes = (FIXTURE_DIR / "empty_query_response.xml").read_bytes()
+    seen_query = {"current": None}
+
+    async def fake_send_request(self, query_id):
+        seen_query["current"] = query_id
+        if query_id == "Q-BAD":
+            raise client_mod.FlexAuthError("1018", "bad token")
+        return "REF-GOOD"
+
+    async def fake_poll_statement(self, reference_code, max_wait_seconds=300):
+        return xml_bytes
+
+    monkeypatch.setattr(client_mod.FlexClient, "send_request", fake_send_request)
+    monkeypatch.setattr(client_mod.FlexClient, "poll_statement", fake_poll_statement)
+
+    SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
+    summary = await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    results = summary.results
+
+    # B succeeded; A is absent from results (it failed before persist).
+    assert conn_b in results and results[conn_b] is not None
+    assert conn_a not in results
+    # A's failure is reported in the summary so _run_manual can surface 'partial'.
+    assert conn_a in summary.failures
+    assert "1018" in summary.failures[conn_a]
+    assert conn_b not in summary.failures
+
+    async with SessionLocal() as s2:
+        a = await s2.get(Connection, conn_a)
+        assert a.status == "reauth_required"
+        assert "1018" in (a.status_reason or "")
+        assert a.last_sync_status == "failed"
+
+        b = await s2.get(Connection, conn_b)
+        assert b.status == "active"
+        assert b.last_sync_status == "ok"
+
+        # A's ingest_log row is failed and carries A's connection_id.
+        n_failed_a = await s2.scalar(
+            select(func.count(IngestLog.id)).where(
+                IngestLog.organization_id == sample_org.id,
+                IngestLog.status == "failed",
+                IngestLog.connection_id == conn_a,
+            )
+        )
+        assert n_failed_a == 1
+
+        # B produced exactly one ok import.
+        n_fi = await s2.scalar(
+            select(func.count(FlexImport.id)).where(FlexImport.connection_id == conn_b)
+        )
+        assert n_fi == 1
+
+
+@pytest.mark.asyncio
+async def test_run_raises_when_all_connections_fail(
+    monkeypatch, db_session: AsyncSession, db_engine, sample_org
+):
+    """All connections raise FlexAuthError -> run() re-raises the last exception
+    (the _run_manual/SSE contract: a fully-failed run must surface)."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from ibkr_control.ingest.flex import client as client_mod
+    from ibkr_control.ingest.flex import job as flex_job_mod
+
+    from tests.ingest.flex.conftest import _seed_connection
+
+    _set_token_key(monkeypatch)
+    await _seed_connection(db_session, sample_org.id, query_id="Q-1")
+    await _seed_connection(db_session, sample_org.id, query_id="Q-2")
+
+    async def fake_send_request(self, query_id):
+        raise client_mod.FlexAuthError("1018", f"bad {query_id}")
+
+    async def fake_poll_statement(self, reference_code, max_wait_seconds=300):
+        raise AssertionError("poll should not be reached")
+
+    monkeypatch.setattr(client_mod.FlexClient, "send_request", fake_send_request)
+    monkeypatch.setattr(client_mod.FlexClient, "poll_statement", fake_poll_statement)
+
+    SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
+    with pytest.raises(client_mod.FlexAuthError):
+        await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+
+
+@pytest.mark.asyncio
+async def test_run_no_active_connections_raises(
+    monkeypatch, db_session: AsyncSession, db_engine, sample_org
+):
+    """An org with no active connections (all disabled) -> RuntimeError with a
+    clear message (nothing to fetch)."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from ibkr_control.ingest.flex import job as flex_job_mod
+
+    from tests.ingest.flex.conftest import _seed_connection
+
+    _set_token_key(monkeypatch)
+    await _seed_connection(db_session, sample_org.id, query_id="Q-OFF", status="disabled")
+
+    SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
+    with pytest.raises(RuntimeError, match="No active ibkr_flex connections"):
+        await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
 
 
 @pytest.mark.asyncio
@@ -297,43 +552,24 @@ async def test_run_idempotent_across_different_xmls_with_overlapping_trades(
 ):
     """Regression test para D13 [BUG-FIXED] (2026-05-25).
 
-    Pre Phase 2.5: el cron Flex fallaba al segundo run con
-    UniqueViolationError porque el persister dedupea solo a nivel xml_hash y
-    los XMLs YTD cambian byte-a-byte cada dia. Cada hash nuevo intentaba
-    re-INSERT de todos los trades del año -> choque con UNIQUE(transaction_id).
-
     Post Phase 2.5: el persister es idempotent fila por fila via UPSERT por
     natural key. Dos runs con XMLs distintos (hashes distintos) pero trades
-    overlapping deben ambos terminar OK, sin duplicados en DB.
+    overlapping deben ambos terminar OK, sin duplicados en DB. W1: la misma
+    connection corre dos veces.
     """
-    import base64
     from sqlalchemy.ext.asyncio import async_sessionmaker
-    from ibkr_control.db.models.flex_credentials import FlexCredentials
+
     from ibkr_control.db.models.flex_raw import FlexImport, Trade
     from ibkr_control.db.models.ingest_log import IngestLog
     from ibkr_control.ingest.flex import client as client_mod
-    from ibkr_control.ingest.flex import crypto as crypto_mod
     from ibkr_control.ingest.flex import job as flex_job_mod
 
-    test_key = base64.b64encode(b"D" * 32).decode("ascii")
-    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", test_key)
+    from tests.ingest.flex.conftest import _seed_connection
 
-    encrypted = crypto_mod.encrypt_token("test-token-d13")
-    db_session.add(
-        FlexCredentials(
-            organization_id=sample_org.id,
-            token_encrypted=encrypted,
-            ytd_query_id="QUERY-D13",
-        )
-    )
-    await db_session.commit()
+    _set_token_key(monkeypatch, seed=b"D")
+    conn_id = await _seed_connection(db_session, sample_org.id, query_id="QUERY-D13")
 
-    # Use the real 2025 sanitized fixture (has trades + accruals + transfers
-    # — exercises the full persister surface that originally crashed).
     xml_day1 = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
-    # Day 2: simulate IBKR re-emitting the same year with timestamp drift.
-    # Trailing whitespace changes the bytes (different hash) without
-    # affecting parsed content — exactly what happens day-over-day in YTD.
     xml_day2 = xml_day1 + b"\n<!-- regenerated -->\n"
 
     call_count = {"n": 0}
@@ -350,20 +586,20 @@ async def test_run_idempotent_across_different_xmls_with_overlapping_trades(
 
     SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
 
-    # First run: fresh insert, must succeed
-    fi_id_1 = await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    res_1 = (
+        await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    ).results
+    fi_id_1 = res_1[conn_id]
     assert fi_id_1 is not None
 
-    # Second run with a DIFFERENT XML (different hash) but overlapping trades.
-    # Pre-D13-fix this would crash with UniqueViolationError on trades_transaction_id_key.
-    # Post-fix it must succeed and return a new flex_import_id (new XML = new row),
-    # but children get DO NOTHING / DO UPDATE per entity type.
-    fi_id_2 = await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    res_2 = (
+        await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    ).results
+    fi_id_2 = res_2[conn_id]
     assert fi_id_2 is not None
     assert fi_id_2 != fi_id_1, "Different XML bytes should create a new FlexImport"
 
     async with SessionLocal() as s2:
-        # Both runs logged as ok in ingest_log
         n_ok = await s2.scalar(
             select(func.count(IngestLog.id)).where(
                 IngestLog.job_kind == "flex",
@@ -372,9 +608,8 @@ async def test_run_idempotent_across_different_xmls_with_overlapping_trades(
                 IngestLog.trigger == "cron",
             )
         )
-        assert n_ok == 2, "Both cron runs should be marked ok in ingest_log"
+        assert n_ok == 2
 
-        # ZERO failed logs (the original bug surfaced as failed rows)
         n_failed = await s2.scalar(
             select(func.count(IngestLog.id)).where(
                 IngestLog.job_kind == "flex",
@@ -382,57 +617,38 @@ async def test_run_idempotent_across_different_xmls_with_overlapping_trades(
                 IngestLog.status == "failed",
             )
         )
-        assert n_failed == 0, "No failed runs expected post-D13-fix"
+        assert n_failed == 0
 
-        # 2 flex_imports rows (one per distinct hash)
         n_fi = await s2.scalar(
             select(func.count(FlexImport.id)).where(FlexImport.organization_id == sample_org.id)
         )
         assert n_fi == 2
 
-        # Trades: ALL trades from the fixture, NOT duplicated across the 2 runs.
-        # Count by distinct transaction_id should equal total count.
         n_trades = await s2.scalar(select(func.count(Trade.id)))
         n_distinct_tx = await s2.scalar(select(func.count(func.distinct(Trade.transaction_id))))
-        assert n_trades == n_distinct_tx, (
-            f"trades duplicated across runs: {n_trades} rows but {n_distinct_tx} "
-            f"distinct transaction_ids — exactly the D13 bug if these differ"
-        )
+        assert n_trades == n_distinct_tx
 
-        # The second flex_import should report n_new_trades == 0 (all trades
-        # were already in DB from the first run).
         fi_2 = await s2.get(FlexImport, fi_id_2)
-        assert fi_2.n_new_trades == 0, (
-            f"Second run should have inserted 0 new trades; got {fi_2.n_new_trades}"
-        )
+        assert fi_2.n_new_trades == 0
 
 
 @pytest.mark.asyncio
 async def test_run_returns_none_if_hash_already_known(
     monkeypatch, db_session: AsyncSession, db_engine, sample_org
 ):
-    """If is_known_hash(fetched_xml) == True, run() returns None and items_processed=0."""
-    import base64
+    """If the fetched XML hash is already known, run() returns None for that
+    connection and items_processed=0."""
     from sqlalchemy.ext.asyncio import async_sessionmaker
-    from ibkr_control.db.models.flex_credentials import FlexCredentials
+
     from ibkr_control.db.models.flex_raw import FlexImport
     from ibkr_control.db.models.ingest_log import IngestLog
     from ibkr_control.ingest.flex import client as client_mod
-    from ibkr_control.ingest.flex import crypto as crypto_mod
     from ibkr_control.ingest.flex import job as flex_job_mod
 
-    test_key = base64.b64encode(b"Z" * 32).decode("ascii")
-    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", test_key)
+    from tests.ingest.flex.conftest import _seed_connection
 
-    encrypted = crypto_mod.encrypt_token("test-token-2")
-    db_session.add(
-        FlexCredentials(
-            organization_id=sample_org.id,
-            token_encrypted=encrypted,
-            ytd_query_id="QUERY-456",
-        )
-    )
-    await db_session.commit()
+    _set_token_key(monkeypatch, seed=b"Z")
+    conn_id = await _seed_connection(db_session, sample_org.id, query_id="QUERY-456")
 
     xml_bytes = (FIXTURE_DIR / "empty_query_response.xml").read_bytes()
 
@@ -447,22 +663,22 @@ async def test_run_returns_none_if_hash_already_known(
 
     SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
 
-    # First run: persists XML, returns a valid ID
-    fi_id_1 = await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
-    assert fi_id_1 is not None
+    res_1 = (
+        await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    ).results
+    assert res_1[conn_id] is not None
 
-    # Second run: same XML hash → early exit, returns None
-    fi_id_2 = await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
-    assert fi_id_2 is None
+    res_2 = (
+        await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    ).results
+    assert res_2[conn_id] is None
 
     async with SessionLocal() as s2:
-        # Only 1 FlexImport row should exist (the first one, not duplicated)
         n_fi = await s2.scalar(
             select(func.count(FlexImport.id)).where(FlexImport.organization_id == sample_org.id)
         )
         assert n_fi == 1
 
-        # Two ingest_log entries (one per run, both ok)
         n_logs = await s2.scalar(
             select(func.count(IngestLog.id)).where(
                 IngestLog.job_kind == "flex",
@@ -474,46 +690,35 @@ async def test_run_returns_none_if_hash_already_known(
 
 
 # ---------------------------------------------------------------------------
-# Task 6: per-user fast-path with distinct logging (ok vs poison)
+# Per-connection fast-path logging (ok vs poison)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_run_logs_info_on_ok_hash_skip(
-    monkeypatch,
-    caplog,
-    db_session,
-    db_engine,
-    sample_org,
+    monkeypatch, caplog, db_session, db_engine, sample_org
 ):
     """run() encuentra hash con status='ok' -> skip + info log."""
     from sqlalchemy.ext.asyncio import async_sessionmaker
-    from ibkr_control.db.models.flex_credentials import FlexCredentials
+
     from ibkr_control.db.models.flex_raw import FlexImport as FI
-    from ibkr_control.ingest.flex import crypto as flex_crypto_mod
+    from ibkr_control.ingest.flex import client as client_mod
+    from ibkr_control.ingest.flex import job as flex_job_mod
     from ibkr_control.ingest.hash_dedup import xml_hash
 
+    from tests.ingest.flex.conftest import _seed_connection
+
     caplog.set_level(logging.INFO, logger="ibkr_control.ingest.flex.job")
+    _set_token_key(monkeypatch, seed=b"K")
 
     xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
     h = xml_hash(xml)
 
-    # Seed credentials + existing flex_imports row with status='ok'
-    import base64
-
-    test_key = base64.b64encode(b"K" * 32).decode("ascii")
-    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", test_key)
-
-    db_session.add(
-        FlexCredentials(
-            organization_id=sample_org.id,
-            token_encrypted=flex_crypto_mod.encrypt_token("dummy-token"),
-            ytd_query_id="123456",
-        )
-    )
+    conn_id = await _seed_connection(db_session, sample_org.id, query_id="123456")
     db_session.add(
         FI(
             organization_id=sample_org.id,
+            connection_id=conn_id,
             xml_hash=h,
             xml_bytes=xml,
             xml_size_bytes=len(xml),
@@ -527,57 +732,43 @@ async def test_run_logs_info_on_ok_hash_skip(
     )
     await db_session.commit()
 
-    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
-
-    from ibkr_control.ingest.flex import client as client_mod
-
     monkeypatch.setattr(client_mod.FlexClient, "send_request", AsyncMock(return_value="ref-ok"))
     monkeypatch.setattr(client_mod.FlexClient, "poll_statement", AsyncMock(return_value=xml))
 
-    from ibkr_control.ingest.flex import job as flex_job_mod
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    result = (
+        await flex_job_mod.run(session_factory, organization_id=sample_org.id, trigger="cron")
+    ).results
 
-    result = await flex_job_mod.run(session_factory, organization_id=sample_org.id, trigger="cron")
-
-    assert result is None
+    assert result[conn_id] is None
     assert "duplicate hash" in caplog.text and "skipped" in caplog.text
 
 
 @pytest.mark.asyncio
 async def test_run_logs_warning_on_poison_hash_skip(
-    monkeypatch,
-    caplog,
-    db_session,
-    db_engine,
-    sample_org,
+    monkeypatch, caplog, db_session, db_engine, sample_org
 ):
-    """run() encuentra hash con status='poison' -> skip + warning log con recovery hint."""
+    """run() encuentra hash con status='poison' -> skip + warning con recovery hint."""
     from sqlalchemy.ext.asyncio import async_sessionmaker
-    from ibkr_control.db.models.flex_credentials import FlexCredentials
+
     from ibkr_control.db.models.flex_raw import FlexImport as FI
     from ibkr_control.ingest.flex import client as client_mod
-    from ibkr_control.ingest.flex import crypto as flex_crypto_mod
+    from ibkr_control.ingest.flex import job as flex_job_mod
     from ibkr_control.ingest.hash_dedup import xml_hash
 
+    from tests.ingest.flex.conftest import _seed_connection
+
     caplog.set_level(logging.WARNING, logger="ibkr_control.ingest.flex.job")
+    _set_token_key(monkeypatch, seed=b"P")
 
     xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
     h = xml_hash(xml)
 
-    import base64
-
-    test_key = base64.b64encode(b"P" * 32).decode("ascii")
-    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", test_key)
-
-    db_session.add(
-        FlexCredentials(
-            organization_id=sample_org.id,
-            token_encrypted=flex_crypto_mod.encrypt_token("dummy-token"),
-            ytd_query_id="123456",
-        )
-    )
+    conn_id = await _seed_connection(db_session, sample_org.id, query_id="123456")
     db_session.add(
         FI(
             organization_id=sample_org.id,
+            connection_id=conn_id,
             xml_hash=h,
             xml_bytes=xml,
             xml_size_bytes=len(xml),
@@ -592,15 +783,14 @@ async def test_run_logs_warning_on_poison_hash_skip(
     )
     await db_session.commit()
 
-    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
-
     monkeypatch.setattr(client_mod.FlexClient, "send_request", AsyncMock(return_value="ref-poison"))
     monkeypatch.setattr(client_mod.FlexClient, "poll_statement", AsyncMock(return_value=xml))
 
-    from ibkr_control.ingest.flex import job as flex_job_mod
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    result = (
+        await flex_job_mod.run(session_factory, organization_id=sample_org.id, trigger="cron")
+    ).results
 
-    result = await flex_job_mod.run(session_factory, organization_id=sample_org.id, trigger="cron")
-
-    assert result is None
+    assert result[conn_id] is None
     assert "previously poisoned" in caplog.text
     assert "poison_reset" in caplog.text

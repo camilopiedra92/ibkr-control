@@ -132,6 +132,7 @@ async def test_run_manual_emits_substep_keys_matching_frontend(monkeypatch):
     UI can render '7 dias'.
     """
     from ibkr_control.api import ingest as ingest_mod
+    from ibkr_control.ingest.flex import job as flex_job_mod
     from ibkr_control.ingest.job_tracker import get_tracker
 
     flex_kwargs: dict = {}
@@ -141,7 +142,7 @@ async def test_run_manual_emits_substep_keys_matching_frontend(monkeypatch):
 
     async def fake_flex_run(*_a, **kw):
         flex_kwargs.update(kw)
-        return None
+        return flex_job_mod.FlexRunSummary(results={7: 100}, failures={})
 
     monkeypatch.setattr("ibkr_control.ingest.trm.job.run", fake_trm_run)
     monkeypatch.setattr("ibkr_control.ingest.flex.job.run", fake_flex_run)
@@ -167,6 +168,8 @@ async def test_run_manual_emits_substep_keys_matching_frontend(monkeypatch):
     ]
     trm_ok = next(e for e in events if e["step"] == "trm_backfill" and e.get("status") == "ok")
     assert trm_ok["n_days"] == 7
+    flex_ok = next(e for e in events if e["step"] == "flex_ytd" and e.get("status") == "ok")
+    assert flex_ok["n_connections_ok"] == 1
 
 
 async def test_run_manual_marks_failing_substep_as_failed(monkeypatch):
@@ -191,6 +194,38 @@ async def test_run_manual_marks_failing_substep_as_failed(monkeypatch):
     failed = next(e for e in events if e.get("status") == "failed")
     assert failed["step"] == "trm_backfill"
     assert "boom" in failed["error"]
+
+
+async def test_run_manual_emits_partial_on_partial_flex_failure(monkeypatch):
+    """Cross-stack contract lock with ManualRefreshButton.tsx: when flex run()
+    returns >=1 success AND >=1 failure (partial), _run_manual must emit the
+    flex_ytd event with status='partial' + n_connections_ok/failed so the UI
+    shows a warning instead of falsely claiming "Completado correctamente".
+    The run STILL reaches step='done' (partial is not a total failure).
+    """
+    from ibkr_control.api import ingest as ingest_mod
+    from ibkr_control.ingest.flex import job as flex_job_mod
+    from ibkr_control.ingest.job_tracker import get_tracker
+
+    async def fake_flex_run(*_a, **_kw):
+        # 1 ok (conn 7 -> import 100), 1 failed (conn 8) -> partial.
+        return flex_job_mod.FlexRunSummary(results={7: 100}, failures={8: "1018 bad token"})
+
+    monkeypatch.setattr("ibkr_control.ingest.flex.job.run", fake_flex_run)
+    monkeypatch.setattr(ingest_mod, "get_engine", lambda: object())
+
+    tracker = get_tracker()
+    job_id = tracker.create_job(user_id=1)
+    await ingest_mod._run_manual(kind="flex", org_id=1, job_id=job_id)
+
+    events = [e.payload for e in tracker.events_since(job_id, after_id=-1)]
+    flex_ev = next(e for e in events if e["step"] == "flex_ytd" and e.get("status") == "partial")
+    assert flex_ev["n_connections_ok"] == 1
+    assert flex_ev["n_connections_failed"] == 1
+    # The run proceeds to done despite the partial failure.
+    assert any(e["step"] == "done" for e in events)
+    # And it does NOT emit a flex_ytd 'ok' (which would be a false all-clear).
+    assert not any(e["step"] == "flex_ytd" and e.get("status") == "ok" for e in events)
 
 
 async def test_trigger_persists_timestamp_in_org_row(

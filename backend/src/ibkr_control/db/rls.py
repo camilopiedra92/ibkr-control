@@ -91,7 +91,8 @@ ORG_SCOPED_TABLES = [
     "accounts",
     "parties",
     "participations",
-    "flex_credentials",
+    "connections",
+    "connection_ibkr_flex",
     "counterparties",
     "flex_imports",
     "flex_import_accounts",
@@ -144,12 +145,12 @@ def access_grants_policy_sql() -> list[str]:
 def system_enum_function_sql() -> list[str]:
     """CONTROL-PLANE capability: cross-tenant enumeration of credentialed orgs.
 
-    The Flex cron must answer "which organizations have flex_credentials?" — an
-    inherently CROSS-TENANT, system (control-plane) question. As the non-bypass
-    ``app_rls`` role under FORCE ROW LEVEL SECURITY with no ``app.current_org``
-    set, a plain ``SELECT DISTINCT organization_id FROM flex_credentials``
-    default-denies to ZERO rows → the cron would run and fetch nothing, silently
-    (the bug this closes).
+    The Flex cron must answer "which organizations have an active ibkr_flex
+    connection?" — an inherently CROSS-TENANT, system (control-plane) question.
+    As the non-bypass ``app_rls`` role under FORCE ROW LEVEL SECURITY with no
+    ``app.current_org`` set, a plain ``SELECT DISTINCT organization_id FROM
+    connections`` default-denies to ZERO rows → the cron would run and fetch
+    nothing, silently (the bug this closes).
 
     Rather than hand ``app_rls`` a broad ``BYPASSRLS`` role/connection (which
     would also leak cross-tenant read/write of EVERYTHING and pull SP4's secrets/
@@ -164,8 +165,8 @@ def system_enum_function_sql() -> list[str]:
         RLS as that owner).
       * ``SET search_path = pg_catalog, public`` is MANDATORY on SECURITY DEFINER
         functions: it pins name resolution so a caller cannot hijack the search
-        path to shadow ``flex_credentials`` (or any builtin) with a malicious
-        object and escalate privilege. Never omit it.
+        path to shadow ``connections`` (or any builtin) with a malicious object
+        and escalate privilege. Never omit it.
       * ``REVOKE EXECUTE ... FROM PUBLIC`` + ``GRANT EXECUTE ... TO app_rls``:
         least privilege — only the app role may call it, nothing more.
 
@@ -179,7 +180,8 @@ def system_enum_function_sql() -> list[str]:
         "CREATE OR REPLACE FUNCTION system_credentialed_org_ids() "
         "RETURNS SETOF bigint LANGUAGE sql STABLE SECURITY DEFINER "
         "SET search_path = pg_catalog, public AS $$ "
-        "SELECT DISTINCT organization_id FROM flex_credentials $$",
+        "SELECT DISTINCT organization_id FROM connections "
+        "WHERE provider_type = 'ibkr_flex' AND status <> 'disabled' $$",
         "REVOKE EXECUTE ON FUNCTION system_credentialed_org_ids() FROM PUBLIC",
         f"GRANT EXECUTE ON FUNCTION system_credentialed_org_ids() TO {APP_ROLE}",
     ]

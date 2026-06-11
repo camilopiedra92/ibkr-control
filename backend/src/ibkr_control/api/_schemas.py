@@ -2,24 +2,54 @@
 
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
+# Single source of truth API-side para el union type del cliente TS (orval
+# genera un union de strings, habilita switch exhaustivo en el frontend).
+# Debe mantenerse en lockstep con CONNECTION_STATUSES / el CHECK del modelo
+# (db/models/connections.py) — cualquier test de API que haga round-trip de un
+# status los verifica juntos.
+ConnectionStatus = Literal["active", "degraded", "reauth_required", "disabled"]
 
-# -- Credentials ------------------------------------------------------------
-class FlexCredentialsRead(BaseModel):
-    configured_at: datetime
-    query_id: str
-    last_rotated_at: datetime
 
-
-class FlexCredentialsValidate(BaseModel):
+# -- Setup connection payload (W1, wizard step1 opera sobre connections) -----
+class SetupConnectionPayload(BaseModel):
     token: str = Field(min_length=10, max_length=512)
     query_id: str = Field(min_length=1, max_length=64)
+    display_name: str | None = Field(default=None, max_length=120)
 
 
-class FlexCredentialsUpdate(BaseModel):
-    token: str | None = Field(default=None, min_length=10, max_length=512)
+# -- Connections (W1, reemplaza credentials) --------------------------------
+class ConnectionRead(BaseModel):
+    id: int
+    institution_code: str
+    provider_type: str
+    display_name: str | None
+    status: ConnectionStatus
+    status_reason: str | None
+    last_sync_at: datetime | None
+    last_sync_status: str | None
+    consecutive_failures: int
+    query_id: str
+    last_rotated_at: datetime
+    created_at: datetime
+
+
+class ConnectionCreate(BaseModel):
+    token: str = Field(min_length=10, max_length=512)
+    query_id: str = Field(min_length=1, max_length=64)
+    display_name: str | None = Field(default=None, max_length=120)
+
+
+class ConnectionRotate(BaseModel):
+    token: str = Field(min_length=10, max_length=512)
     query_id: str | None = Field(default=None, min_length=1, max_length=64)
+
+
+class ConnectionUpdate(BaseModel):
+    display_name: str | None = Field(default=None, max_length=120)
 
 
 # -- Setup wizard -----------------------------------------------------------

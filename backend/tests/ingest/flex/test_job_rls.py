@@ -17,7 +17,7 @@ import base64
 from pathlib import Path
 
 import pytest_asyncio
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ibkr_control.db.rls import app_rls_password
@@ -31,67 +31,78 @@ FIXTURE_DIR = Path(__file__).parent.parent.parent / "fixtures" / "xml"
 
 @pytest_asyncio.fixture
 async def rls_job_env(ephemeral_session_factory, ephemeral_db_url, monkeypatch):
-    """(app_factory, seed_org_with_creds) for flex_job.run RLS tests.
+    """(app_factory, seed_org_with_conn) for flex_job.run RLS tests.
 
     - app_factory: async_sessionmaker connecting as the non-bypass ``app_rls``
       login role. This is the session_factory we pass to flex_job.run — exactly
       mirroring production (the app's engine is app_rls).
-    - seed_org_with_creds(name, query_id) -> org_id: as the container OWNER,
-      creates an Organization + its FlexCredentials. Sets app.current_org to the
-      new org before inserting FlexCredentials so the FORCE'd WITH CHECK passes
-      (same pattern as rls_session_factory's seed).
+    - seed_org_with_conn(name, query_id) -> (org_id, conn_id): as the container
+      OWNER, creates an Organization + its ibkr_flex Connection (+detail). Sets
+      app.current_org to the new org before inserting the org-scoped rows so the
+      FORCE'd WITH CHECK passes (same pattern as rls_session_factory's seed).
     """
-    from ibkr_control.db.models.flex_credentials import FlexCredentials
+    from ibkr_control.db.models.connections import Connection, ConnectionIbkrFlex
+    from ibkr_control.db.models.institutions import Institution
     from ibkr_control.db.models.organizations import Organization
 
-    # Encryption key for FlexCredentials token round-trip.
+    # Encryption key for the connection token round-trip.
     test_key = base64.b64encode(b"R" * 32).decode("ascii")
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", test_key)
 
     owner_factory = ephemeral_session_factory
 
-    async def seed_org_with_creds(name: str, query_id: str) -> int:
+    async def seed_org_with_conn(name: str, query_id: str) -> tuple[int, int]:
         async with owner_factory() as s:
             org = Organization(type="personal", name=name)
             s.add(org)
             await s.flush()
-            # FORCE RLS applies to the owner too -> set context so the
-            # flex_credentials WITH CHECK (organization_id = current_org) passes.
+            inst_id = await s.scalar(select(Institution.id).where(Institution.code == "ibkr"))
+            # FORCE RLS applies to the owner too -> set context so the org-scoped
+            # WITH CHECK (organization_id = current_org) passes for connections.
             await s.execute(
                 text("SELECT set_config('app.current_org', :o, true)").bindparams(o=str(org.id))
             )
+            conn = Connection(
+                organization_id=org.id,
+                institution_id=inst_id,
+                provider_type="ibkr_flex",
+                status="active",
+            )
+            s.add(conn)
+            await s.flush()
             s.add(
-                FlexCredentials(
+                ConnectionIbkrFlex(
+                    connection_id=conn.id,
                     organization_id=org.id,
                     token_encrypted=crypto_mod.encrypt_token("real-token"),
-                    ytd_query_id=query_id,
+                    query_id=query_id,
                 )
             )
             await s.commit()
-            return org.id
+            return org.id, conn.id
 
     app_dsn = swap_dsn_credentials(ephemeral_db_url, "app_rls", app_rls_password())
     app_engine = create_async_engine(app_dsn, echo=False)
     app_factory = async_sessionmaker(app_engine, expire_on_commit=False)
     try:
-        yield app_factory, seed_org_with_creds
+        yield app_factory, seed_org_with_conn
     finally:
         await app_engine.dispose()
 
 
 async def test_run_succeeds_under_app_rls_and_isolates_org(rls_job_env, monkeypatch):
-    """run() under app_rls finds org A's creds, ingests, writes only org A's rows.
+    """run() under app_rls finds org A's connection, ingests, writes only org A's rows.
 
-    Without apply_org_context inside run(), the app_rls session has no
-    app.current_org → the FlexCredentials lookup default-denies → run() raises
-    RuntimeError("No flex_credentials ..."). With the fix it finds the creds and
-    persists, and the data is visible only under current_org=A.
+    Without the RLS context inside run(), the app_rls session has no
+    app.current_org → the connections lookup default-denies → run() raises
+    RuntimeError("No active ibkr_flex connections ..."). With the fix it finds
+    the connection and persists, and the data is visible only under current_org=A.
     """
     from ibkr_control.db.models.flex_raw import FlexImport
 
     app_factory, seed = rls_job_env
-    org_a = await seed("Org A", "QUERY-A")
-    org_b = await seed("Org B", "QUERY-B")
+    org_a, conn_a = await seed("Org A", "QUERY-A")
+    org_b, _conn_b = await seed("Org B", "QUERY-B")
 
     # Mock the IBKR client so no network: real 2025 fixture has trades + transfers.
     xml_bytes = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
@@ -106,8 +117,11 @@ async def test_run_succeeds_under_app_rls_and_isolates_org(rls_job_env, monkeypa
     monkeypatch.setattr(client_mod.FlexClient, "send_request", fake_send_request)
     monkeypatch.setattr(client_mod.FlexClient, "poll_statement", fake_poll_statement)
 
-    # Run as app_rls for org A — must succeed (creds found, persisted).
-    flex_import_id = await flex_job_mod.run(app_factory, organization_id=org_a, trigger="cron")
+    # Run as app_rls for org A — must succeed (connection found, persisted).
+    summary = await flex_job_mod.run(app_factory, organization_id=org_a, trigger="cron")
+    results = summary.results
+    assert set(results.keys()) == {conn_a}
+    flex_import_id = results[conn_a]
     assert flex_import_id is not None
 
     # Org A sees its FlexImport + an 'ok' ingest_log; org B sees neither.

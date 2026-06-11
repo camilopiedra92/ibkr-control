@@ -40,26 +40,28 @@ def test_flex_daily_references_per_org_runner():
 async def test_run_flex_for_all_orgs_iterates_distinct_orgs(
     db_session, sample_org, sample_user, monkeypatch
 ):
-    """The Flex cron iterates distinct flex_credentials.organization_id and calls
+    """The Flex cron iterates distinct organization_ids with an active ibkr_flex
+    connection (via system_credentialed_org_ids()) and calls
     flex_job.run(organization_id=<org>, trigger='cron') for each — the ingest is
     purely org-scoped (D-CONV-3), no triggering user."""
-    from ibkr_control.db.models.flex_credentials import FlexCredentials
+    import base64
+
     from ibkr_control.db.models.organizations import Organization
     from ibkr_control.ingest.flex import job as flex_job
     from ibkr_control.scheduler import jobs as jobs_mod
 
-    # Second tenant with its own creds.
+    from tests.ingest.flex.conftest import _seed_connection
+
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", base64.b64encode(b"S" * 32).decode("ascii"))
+
+    # Second tenant with its own connection.
     org2 = Organization(type="personal", name="Org Two")
     db_session.add(org2)
     await db_session.flush()
-
-    db_session.add(
-        FlexCredentials(organization_id=sample_org.id, token_encrypted=b"x", ytd_query_id="q1")
-    )
-    db_session.add(
-        FlexCredentials(organization_id=org2.id, token_encrypted=b"y", ytd_query_id="q2")
-    )
     await db_session.commit()
+
+    await _seed_connection(db_session, sample_org.id, query_id="q1")
+    await _seed_connection(db_session, org2.id, query_id="q2")
 
     calls: list[dict] = []
 

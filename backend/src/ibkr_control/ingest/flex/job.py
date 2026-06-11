@@ -15,15 +15,17 @@ Patron de transaccion en ingest_xml:
 
 import logging
 from datetime import date, datetime, timezone
+from typing import NamedTuple
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ibkr_control.db.models.flex_credentials import FlexCredentials
+from ibkr_control.db.models.connections import Connection, ConnectionIbkrFlex
 from ibkr_control.db.models.flex_raw import FlexImport
 from ibkr_control.db.models.ingest_log import IngestLog
-from ibkr_control.db.rls import apply_org_context
+from ibkr_control.db.rls import apply_org_context, set_session_org_context
+from ibkr_control.ingest import connection_state
 from ibkr_control.ingest.flex import client as flex_client_mod
 from ibkr_control.ingest.flex import crypto as flex_crypto_mod
 from ibkr_control.ingest.flex import parser as flex_parser_mod
@@ -35,6 +37,22 @@ from ibkr_control.ingest.log import ingest_log_entry
 logger = logging.getLogger(__name__)
 
 
+class FlexRunSummary(NamedTuple):
+    """Resultado de run(): exitos + fallos de un ciclo de fetch per-org.
+
+    - results: {connection_id: flex_import_id | None} solo de las conexiones que
+      terminaron OK (None = hash dedup, sin cambios). Igual que el dict que run()
+      devolvia antes (W1 Task 4) — los callers que solo miran exitos leen .results.
+    - failures: {connection_id: reason} de las conexiones que fallaron (auth o
+      transitorio). Permite a _run_manual emitir un SSE 'partial' con el conteo
+      sin perder cuales fallaron. El contrato de raise NO cambia: run() solo
+      re-lanza si results quedo vacio Y failures no.
+    """
+
+    results: dict[int, int | None]
+    failures: dict[int, str]
+
+
 async def _insert_poison_row(
     session: AsyncSession,
     *,
@@ -43,6 +61,7 @@ async def _insert_poison_row(
     xml_bytes: bytes,
     source: str,
     exc: Exception,
+    connection_id: int | None = None,
 ) -> None:
     """Inserts flex_imports row with status='poison' after a parse/persist failure.
 
@@ -62,6 +81,7 @@ async def _insert_poison_row(
         pg_insert(FlexImport)
         .values(
             organization_id=organization_id,
+            connection_id=connection_id,
             xml_hash=xml_hash,
             xml_bytes=xml_bytes,
             xml_size_bytes=len(xml_bytes),
@@ -189,103 +209,198 @@ async def ingest_xml(
         return flex_import_id
 
 
+async def _run_one_connection(
+    session: AsyncSession,
+    *,
+    organization_id: int,
+    trigger: str,
+    connection_id: int,
+    token_encrypted: bytes,
+    query_id: str,
+) -> int | None:
+    """Fetchea + ingiere UNA connection. Devuelve flex_import_id, o None si el
+    hash ya era conocido (dedup, sin cambios).
+
+    Envuelto en su PROPIO ingest_log_entry para que un fallo marque SU row
+    'failed' (y lo commitee) sin afectar a las demás conexiones del loop. Usa el
+    mismo patrón SAVEPOINT + poison-row-fuera-del-savepoint que ingest_xml: si
+    persist() falla, el SAVEPOINT revierte sus writes parciales, la poison row se
+    inserta en la sesión externa, y ingest_log_entry marca el row 'failed'.
+    """
+    async with ingest_log_entry(
+        session,
+        "flex",
+        organization_id=organization_id,
+        trigger=trigger,
+        connection_id=connection_id,
+    ) as log_id:
+        token = flex_crypto_mod.decrypt_token(token_encrypted)
+        client = flex_client_mod.FlexClient(token=token)
+        reference = await client.send_request(query_id=query_id)
+        xml_bytes = await client.poll_statement(reference_code=reference)
+
+        h = xml_hash(xml_bytes)
+        status = await check_hash_status(session, organization_id, h)
+        if status == "ok":
+            logger.info("flex: duplicate hash %s..., skipped (items_processed=0)", h[:12])
+            log_row = await session.scalar(select(IngestLog).where(IngestLog.id == log_id))
+            log_row.items_processed = 0
+            return None
+        if status == "poison":
+            logger.warning(
+                "flex: previously poisoned hash %s..., skipped. "
+                "Run scripts/poison_reset.py --org-id %d --xml-hash %s to retry.",
+                h[:12],
+                organization_id,
+                h,
+            )
+            log_row = await session.scalar(select(IngestLog).where(IngestLog.id == log_id))
+            log_row.items_processed = 0
+            return None
+        # status == "absent": proceed with normal flow
+
+        # Usar SAVEPOINT igual que en ingest_xml para aislar fallas del persister
+        sp = await session.begin_nested()
+        try:
+            parsed = flex_parser_mod.parse(xml_bytes)
+            flex_import_id, _counters = await flex_persister_mod.persist(
+                session,
+                parsed=parsed,
+                organization_id=organization_id,
+                xml_bytes=xml_bytes,
+                source="web_service",
+                connection_id=connection_id,
+            )
+            await sp.commit()
+        except Exception as exc:
+            # Must stay broad: same SAVEPOINT pattern as ingest_xml — must
+            # rollback partial persister writes for any exception type so
+            # ingest_log_entry can mark the row 'failed' and commit it.
+            await sp.rollback()
+            # Insert poison row OUTSIDE the rolled-back savepoint so it
+            # survives the rollback and gets commited by ingest_log_entry's
+            # finally.
+            await _insert_poison_row(
+                session,
+                organization_id=organization_id,
+                xml_hash=h,
+                xml_bytes=xml_bytes,
+                source="web_service",
+                exc=exc,
+                connection_id=connection_id,
+            )
+            raise
+
+        log_row = await session.scalar(select(IngestLog).where(IngestLog.id == log_id))
+        if _counters.get("hash_dedup"):
+            log_row.items_processed = 0
+        else:
+            log_row.items_processed = (
+                _counters["n_observed_trades"]
+                + _counters["n_observed_lots_closed"]
+                + _counters["n_observed_open_lots"]
+                + _counters["n_observed_cash_tx"]
+                + _counters["n_observed_transfers"]
+            )
+        return flex_import_id
+
+
 async def run(
     session_factory: async_sessionmaker,
     *,
     organization_id: int,
     trigger: str,  # 'cron' | 'manual' | 'wizard'
-) -> int | None:
-    """Hace fetch al Flex WS + ingiere. Devuelve flex_import_id o None si no hubo cambios.
+) -> FlexRunSummary:
+    """Fetchea + ingiere TODAS las connections ibkr_flex activas del org.
 
-    Toma advisory_lock por (source='flex', scope_id=organization_id) — bloquea
-    concurrent runs para el mismo org (flex es per-org). Si esta tomado, lanza
-    LockHeldError (caller decide que hacer). El org es la unidad de operación —
-    las creds, el dedup y el ingest son todos per-org (D-CONV-3).
+    Devuelve FlexRunSummary(results, failures): results trae solo las conexiones
+    que terminaron OK ({connection_id: flex_import_id | None}, None = hash dedup
+    sin cambios); failures trae {connection_id: reason} de las que fallaron.
+    Aislamiento per-connection: el fallo de una conexión transiciona SU estado
+    (connection_state) y registra SU ingest_log row, pero no bloquea a las demás.
+    Si results quedó vacío y hubo excepción, re-lanza la última (contrato con
+    _run_manual: el SSE debe mostrar el fallo total). Un fallo PARCIAL (algunas
+    OK, algunas en failures) NO re-lanza — _run_manual lo surfacea como 'partial'.
+
+    Toma advisory_lock por (source='flex', scope_id=organization_id) UNA vez para
+    todo el loop — bloquea concurrent runs del mismo org (flex es per-org). Si
+    esta tomado, lanza LockHeldError (caller decide).
+
+    RLS: usa set_session_org_context (stash + after_begin listener, PR #7) además
+    del apply inmediato, porque ingest_log_entry commitea por conexión y las
+    transiciones de estado corren en transacciones nuevas que necesitan el GUC
+    re-aplicado — sin esto, todo write post-primer-commit default-deny.
     """
+    results: dict[int, int | None] = {}
+    failures: dict[int, str] = {}
+    last_exc: Exception | None = None
+
     async with session_factory() as session:
-        # run() opens its OWN session outside any request, so nothing set the RLS
-        # context for it. In prod the app connects as the non-bypass app_rls role,
-        # so every org-scoped read/write below (creds lookup, flex_imports dedup,
-        # ingest_log, persister) would default-deny without this. SET LOCAL is
-        # transaction-scoped; the session's autobegin opened the tx, so this
-        # applies to all subsequent statements. No user_id: this is a system job.
+        set_session_org_context(session, org_id=organization_id, user_id=None)
         await apply_org_context(session, org_id=organization_id)
         async with advisory_lock(session, scope_id=organization_id, source="flex"):
-            async with ingest_log_entry(
-                session, "flex", organization_id=organization_id, trigger=trigger
-            ) as log_id:
-                creds = await session.scalar(
-                    select(FlexCredentials).where(
-                        FlexCredentials.organization_id == organization_id
+            conns = (
+                await session.scalars(
+                    select(Connection)
+                    .where(
+                        Connection.provider_type == "ibkr_flex",
+                        Connection.status != "disabled",
                     )
+                    .order_by(Connection.id)
                 )
-                if creds is None:
-                    raise RuntimeError(f"No flex_credentials for organization_id={organization_id}")
+            ).all()
+            if not conns:
+                raise RuntimeError(
+                    f"No active ibkr_flex connections for organization_id={organization_id}"
+                )
 
-                token = flex_crypto_mod.decrypt_token(creds.token_encrypted)
-                client = flex_client_mod.FlexClient(token=token)
-                reference = await client.send_request(query_id=creds.ytd_query_id)
-                xml_bytes = await client.poll_statement(reference_code=reference)
-
-                h = xml_hash(xml_bytes)
-                status = await check_hash_status(session, organization_id, h)
-                if status == "ok":
-                    logger.info("flex: duplicate hash %s..., skipped (items_processed=0)", h[:12])
-                    log_row = await session.scalar(select(IngestLog).where(IngestLog.id == log_id))
-                    log_row.items_processed = 0
-                    return None
-                if status == "poison":
-                    logger.warning(
-                        "flex: previously poisoned hash %s..., skipped. "
-                        "Run scripts/poison_reset.py --org-id %d --xml-hash %s to retry.",
-                        h[:12],
-                        organization_id,
-                        h,
-                    )
-                    log_row = await session.scalar(select(IngestLog).where(IngestLog.id == log_id))
-                    log_row.items_processed = 0
-                    return None
-                # status == "absent": proceed with normal flow
-
-                # Usar SAVEPOINT igual que en ingest_xml para aislar fallas del persister
-                sp = await session.begin_nested()
+            for conn in conns:
+                detail = await session.get(ConnectionIbkrFlex, conn.id)
                 try:
-                    parsed = flex_parser_mod.parse(xml_bytes)
-                    flex_import_id, _counters = await flex_persister_mod.persist(
+                    # Fail-loud legible si el invariante de subtipo se rompió
+                    # (Connection sin su detail 1:1). Dentro del try a propósito:
+                    # el broad except lo captura -> mark_sync_failed con una
+                    # razón clara en status_reason, sin matar el loop.
+                    if detail is None:
+                        raise RuntimeError(
+                            f"Connection {conn.id} has no connection_ibkr_flex detail row "
+                            "(subtype invariant broken)"
+                        )
+                    results[conn.id] = await _run_one_connection(
                         session,
-                        parsed=parsed,
                         organization_id=organization_id,
-                        xml_bytes=xml_bytes,
-                        source="web_service",
+                        trigger=trigger,
+                        connection_id=conn.id,
+                        token_encrypted=detail.token_encrypted,
+                        query_id=detail.query_id,
                     )
-                    await sp.commit()
+                except (
+                    flex_client_mod.FlexAuthError,
+                    flex_client_mod.FlexQueryNotFoundError,
+                ) as exc:
+                    # CR-3: auth-class (1003/1004/1018) o query_id mal configurado
+                    # (1005) — ambos requieren acción del usuario (reauth_required).
+                    connection_state.mark_auth_failed(
+                        conn, reason=str(exc), now=datetime.now(timezone.utc)
+                    )
+                    await session.commit()
+                    failures[conn.id] = str(exc)
+                    last_exc = exc
+                    continue
                 except Exception as exc:
-                    # Must stay broad: same SAVEPOINT pattern as ingest_xml — must
-                    # rollback partial persister writes for any exception type so
-                    # ingest_log_entry can mark the row 'failed' and commit it.
-                    await sp.rollback()
-                    # Insert poison row OUTSIDE the rolled-back savepoint so it
-                    # survives the rollback and gets commited by ingest_log_entry's
-                    # finally.
-                    await _insert_poison_row(
-                        session,
-                        organization_id=organization_id,
-                        xml_hash=h,
-                        xml_bytes=xml_bytes,
-                        source="web_service",
-                        exc=exc,
+                    # Transitorio (1001 BUSY agotado, timeout, red, parse/persist).
+                    # Broad a propósito: cualquier fallo debe transicionar estado
+                    # y seguir con la próxima conexión, no matar el loop.
+                    connection_state.mark_sync_failed(
+                        conn, reason=str(exc), now=datetime.now(timezone.utc)
                     )
-                    raise
+                    await session.commit()
+                    failures[conn.id] = str(exc)
+                    last_exc = exc
+                    continue
+                connection_state.mark_sync_ok(conn, now=datetime.now(timezone.utc))
+                await session.commit()
 
-                log_row = await session.scalar(select(IngestLog).where(IngestLog.id == log_id))
-                if _counters.get("hash_dedup"):
-                    log_row.items_processed = 0
-                else:
-                    log_row.items_processed = (
-                        _counters["n_observed_trades"]
-                        + _counters["n_observed_lots_closed"]
-                        + _counters["n_observed_open_lots"]
-                        + _counters["n_observed_cash_tx"]
-                        + _counters["n_observed_transfers"]
-                    )
-                return flex_import_id
+    if not results and last_exc is not None:
+        raise last_exc
+    return FlexRunSummary(results=results, failures=failures)

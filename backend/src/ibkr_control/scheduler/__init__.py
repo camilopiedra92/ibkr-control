@@ -9,8 +9,8 @@ from ibkr_control.config import get_settings
 def create_scheduler() -> AsyncIOScheduler:
     """Create the production scheduler with persistent SQLAlchemyJobStore.
 
-    Jobs are stored in `apscheduler_jobs` (pre-created by Alembic migration
-    7fdaf6528762 as owner — app_rls has no CREATE). Restart-safe: cron
+    Jobs are stored in `apscheduler_jobs` (pre-created by the Alembic baseline
+    a9977ac077e5 as owner — app_rls has no CREATE). Restart-safe: cron
     triggers re-register via register_jobs() with replace_existing=True, and
     missed runs within misfire_grace_time get caught up at boot.
     pool_pre_ping: el jobstore sync mantiene su conexión psycopg viva entre

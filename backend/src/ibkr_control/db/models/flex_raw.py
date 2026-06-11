@@ -41,11 +41,18 @@ class FlexImport(Base):
         # tables (D-CONV-3).
         UniqueConstraint("organization_id", "xml_hash", name="uq_flex_imports_org_xml_hash"),
         Index(None, "organization_id"),
+        Index(None, "connection_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     organization_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    # W1: linaje import/run -> connection. NULL para manual_upload (no hay
+    # conexión) y para rows que sobreviven al borrado de su conexión (SET NULL —
+    # append-only ledger: el hecho no muere con la credencial).
+    connection_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("connections.id", ondelete="SET NULL"), nullable=True
     )
     anyo: Mapped[int] = mapped_column(Integer, nullable=False)
     xml_hash: Mapped[str] = mapped_column(String, nullable=False)

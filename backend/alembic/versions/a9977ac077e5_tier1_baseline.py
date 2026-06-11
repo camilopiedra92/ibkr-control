@@ -1,11 +1,60 @@
-"""saas baseline
+"""tier1_baseline
 
-Revision ID: 05943d9efcdb
+Squash de las 5 revisiones de la cadena SP1 en UN baseline pristino que
+reproduce el estado ACTUAL de ``Base.metadata`` (W1 Task 1, T1-D14 amended: el
+baseline es mutable hasta el primer deploy — no hay deployment, la DB dev es
+descartable, el usuario recarga XMLs por wizard). Cadena vieja squasheada:
+
+  05943d9efcdb (saas baseline + RLS) -> a1f2c3d4e5b6 (system function)
+  -> 7fdaf6528762 (apscheduler_jobs) -> 544a0b2c362c (db hardening:
+  FK indexes + RESTRICT + created_at + close_datetime comment)
+  -> fd27737af54e (account multihome: per-org uniqueness).
+
+El squash original (W1 Task 1) fue PURAMENTE MECÁNICO (byte-equivalente a la
+cadena de 5). **Amendment #1 (W1 Task 3, T1-D14: el baseline es MUTABLE hasta el
+primer deploy):** este MISMO archivo y revision id se amendan IN PLACE para
+agregar el modelo de connections — tablas nuevas ``institutions`` (control
+plane, sin RLS), ``connections`` + ``connection_ibkr_flex`` (org-scoped, RLS,
+patrón Plaid Item con subtipo enforced en SQL), la columna de linaje
+``connection_id`` en ``flex_imports`` + ``ingest_log``, el seed de la
+institución ``ibkr``, y las 2 tablas nuevas sumadas al snapshot RLS
+``_ORG_SCOPED_TABLES``. La sección autogenerada se regeneró canónicamente
+(container, DB virgen) y se trasplantó entre los marcadores.
+
+**Amendment #2 (W1 Task 4):** el cuerpo de ``system_credentialed_org_ids()`` se
+repunta de ``flex_credentials`` a ``connections`` (``WHERE provider_type =
+'ibkr_flex' AND status <> 'disabled'``) — el cron Flex ahora itera connections
+activas, no las credenciales legacy. Frozen idéntico a
+``db/rls.py::system_enum_function_sql()``.
+
+**Amendment #3 (W1 Task 7):** ``flex_credentials`` (tabla + modelo + entrada en
+el snapshot RLS) se eliminó por completo — todos los consumidores ya leen las
+tablas ``connections`` (Tasks 4-6). El baseline ya no la crea: el delta fue una
+sustracción a mano (los bloques de create_table/index/drop eran autocontenidos)
+validada por el drift test (Base.metadata == schema migrado).
+
+El DDL de ``upgrade()`` hasta el marcador ``end Alembic commands`` es
+autogenerado canónicamente (container, DB virgen, ``alembic revision
+--autogenerate``). Las SECCIONES HAND-WRITTEN que autogenerate NO captura
+(RLS, rol app_rls, apscheduler_jobs, función de sistema, policy de access_grants,
+seed de institutions) se re-aplican INLINE al final del upgrade — CERO imports de
+``ibkr_control.db.rls`` para DDL (regla T1-D14: las migraciones nunca importan
+builders vivos; el baseline congela todo inline). ÚNICA excepción: el VALOR del
+password de ``app_rls`` se lee del env ``APP_RLS_PASSWORD`` inline (mismo
+mecanismo que el baseline viejo via ``app_rls_password()``: es un VALOR de
+runtime, no DDL estructural — debe resolverse al aplicar, no hardcodearse).
+
+apscheduler_jobs NO vive en ``Base.metadata`` (tabla runtime de APScheduler) —
+el drift test la ignora; se crea aquí (IF NOT EXISTS, dirty-volume safe) porque
+app_rls no tiene CREATE.
+
+Revision ID: a9977ac077e5
 Revises:
-Create Date: 2026-06-03 17:32:55.685198
+Create Date: 2026-06-10 16:31:36.300280
 
 """
 
+import os
 from typing import Sequence, Union
 
 from alembic import op
@@ -13,15 +62,81 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = "05943d9efcdb"
+revision: str = "a9977ac077e5"
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
+
+# ---------------------------------------------------------------------------
+# Hand-written constants frozen inline (T1-D14: no live builder imports).
+# Snapshot of db/rls.py::ORG_SCOPED_TABLES + APP_ROLE at the time of this
+# baseline. flex_credentials fue eliminada (amendment #3, W1 Task 7) — el snapshot
+# ya solo cubre las tablas connections. Si la lista viva diverge, el drift test NO
+# lo atrapa (las policies no están en Base.metadata) — test_rls.py es la red de
+# comportamiento; test_tier1_baseline el lockstep guard.
+# ---------------------------------------------------------------------------
+_APP_ROLE = "app_rls"
+_ORG_SCOPED_TABLES = [
+    "accounts",
+    "parties",
+    "participations",
+    "connections",
+    "connection_ibkr_flex",
+    "counterparties",
+    "flex_imports",
+    "flex_import_accounts",
+    "trades",
+    "closed_lots",
+    "open_position_lots",
+    "transfers",
+    "cash_transactions",
+    "change_in_dividend_accruals",
+    "open_dividend_accruals",
+    "ingest_log",
+]
+# Reader convention (db/rls.py): NULLIF(...,'') so an unset GUC -> NULL ->
+# default-deny (clean), not a 22P02 error. Frozen verbatim.
+_CURRENT_ORG = "NULLIF(current_setting('app.current_org', true), '')::bigint"
+_CURRENT_USER = "NULLIF(current_setting('app.current_user', true), '')::bigint"
+
+
+def _app_rls_password() -> str:
+    """Password for the app_rls login role — read from env at apply time.
+
+    Replica EXACTA del mecanismo del baseline viejo (db/rls.py::app_rls_password):
+    es un VALOR de runtime (no DDL estructural), interpolado en el string literal
+    de ``CREATE ROLE ... PASSWORD '<value>'``. Dev/test default ``app_rls_pw``;
+    prod inyecta un secreto real via ``APP_RLS_PASSWORD`` (SP4/deploy). Se lee del
+    env INLINE (no hay import de builders vivos). Fail-loud si trae una comilla
+    simple (rompería el literal SQL) — rechazar, no escapar.
+    """
+    pw = os.environ.get("APP_RLS_PASSWORD", "app_rls_pw")
+    if "'" in pw:
+        raise ValueError(
+            "APP_RLS_PASSWORD must not contain a single quote "
+            "(it is embedded in a SQL string literal in the CREATE ROLE DDL)"
+        )
+    return pw
 
 
 def upgrade() -> None:
     """Upgrade schema."""
     # ### commands auto generated by Alembic - please adjust! ###
+    op.create_table(
+        "institutions",
+        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("code", sa.String(), nullable=False),
+        sa.Column("name", sa.String(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("NOW()"),
+            nullable=False,
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_institutions")),
+        sa.UniqueConstraint("code", name=op.f("uq_institutions_code")),
+        comment="Control plane (global, sin RLS, como trm_days): catálogo de instituciones. Seeded por migración, no input de usuario.",
+    )
     op.create_table(
         "organizations",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
@@ -120,11 +235,63 @@ def upgrade() -> None:
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_accounts")),
-        sa.UniqueConstraint("ibkr_account_id", name=op.f("uq_accounts_ibkr_account_id")),
-        comment="Identidad COMPARTIDA. Una fila por cuenta IBKR; sin user_id a propósito — la propiedad se modela en participations (la conjunta es 50/50). ibkr_account_id UNIQUE global es correcto.",
+        sa.UniqueConstraint(
+            "organization_id", "ibkr_account_id", name="uq_accounts_org_ibkr_account_id"
+        ),
+        comment="Multi-home (patrón Plaid, spec 2026-06-10): la misma cuenta broker puede existir en N orgs, una fila por org — universos aislados, el SaaS no verifica exclusividad de propiedad. Dentro de un org sigue siendo identidad compartida: sin user_id, propiedad vía participations (la conjunta es 50/50).",
+    )
+    op.create_table(
+        "connections",
+        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("organization_id", sa.BigInteger(), nullable=False),
+        sa.Column("institution_id", sa.BigInteger(), nullable=False),
+        sa.Column("provider_type", sa.String(), nullable=False),
+        sa.Column("display_name", sa.String(), nullable=True),
+        sa.Column("status", sa.String(), server_default=sa.text("'active'"), nullable=False),
+        sa.Column("status_reason", sa.Text(), nullable=True),
+        sa.Column("last_sync_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("last_sync_status", sa.String(), nullable=True),
+        sa.Column(
+            "consecutive_failures", sa.Integer(), server_default=sa.text("0"), nullable=False
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("NOW()"),
+            nullable=False,
+        ),
+        sa.CheckConstraint(
+            "last_sync_status IS NULL OR last_sync_status IN ('ok', 'failed')",
+            name=op.f("ck_connections_last_sync_status"),
+        ),
+        sa.CheckConstraint(
+            "provider_type IN ('ibkr_flex')", name=op.f("ck_connections_provider_type")
+        ),
+        sa.CheckConstraint(
+            "status IN ('active', 'degraded', 'reauth_required', 'disabled')",
+            name=op.f("ck_connections_status"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["institution_id"],
+            ["institutions.id"],
+            name=op.f("fk_connections_institution_id_institutions"),
+            ondelete="RESTRICT",
+        ),
+        sa.ForeignKeyConstraint(
+            ["organization_id"],
+            ["organizations.id"],
+            name=op.f("fk_connections_organization_id_organizations"),
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_connections")),
+        sa.UniqueConstraint("id", "provider_type", name="uq_connections_id_provider_type"),
+        comment="Org-scoped (RLS). Vínculo org<->institución (patrón Plaid Item). Config provider-specific en la detail 1:1 (connection_ibkr_flex). status SOLO vía ingest/connection_state.py (W4).",
     )
     op.create_index(
-        op.f("ix_accounts_organization_id"), "accounts", ["organization_id"], unique=False
+        op.f("ix_connections_institution_id"), "connections", ["institution_id"], unique=False
+    )
+    op.create_index(
+        op.f("ix_connections_organization_id"), "connections", ["organization_id"], unique=False
     )
     op.create_table(
         "counterparties",
@@ -155,127 +322,6 @@ def upgrade() -> None:
         "counterparties",
         ["organization_id"],
         unique=False,
-    )
-    op.create_table(
-        "flex_credentials",
-        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
-        sa.Column("organization_id", sa.BigInteger(), nullable=False),
-        sa.Column("token_encrypted", sa.LargeBinary(), nullable=False),
-        sa.Column("ytd_query_id", sa.String(), nullable=False),
-        sa.Column(
-            "last_rotated_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.text("NOW()"),
-            nullable=False,
-        ),
-        sa.ForeignKeyConstraint(
-            ["organization_id"],
-            ["organizations.id"],
-            name=op.f("fk_flex_credentials_organization_id_organizations"),
-            ondelete="CASCADE",
-        ),
-        sa.PrimaryKeyConstraint("id", name=op.f("pk_flex_credentials")),
-        comment="Flex token del org (no del user). Org-scoped, RLS. >1 login IBKR por org permitido.",
-    )
-    op.create_index(
-        op.f("ix_flex_credentials_organization_id"),
-        "flex_credentials",
-        ["organization_id"],
-        unique=False,
-    )
-    op.create_table(
-        "flex_imports",
-        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
-        sa.Column("organization_id", sa.BigInteger(), nullable=False),
-        sa.Column("anyo", sa.Integer(), nullable=False),
-        sa.Column("xml_hash", sa.String(), nullable=False),
-        sa.Column("xml_size_bytes", sa.Integer(), nullable=False),
-        sa.Column("xml_bytes", sa.LargeBinary(), nullable=False),
-        sa.Column("source", sa.String(), nullable=False),
-        sa.Column("period_covered_from", sa.Date(), nullable=False),
-        sa.Column("period_covered_to", sa.Date(), nullable=False),
-        sa.Column("year_status", sa.String(), server_default=sa.text("'rolling'"), nullable=False),
-        sa.Column(
-            "fetched_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.text("NOW()"),
-            nullable=False,
-        ),
-        sa.Column("n_observed_trades", sa.Integer(), nullable=True),
-        sa.Column("n_observed_lots_closed", sa.Integer(), nullable=True),
-        sa.Column("n_observed_open_lots", sa.Integer(), nullable=True),
-        sa.Column("n_observed_cash_tx", sa.Integer(), nullable=True),
-        sa.Column("n_observed_dividends", sa.Integer(), nullable=True),
-        sa.Column("n_observed_transfers", sa.Integer(), nullable=True),
-        sa.Column("n_new_trades", sa.Integer(), nullable=True),
-        sa.Column("n_new_lots_closed", sa.Integer(), nullable=True),
-        sa.Column("n_new_open_lots", sa.Integer(), nullable=True),
-        sa.Column("n_new_cash_tx", sa.Integer(), nullable=True),
-        sa.Column("n_new_dividends", sa.Integer(), nullable=True),
-        sa.Column("n_new_transfers", sa.Integer(), nullable=True),
-        sa.Column("status", sa.String(length=20), server_default=sa.text("'ok'"), nullable=False),
-        sa.Column("poison_reason", sa.Text(), nullable=True),
-        sa.CheckConstraint(
-            "source IN ('web_service', 'manual_upload')", name=op.f("ck_flex_imports_source")
-        ),
-        sa.CheckConstraint("status IN ('ok', 'poison')", name=op.f("ck_flex_imports_status")),
-        sa.CheckConstraint(
-            "year_status IN ('rolling', 'sealed')", name=op.f("ck_flex_imports_year_status")
-        ),
-        sa.ForeignKeyConstraint(
-            ["organization_id"],
-            ["organizations.id"],
-            name=op.f("fk_flex_imports_organization_id_organizations"),
-            ondelete="CASCADE",
-        ),
-        sa.PrimaryKeyConstraint("id", name=op.f("pk_flex_imports")),
-        sa.UniqueConstraint("organization_id", "xml_hash", name="uq_flex_imports_org_xml_hash"),
-    )
-    op.create_index(
-        op.f("ix_flex_imports_organization_id"), "flex_imports", ["organization_id"], unique=False
-    )
-    op.create_table(
-        "ingest_log",
-        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
-        sa.Column("organization_id", sa.BigInteger(), nullable=False),
-        sa.Column("job_kind", sa.Text(), nullable=False),
-        sa.Column(
-            "started_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.text("NOW()"),
-            nullable=False,
-        ),
-        sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("status", sa.Text(), nullable=False),
-        sa.Column("items_processed", sa.Integer(), nullable=True),
-        sa.Column("error_message", sa.Text(), nullable=True),
-        sa.Column("trigger", sa.Text(), nullable=False),
-        sa.CheckConstraint(
-            "job_kind IN ('flex', 'trm', 'manual_refresh', 'manual_upload', 'setup_initial')",
-            name=op.f("ck_ingest_log_job_kind"),
-        ),
-        sa.CheckConstraint(
-            "status IN ('running', 'ok', 'failed')", name=op.f("ck_ingest_log_status")
-        ),
-        sa.CheckConstraint(
-            "trigger IN ('cron', 'manual', 'wizard')", name=op.f("ck_ingest_log_trigger")
-        ),
-        sa.ForeignKeyConstraint(
-            ["organization_id"],
-            ["organizations.id"],
-            name=op.f("fk_ingest_log_organization_id_organizations"),
-            ondelete="CASCADE",
-        ),
-        sa.PrimaryKeyConstraint("id", name=op.f("pk_ingest_log")),
-    )
-    op.create_index(
-        "ix_ingest_log_org_started_at",
-        "ingest_log",
-        ["organization_id", sa.literal_column("started_at DESC")],
-        unique=False,
-    )
-    op.create_index(
-        op.f("ix_ingest_log_organization_id"), "ingest_log", ["organization_id"], unique=False
     )
     op.create_table(
         "memberships",
@@ -331,6 +377,7 @@ def upgrade() -> None:
     op.create_index(
         op.f("ix_parties_organization_id"), "parties", ["organization_id"], unique=False
     )
+    op.create_index(op.f("ix_parties_user_id"), "parties", ["user_id"], unique=False)
     op.create_table(
         "user_settings",
         sa.Column("user_id", sa.Integer(), nullable=False),
@@ -408,6 +455,218 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name=op.f("pk_access_grants")),
         comment="Grant cross-org party-scoped. RLS especial (grantor-org OR grantee).",
     )
+    op.create_index(
+        op.f("ix_access_grants_grantee_organization_id"),
+        "access_grants",
+        ["grantee_organization_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_access_grants_grantee_user_id"), "access_grants", ["grantee_user_id"], unique=False
+    )
+    op.create_index(
+        op.f("ix_access_grants_grantor_party_id"),
+        "access_grants",
+        ["grantor_party_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_access_grants_organization_id"), "access_grants", ["organization_id"], unique=False
+    )
+    op.create_table(
+        "connection_ibkr_flex",
+        sa.Column("connection_id", sa.BigInteger(), nullable=False),
+        sa.Column(
+            "provider_type", sa.String(), server_default=sa.text("'ibkr_flex'"), nullable=False
+        ),
+        sa.Column("organization_id", sa.BigInteger(), nullable=False),
+        sa.Column("token_encrypted", sa.LargeBinary(), nullable=False),
+        sa.Column("query_id", sa.String(), nullable=False),
+        sa.Column(
+            "last_rotated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("NOW()"),
+            nullable=False,
+        ),
+        sa.CheckConstraint(
+            "provider_type = 'ibkr_flex'", name=op.f("ck_connection_ibkr_flex_provider_type")
+        ),
+        sa.ForeignKeyConstraint(
+            ["connection_id", "provider_type"],
+            ["connections.id", "connections.provider_type"],
+            name=op.f("fk_connection_ibkr_flex_connection_id_connections"),
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["organization_id"],
+            ["organizations.id"],
+            name=op.f("fk_connection_ibkr_flex_organization_id_organizations"),
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("connection_id", name=op.f("pk_connection_ibkr_flex")),
+        comment="Detail 1:1 tipada del provider ibkr_flex (T1-D1, cero JSONB). Org-scoped (RLS). Subtipo enforced por FK compuesto + CHECK (T1-D2).",
+    )
+    op.create_index(
+        op.f("ix_connection_ibkr_flex_organization_id"),
+        "connection_ibkr_flex",
+        ["organization_id"],
+        unique=False,
+    )
+    op.create_table(
+        "flex_imports",
+        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("organization_id", sa.BigInteger(), nullable=False),
+        sa.Column("connection_id", sa.BigInteger(), nullable=True),
+        sa.Column("anyo", sa.Integer(), nullable=False),
+        sa.Column("xml_hash", sa.String(), nullable=False),
+        sa.Column("xml_size_bytes", sa.Integer(), nullable=False),
+        sa.Column("xml_bytes", sa.LargeBinary(), nullable=False),
+        sa.Column("source", sa.String(), nullable=False),
+        sa.Column("period_covered_from", sa.Date(), nullable=False),
+        sa.Column("period_covered_to", sa.Date(), nullable=False),
+        sa.Column("year_status", sa.String(), server_default=sa.text("'rolling'"), nullable=False),
+        sa.Column(
+            "fetched_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("NOW()"),
+            nullable=False,
+        ),
+        sa.Column("n_observed_trades", sa.Integer(), nullable=True),
+        sa.Column("n_observed_lots_closed", sa.Integer(), nullable=True),
+        sa.Column("n_observed_open_lots", sa.Integer(), nullable=True),
+        sa.Column("n_observed_cash_tx", sa.Integer(), nullable=True),
+        sa.Column("n_observed_dividends", sa.Integer(), nullable=True),
+        sa.Column("n_observed_transfers", sa.Integer(), nullable=True),
+        sa.Column("n_new_trades", sa.Integer(), nullable=True),
+        sa.Column("n_new_lots_closed", sa.Integer(), nullable=True),
+        sa.Column("n_new_open_lots", sa.Integer(), nullable=True),
+        sa.Column("n_new_cash_tx", sa.Integer(), nullable=True),
+        sa.Column("n_new_dividends", sa.Integer(), nullable=True),
+        sa.Column("n_new_transfers", sa.Integer(), nullable=True),
+        sa.Column("status", sa.String(length=20), server_default=sa.text("'ok'"), nullable=False),
+        sa.Column("poison_reason", sa.Text(), nullable=True),
+        sa.CheckConstraint(
+            "source IN ('web_service', 'manual_upload')", name=op.f("ck_flex_imports_source")
+        ),
+        sa.CheckConstraint("status IN ('ok', 'poison')", name=op.f("ck_flex_imports_status")),
+        sa.CheckConstraint(
+            "year_status IN ('rolling', 'sealed')", name=op.f("ck_flex_imports_year_status")
+        ),
+        sa.ForeignKeyConstraint(
+            ["connection_id"],
+            ["connections.id"],
+            name=op.f("fk_flex_imports_connection_id_connections"),
+            ondelete="SET NULL",
+        ),
+        sa.ForeignKeyConstraint(
+            ["organization_id"],
+            ["organizations.id"],
+            name=op.f("fk_flex_imports_organization_id_organizations"),
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_flex_imports")),
+        sa.UniqueConstraint("organization_id", "xml_hash", name="uq_flex_imports_org_xml_hash"),
+    )
+    op.create_index(
+        op.f("ix_flex_imports_connection_id"), "flex_imports", ["connection_id"], unique=False
+    )
+    op.create_index(
+        op.f("ix_flex_imports_organization_id"), "flex_imports", ["organization_id"], unique=False
+    )
+    op.create_table(
+        "ingest_log",
+        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("organization_id", sa.BigInteger(), nullable=False),
+        sa.Column("connection_id", sa.BigInteger(), nullable=True),
+        sa.Column("job_kind", sa.Text(), nullable=False),
+        sa.Column(
+            "started_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("NOW()"),
+            nullable=False,
+        ),
+        sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("status", sa.Text(), nullable=False),
+        sa.Column("items_processed", sa.Integer(), nullable=True),
+        sa.Column("error_message", sa.Text(), nullable=True),
+        sa.Column("trigger", sa.Text(), nullable=False),
+        sa.CheckConstraint(
+            "job_kind IN ('flex', 'trm', 'manual_refresh', 'manual_upload', 'setup_initial')",
+            name=op.f("ck_ingest_log_job_kind"),
+        ),
+        sa.CheckConstraint(
+            "status IN ('running', 'ok', 'failed')", name=op.f("ck_ingest_log_status")
+        ),
+        sa.CheckConstraint(
+            "trigger IN ('cron', 'manual', 'wizard')", name=op.f("ck_ingest_log_trigger")
+        ),
+        sa.ForeignKeyConstraint(
+            ["connection_id"],
+            ["connections.id"],
+            name=op.f("fk_ingest_log_connection_id_connections"),
+            ondelete="SET NULL",
+        ),
+        sa.ForeignKeyConstraint(
+            ["organization_id"],
+            ["organizations.id"],
+            name=op.f("fk_ingest_log_organization_id_organizations"),
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_ingest_log")),
+    )
+    op.create_index(
+        op.f("ix_ingest_log_connection_id"), "ingest_log", ["connection_id"], unique=False
+    )
+    op.create_index(
+        "ix_ingest_log_org_started_at",
+        "ingest_log",
+        ["organization_id", sa.literal_column("started_at DESC")],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_ingest_log_organization_id"), "ingest_log", ["organization_id"], unique=False
+    )
+    op.create_table(
+        "participations",
+        sa.Column("party_id", sa.BigInteger(), nullable=False),
+        sa.Column("account_id", sa.BigInteger(), nullable=False),
+        sa.Column("organization_id", sa.BigInteger(), nullable=False),
+        sa.Column("pct", sa.Numeric(precision=5, scale=4), nullable=False),
+        sa.Column("valid_from", sa.Date(), nullable=False),
+        sa.Column("valid_to", sa.Date(), nullable=True),
+        sa.CheckConstraint("pct >= 0 AND pct <= 1", name=op.f("ck_participations_pct_range")),
+        sa.CheckConstraint(
+            "valid_to IS NULL OR valid_to > valid_from", name=op.f("ck_participations_valid_range")
+        ),
+        sa.ForeignKeyConstraint(
+            ["account_id"],
+            ["accounts.id"],
+            name=op.f("fk_participations_account_id_accounts"),
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["organization_id"],
+            ["organizations.id"],
+            name=op.f("fk_participations_organization_id_organizations"),
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["party_id"],
+            ["parties.id"],
+            name=op.f("fk_participations_party_id_parties"),
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint(
+            "party_id", "account_id", "valid_from", name=op.f("pk_participations")
+        ),
+        comment="Propiedad fiscal: Party posee Account con pct (SCD-2). Org-scoped.",
+    )
+    op.create_index(
+        op.f("ix_participations_organization_id"),
+        "participations",
+        ["organization_id"],
+        unique=False,
+    )
     op.create_table(
         "cash_transactions",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
@@ -422,7 +681,10 @@ def upgrade() -> None:
         sa.Column("date", sa.Date(), nullable=False),
         sa.Column("symbol", sa.String(), nullable=True),
         sa.ForeignKeyConstraint(
-            ["account_id"], ["accounts.id"], name=op.f("fk_cash_transactions_account_id_accounts")
+            ["account_id"],
+            ["accounts.id"],
+            name=op.f("fk_cash_transactions_account_id_accounts"),
+            ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["flex_import_id"],
@@ -437,14 +699,16 @@ def upgrade() -> None:
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_cash_transactions")),
-        sa.UniqueConstraint("transaction_id", name=op.f("uq_cash_transactions_transaction_id")),
-        comment="Account-scoped. Visibilidad vía participations; sin user_id. transaction_id UNIQUE global correcto — un hecho pertenece a la cuenta, no al usuario.",
+        sa.UniqueConstraint(
+            "organization_id", "transaction_id", name="uq_cash_transactions_org_transaction_id"
+        ),
+        comment="Account-scoped. Visibilidad vía participations; sin user_id. transaction_id único POR TENANT (multi-home, spec 2026-06-10): la misma cuenta broker puede existir en N orgs, cada org tiene su copia de los hechos.",
     )
     op.create_index(op.f("ix_cash_transactions_date"), "cash_transactions", ["date"], unique=False)
     op.create_index(
-        op.f("ix_cash_transactions_organization_id"),
+        op.f("ix_cash_transactions_flex_import_id"),
         "cash_transactions",
-        ["organization_id"],
+        ["flex_import_id"],
         unique=False,
     )
     op.create_table(
@@ -479,10 +743,17 @@ def upgrade() -> None:
             server_default=sa.text("'{}'::jsonb"),
             nullable=False,
         ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("NOW()"),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(
             ["account_id"],
             ["accounts.id"],
             name=op.f("fk_change_in_dividend_accruals_account_id_accounts"),
+            ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["flex_import_id"],
@@ -514,6 +785,12 @@ def upgrade() -> None:
         op.f("ix_change_in_dividend_accruals_account_id_symbol"),
         "change_in_dividend_accruals",
         ["account_id", "symbol"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_change_in_dividend_accruals_flex_import_id"),
+        "change_in_dividend_accruals",
+        ["flex_import_id"],
         unique=False,
     )
     op.create_index(
@@ -592,10 +869,17 @@ def upgrade() -> None:
             server_default=sa.text("'{}'::jsonb"),
             nullable=False,
         ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("NOW()"),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(
             ["account_id"],
             ["accounts.id"],
             name=op.f("fk_open_dividend_accruals_account_id_accounts"),
+            ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["flex_import_id"],
@@ -629,6 +913,12 @@ def upgrade() -> None:
         unique=False,
     )
     op.create_index(
+        op.f("ix_open_dividend_accruals_flex_import_id"),
+        "open_dividend_accruals",
+        ["flex_import_id"],
+        unique=False,
+    )
+    op.create_index(
         op.f("ix_open_dividend_accruals_organization_id"),
         "open_dividend_accruals",
         ["organization_id"],
@@ -655,8 +945,17 @@ def upgrade() -> None:
         sa.Column("mark_value_usd", sa.Numeric(precision=20, scale=4), nullable=True),
         sa.Column("snapshot_date", sa.Date(), nullable=False),
         sa.Column("originating_transaction_id", sa.String(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("NOW()"),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(
-            ["account_id"], ["accounts.id"], name=op.f("fk_open_position_lots_account_id_accounts")
+            ["account_id"],
+            ["accounts.id"],
+            name=op.f("fk_open_position_lots_account_id_accounts"),
+            ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["flex_import_id"],
@@ -688,49 +987,14 @@ def upgrade() -> None:
         unique=False,
     )
     op.create_index(
-        op.f("ix_open_position_lots_organization_id"),
+        op.f("ix_open_position_lots_flex_import_id"),
         "open_position_lots",
-        ["organization_id"],
+        ["flex_import_id"],
         unique=False,
     )
-    op.create_table(
-        "participations",
-        sa.Column("party_id", sa.BigInteger(), nullable=False),
-        sa.Column("account_id", sa.BigInteger(), nullable=False),
-        sa.Column("organization_id", sa.BigInteger(), nullable=False),
-        sa.Column("pct", sa.Numeric(precision=5, scale=4), nullable=False),
-        sa.Column("valid_from", sa.Date(), nullable=False),
-        sa.Column("valid_to", sa.Date(), nullable=True),
-        sa.CheckConstraint("pct >= 0 AND pct <= 1", name=op.f("ck_participations_pct_range")),
-        sa.CheckConstraint(
-            "valid_to IS NULL OR valid_to > valid_from", name=op.f("ck_participations_valid_range")
-        ),
-        sa.ForeignKeyConstraint(
-            ["account_id"],
-            ["accounts.id"],
-            name=op.f("fk_participations_account_id_accounts"),
-            ondelete="CASCADE",
-        ),
-        sa.ForeignKeyConstraint(
-            ["organization_id"],
-            ["organizations.id"],
-            name=op.f("fk_participations_organization_id_organizations"),
-            ondelete="CASCADE",
-        ),
-        sa.ForeignKeyConstraint(
-            ["party_id"],
-            ["parties.id"],
-            name=op.f("fk_participations_party_id_parties"),
-            ondelete="CASCADE",
-        ),
-        sa.PrimaryKeyConstraint(
-            "party_id", "account_id", "valid_from", name=op.f("pk_participations")
-        ),
-        comment="Propiedad fiscal: Party posee Account con pct (SCD-2). Org-scoped.",
-    )
     op.create_index(
-        op.f("ix_participations_organization_id"),
-        "participations",
+        op.f("ix_open_position_lots_organization_id"),
+        "open_position_lots",
         ["organization_id"],
         unique=False,
     )
@@ -762,7 +1026,10 @@ def upgrade() -> None:
             "open_close IS NULL OR open_close IN ('O', 'C')", name=op.f("ck_trades_open_close")
         ),
         sa.ForeignKeyConstraint(
-            ["account_id"], ["accounts.id"], name=op.f("fk_trades_account_id_accounts")
+            ["account_id"],
+            ["accounts.id"],
+            name=op.f("fk_trades_account_id_accounts"),
+            ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["flex_import_id"],
@@ -777,13 +1044,15 @@ def upgrade() -> None:
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_trades")),
-        sa.UniqueConstraint("transaction_id", name=op.f("uq_trades_transaction_id")),
-        comment="Account-scoped. Visibilidad vía participations; sin user_id. transaction_id UNIQUE global correcto — un hecho pertenece a la cuenta, no al usuario.",
+        sa.UniqueConstraint(
+            "organization_id", "transaction_id", name="uq_trades_org_transaction_id"
+        ),
+        comment="Account-scoped. Visibilidad vía participations; sin user_id. transaction_id único POR TENANT (multi-home, spec 2026-06-10): la misma cuenta broker puede existir en N orgs, cada org tiene su copia de los hechos.",
     )
     op.create_index(
         op.f("ix_trades_account_id_symbol"), "trades", ["account_id", "symbol"], unique=False
     )
-    op.create_index(op.f("ix_trades_organization_id"), "trades", ["organization_id"], unique=False)
+    op.create_index(op.f("ix_trades_flex_import_id"), "trades", ["flex_import_id"], unique=False)
     op.create_index(op.f("ix_trades_trade_date"), "trades", ["trade_date"], unique=False)
     op.create_table(
         "transfers",
@@ -810,12 +1079,16 @@ def upgrade() -> None:
             name=op.f("ck_transfers_src_arc"),
         ),
         sa.ForeignKeyConstraint(
-            ["dst_account_id"], ["accounts.id"], name=op.f("fk_transfers_dst_account_id_accounts")
+            ["dst_account_id"],
+            ["accounts.id"],
+            name=op.f("fk_transfers_dst_account_id_accounts"),
+            ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["dst_counterparty_id"],
             ["counterparties.id"],
             name=op.f("fk_transfers_dst_counterparty_id_counterparties"),
+            ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["flex_import_id"],
@@ -830,19 +1103,37 @@ def upgrade() -> None:
             ondelete="CASCADE",
         ),
         sa.ForeignKeyConstraint(
-            ["src_account_id"], ["accounts.id"], name=op.f("fk_transfers_src_account_id_accounts")
+            ["src_account_id"],
+            ["accounts.id"],
+            name=op.f("fk_transfers_src_account_id_accounts"),
+            ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["src_counterparty_id"],
             ["counterparties.id"],
             name=op.f("fk_transfers_src_counterparty_id_counterparties"),
+            ondelete="RESTRICT",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_transfers")),
-        sa.UniqueConstraint("transaction_id", name=op.f("uq_transfers_transaction_id")),
-        comment="Account-scoped. Visibilidad vía participations; sin user_id. transaction_id UNIQUE global correcto — un hecho pertenece a la cuenta, no al usuario.",
+        sa.UniqueConstraint(
+            "organization_id", "transaction_id", name="uq_transfers_org_transaction_id"
+        ),
+        comment="Account-scoped. Visibilidad vía participations; sin user_id. transaction_id único POR TENANT (multi-home, spec 2026-06-10): la misma cuenta broker puede existir en N orgs, cada org tiene su copia de los hechos.",
     )
     op.create_index(
-        op.f("ix_transfers_organization_id"), "transfers", ["organization_id"], unique=False
+        op.f("ix_transfers_dst_account_id"), "transfers", ["dst_account_id"], unique=False
+    )
+    op.create_index(
+        op.f("ix_transfers_dst_counterparty_id"), "transfers", ["dst_counterparty_id"], unique=False
+    )
+    op.create_index(
+        op.f("ix_transfers_flex_import_id"), "transfers", ["flex_import_id"], unique=False
+    )
+    op.create_index(
+        op.f("ix_transfers_src_account_id"), "transfers", ["src_account_id"], unique=False
+    )
+    op.create_index(
+        op.f("ix_transfers_src_counterparty_id"), "transfers", ["src_counterparty_id"], unique=False
     )
     op.create_table(
         "closed_lots",
@@ -855,14 +1146,28 @@ def upgrade() -> None:
         sa.Column("asset_class", sa.String(), nullable=False),
         sa.Column("open_date", sa.Date(), nullable=False),
         sa.Column("close_date", sa.Date(), nullable=False),
-        sa.Column("close_datetime", sa.DateTime(), nullable=False),
+        sa.Column(
+            "close_datetime",
+            sa.DateTime(),
+            nullable=False,
+            comment="Naive POR DISEÑO (D3 sp1-db-hardening): IBKR emite 'YYYYMMDD;HHMMSS' sin timezone (exchange-local); timestamptz inventaría una zona. La regla 730d (Art. 300 ET) opera a granularidad de día sobre close_date.",
+        ),
         sa.Column("qty", sa.Numeric(precision=20, scale=8), nullable=False),
         sa.Column("cost_basis_usd", sa.Numeric(precision=20, scale=4), nullable=False),
         sa.Column("proceeds_usd", sa.Numeric(precision=20, scale=4), nullable=False),
         sa.Column("fifo_pnl_usd", sa.Numeric(precision=20, scale=4), nullable=False),
         sa.Column("source_trade_id", sa.BigInteger(), nullable=True),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("NOW()"),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(
-            ["account_id"], ["accounts.id"], name=op.f("fk_closed_lots_account_id_accounts")
+            ["account_id"],
+            ["accounts.id"],
+            name=op.f("fk_closed_lots_account_id_accounts"),
+            ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["flex_import_id"],
@@ -881,13 +1186,14 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_closed_lots")),
         sa.UniqueConstraint(
+            "organization_id",
             "transaction_id",
             "close_datetime",
             "qty",
             "fifo_pnl_usd",
             name="uq_closed_lots_natural_key",
         ),
-        comment="Account-scoped. Visibilidad vía participations; sin user_id. Identidad por natural key compuesto (uq_closed_lots_natural_key); transaction_id NO es único global — múltiples ejecuciones de cierre lo comparten (amendment A3).",
+        comment="Account-scoped. Visibilidad vía participations; sin user_id. Identidad por natural key compuesto (uq_closed_lots_natural_key); transaction_id NO es único ni global ni per-org — múltiples ejecuciones de cierre lo comparten (amendment A3); la key es per-tenant (multi-home, spec 2026-06-10).",
     )
     op.create_index(
         op.f("ix_closed_lots_account_id_symbol"),
@@ -896,43 +1202,145 @@ def upgrade() -> None:
         unique=False,
     )
     op.create_index(
-        op.f("ix_closed_lots_organization_id"), "closed_lots", ["organization_id"], unique=False
+        op.f("ix_closed_lots_flex_import_id"), "closed_lots", ["flex_import_id"], unique=False
+    )
+    op.create_index(
+        op.f("ix_closed_lots_source_trade_id"), "closed_lots", ["source_trade_id"], unique=False
     )
     # ### end Alembic commands ###
 
-    # RLS: org isolation (FORCE so even table owner is subject) + the app_rls
-    # non-bypass login role the app connects as. Migrations run as the DB owner.
-    from ibkr_control.db.rls import (
-        ORG_SCOPED_TABLES,
-        access_grants_policy_sql,
-        app_role_grants_sql,
-        standard_policy_sql,
+    # --- (0) seed the global institutions catalog (control plane) -----------
+    # institutions is control-plane data (no RLS, like trm_days): the catalog is
+    # not user input — it is seeded here so connections.institution_id has a row
+    # to reference. ON CONFLICT (code) DO NOTHING keeps it idempotent.
+    op.execute(
+        "INSERT INTO institutions (code, name) VALUES ('ibkr', 'Interactive Brokers') "
+        "ON CONFLICT (code) DO NOTHING"
     )
 
-    for stmt in app_role_grants_sql():
-        op.execute(stmt)
-    for table in ORG_SCOPED_TABLES:
-        for stmt in standard_policy_sql(table):
-            op.execute(stmt)
-    for stmt in access_grants_policy_sql():
-        op.execute(stmt)
+    # =======================================================================
+    # HAND-WRITTEN SECTIONS (frozen inline — autogenerate cannot emit these).
+    # Migrations run as the DB owner (the migrate one-shot container), which is
+    # exempt from RLS even under FORCE — so creating the role + policies + the
+    # SECURITY DEFINER function all run with the necessary privilege here.
+    # =======================================================================
+
+    # --- (1) apscheduler_jobs (runtime table; app_rls has no CREATE) --------
+    # Frozen VERBATIM from the old 7fdaf6528762. IF NOT EXISTS is load-bearing
+    # (dirty-volume safe): APScheduler's SQLAlchemyJobStore lazily create_all()s
+    # this exact table at runtime; a volume that ran a pre-split app already has
+    # it. The schema is APScheduler-owned + frozen by the APScheduler==3.11.* pin
+    # (no third writer), so IF NOT EXISTS cannot mask meaningful drift. Not in
+    # Base.metadata -> the drift test ignores it; test_tier1_baseline asserts it.
+    op.execute(
+        "CREATE TABLE IF NOT EXISTS apscheduler_jobs ("
+        "id VARCHAR(191) NOT NULL PRIMARY KEY, "
+        "next_run_time DOUBLE PRECISION, "
+        "job_state BYTEA NOT NULL)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_apscheduler_jobs_next_run_time "
+        "ON apscheduler_jobs (next_run_time)"
+    )
+
+    # --- (2) app_rls role + grants -----------------------------------------
+    # The non-superuser, non-owner login role the long-running app connects as,
+    # so RLS (with FORCE) actually applies in runtime. Frozen from the output of
+    # db/rls.py::app_role_grants_sql(); the password is the only runtime value,
+    # read from env via _app_rls_password() (no hardcoded credential in source).
+    op.execute(
+        f"DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='{_APP_ROLE}') "
+        f"THEN CREATE ROLE {_APP_ROLE} LOGIN PASSWORD '{_app_rls_password()}'; END IF; END $$"
+    )
+    op.execute(f"GRANT USAGE ON SCHEMA public TO {_APP_ROLE}")
+    op.execute(
+        f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {_APP_ROLE}"
+    )
+    op.execute(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {_APP_ROLE}")
+    op.execute(
+        f"ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+        f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {_APP_ROLE}"
+    )
+    # apscheduler_jobs was created above without going through ALTER DEFAULT
+    # PRIVILEGES timing guarantees; grant DML explicitly (idempotent, frozen from
+    # 7fdaf6528762) so the running app can read/write job rows.
+    op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON apscheduler_jobs TO {_APP_ROLE}")
+
+    # --- (3) standard org-isolation RLS policy on every org-scoped table ----
+    # Frozen from db/rls.py::standard_policy_sql(). ENABLE + FORCE (so even the
+    # table owner is subject) + a single policy keyed on app.current_org.
+    for table in _ORG_SCOPED_TABLES:
+        op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+        op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
+        op.execute(
+            f"CREATE POLICY org_isolation ON {table}\n"
+            f"            USING (organization_id = {_CURRENT_ORG})\n"
+            f"            WITH CHECK (organization_id = {_CURRENT_ORG})"
+        )
+
+    # --- (4) special grant_visibility policy on access_grants ---------------
+    # Frozen from db/rls.py::access_grants_policy_sql(). A grant is visible to the
+    # grantor's org OR the grantee (org or user) — cross-org by design; writes are
+    # still confined to the current org.
+    op.execute("ALTER TABLE access_grants ENABLE ROW LEVEL SECURITY")
+    op.execute("ALTER TABLE access_grants FORCE ROW LEVEL SECURITY")
+    op.execute(
+        "CREATE POLICY grant_visibility ON access_grants\n"
+        "            USING (\n"
+        f"              organization_id = {_CURRENT_ORG}\n"
+        f"              OR grantee_organization_id = {_CURRENT_ORG}\n"
+        f"              OR grantee_user_id = {_CURRENT_USER}\n"
+        "            )\n"
+        f"            WITH CHECK (organization_id = {_CURRENT_ORG})"
+    )
+
+    # --- (5) system_credentialed_org_ids() SECURITY DEFINER function --------
+    # Frozen from db/rls.py::system_enum_function_sql() (amendment #2, W1 Task 4):
+    # the body enumerates orgs with a non-disabled ibkr_flex connection (repointed
+    # from the legacy flex_credentials — the cron now iterates connections).
+    # SECURITY DEFINER (owner is the migration superuser, RLS-exempt) so the
+    # Flex cron can enumerate credentialed orgs (a cross-tenant control-plane
+    # read that would default-deny to 0 rows as app_rls). SET search_path pins
+    # name resolution (anti-hijack); REVOKE FROM PUBLIC + GRANT TO app_rls is
+    # least privilege. Not in Base.metadata -> drift test ignores it.
+    op.execute(
+        "CREATE OR REPLACE FUNCTION system_credentialed_org_ids() "
+        "RETURNS SETOF bigint LANGUAGE sql STABLE SECURITY DEFINER "
+        "SET search_path = pg_catalog, public AS $$ "
+        "SELECT DISTINCT organization_id FROM connections "
+        "WHERE provider_type = 'ibkr_flex' AND status <> 'disabled' $$"
+    )
+    op.execute("REVOKE EXECUTE ON FUNCTION system_credentialed_org_ids() FROM PUBLIC")
+    op.execute(f"GRANT EXECUTE ON FUNCTION system_credentialed_org_ids() TO {_APP_ROLE}")
 
 
 def downgrade() -> None:
     """Downgrade schema."""
+    # Drop the hand-written objects first (mirrors the old chain's downgrades:
+    # the function from a1f2c3d4e5b6, apscheduler_jobs from 7fdaf6528762). The
+    # RLS policies are dropped implicitly with their tables below; the role is
+    # dropped last (after its grants are gone with the tables).
+    op.execute("DROP FUNCTION IF EXISTS system_credentialed_org_ids()")
+    op.execute("DROP INDEX IF EXISTS ix_apscheduler_jobs_next_run_time")
+    op.execute("DROP TABLE IF EXISTS apscheduler_jobs")
+
     # ### commands auto generated by Alembic - please adjust! ###
-    op.drop_index(op.f("ix_closed_lots_organization_id"), table_name="closed_lots")
+    op.drop_index(op.f("ix_closed_lots_source_trade_id"), table_name="closed_lots")
+    op.drop_index(op.f("ix_closed_lots_flex_import_id"), table_name="closed_lots")
     op.drop_index(op.f("ix_closed_lots_account_id_symbol"), table_name="closed_lots")
     op.drop_table("closed_lots")
-    op.drop_index(op.f("ix_transfers_organization_id"), table_name="transfers")
+    op.drop_index(op.f("ix_transfers_src_counterparty_id"), table_name="transfers")
+    op.drop_index(op.f("ix_transfers_src_account_id"), table_name="transfers")
+    op.drop_index(op.f("ix_transfers_flex_import_id"), table_name="transfers")
+    op.drop_index(op.f("ix_transfers_dst_counterparty_id"), table_name="transfers")
+    op.drop_index(op.f("ix_transfers_dst_account_id"), table_name="transfers")
     op.drop_table("transfers")
     op.drop_index(op.f("ix_trades_trade_date"), table_name="trades")
-    op.drop_index(op.f("ix_trades_organization_id"), table_name="trades")
+    op.drop_index(op.f("ix_trades_flex_import_id"), table_name="trades")
     op.drop_index(op.f("ix_trades_account_id_symbol"), table_name="trades")
     op.drop_table("trades")
-    op.drop_index(op.f("ix_participations_organization_id"), table_name="participations")
-    op.drop_table("participations")
     op.drop_index(op.f("ix_open_position_lots_organization_id"), table_name="open_position_lots")
+    op.drop_index(op.f("ix_open_position_lots_flex_import_id"), table_name="open_position_lots")
     op.drop_index(op.f("ix_open_position_lots_account_id_symbol"), table_name="open_position_lots")
     op.drop_table("open_position_lots")
     op.drop_index(
@@ -940,6 +1348,9 @@ def downgrade() -> None:
     )
     op.drop_index(
         op.f("ix_open_dividend_accruals_organization_id"), table_name="open_dividend_accruals"
+    )
+    op.drop_index(
+        op.f("ix_open_dividend_accruals_flex_import_id"), table_name="open_dividend_accruals"
     )
     op.drop_index(
         op.f("ix_open_dividend_accruals_account_id_symbol"), table_name="open_dividend_accruals"
@@ -957,28 +1368,45 @@ def downgrade() -> None:
         table_name="change_in_dividend_accruals",
     )
     op.drop_index(
+        op.f("ix_change_in_dividend_accruals_flex_import_id"),
+        table_name="change_in_dividend_accruals",
+    )
+    op.drop_index(
         op.f("ix_change_in_dividend_accruals_account_id_symbol"),
         table_name="change_in_dividend_accruals",
     )
     op.drop_table("change_in_dividend_accruals")
-    op.drop_index(op.f("ix_cash_transactions_organization_id"), table_name="cash_transactions")
+    op.drop_index(op.f("ix_cash_transactions_flex_import_id"), table_name="cash_transactions")
     op.drop_index(op.f("ix_cash_transactions_date"), table_name="cash_transactions")
     op.drop_table("cash_transactions")
+    op.drop_index(op.f("ix_participations_organization_id"), table_name="participations")
+    op.drop_table("participations")
+    op.drop_index(op.f("ix_ingest_log_organization_id"), table_name="ingest_log")
+    op.drop_index("ix_ingest_log_org_started_at", table_name="ingest_log")
+    op.drop_index(op.f("ix_ingest_log_connection_id"), table_name="ingest_log")
+    op.drop_table("ingest_log")
+    op.drop_index(op.f("ix_flex_imports_organization_id"), table_name="flex_imports")
+    op.drop_index(op.f("ix_flex_imports_connection_id"), table_name="flex_imports")
+    op.drop_table("flex_imports")
+    op.drop_index(
+        op.f("ix_connection_ibkr_flex_organization_id"), table_name="connection_ibkr_flex"
+    )
+    op.drop_table("connection_ibkr_flex")
+    op.drop_index(op.f("ix_access_grants_organization_id"), table_name="access_grants")
+    op.drop_index(op.f("ix_access_grants_grantor_party_id"), table_name="access_grants")
+    op.drop_index(op.f("ix_access_grants_grantee_user_id"), table_name="access_grants")
+    op.drop_index(op.f("ix_access_grants_grantee_organization_id"), table_name="access_grants")
     op.drop_table("access_grants")
     op.drop_table("user_settings")
+    op.drop_index(op.f("ix_parties_user_id"), table_name="parties")
     op.drop_index(op.f("ix_parties_organization_id"), table_name="parties")
     op.drop_table("parties")
     op.drop_table("memberships")
-    op.drop_index(op.f("ix_ingest_log_organization_id"), table_name="ingest_log")
-    op.drop_index("ix_ingest_log_org_started_at", table_name="ingest_log")
-    op.drop_table("ingest_log")
-    op.drop_index(op.f("ix_flex_imports_organization_id"), table_name="flex_imports")
-    op.drop_table("flex_imports")
-    op.drop_index(op.f("ix_flex_credentials_organization_id"), table_name="flex_credentials")
-    op.drop_table("flex_credentials")
     op.drop_index(op.f("ix_counterparties_organization_id"), table_name="counterparties")
     op.drop_table("counterparties")
-    op.drop_index(op.f("ix_accounts_organization_id"), table_name="accounts")
+    op.drop_index(op.f("ix_connections_organization_id"), table_name="connections")
+    op.drop_index(op.f("ix_connections_institution_id"), table_name="connections")
+    op.drop_table("connections")
     op.drop_table("accounts")
     op.drop_index(op.f("ix_users_email"), table_name="users")
     op.drop_table("users")
@@ -986,11 +1414,9 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_trm_days_date"), table_name="trm_days")
     op.drop_table("trm_days")
     op.drop_table("organizations")
+    op.drop_table("institutions")
     # ### end Alembic commands ###
 
-    # Policies are dropped implicitly with their tables above. Drop the role last
-    # (its grants are gone once the tables are dropped). This is a wipe baseline,
-    # so downgrade fidelity is low-priority.
-    from ibkr_control.db.rls import APP_ROLE
-
-    op.execute(f"DROP ROLE IF EXISTS {APP_ROLE}")
+    # Role last: its grants are gone once the tables are dropped. This is a wipe
+    # baseline, so downgrade fidelity is low-priority (frozen from 05943d9efcdb).
+    op.execute(f"DROP ROLE IF EXISTS {_APP_ROLE}")
