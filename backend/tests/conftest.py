@@ -126,13 +126,14 @@ async def owner_session(test_db):  # noqa: F811 — parámetro de fixture pytest
 
 @pytest.fixture
 async def db_engine(test_db):  # noqa: F811 — parámetro de fixture pytest inyecta test_db; sombrea el import a propósito
-    """OWNER engine sobre el mismo clon migrado, para tests que abren multiples
-    sesiones concurrentes (p.ej. contencion de advisory locks).
+    """Engine ``app_rls`` (NO bypass) sobre el clon migrado, para tests que abren
+    multiples sesiones concurrentes (p.ej. contencion de advisory locks).
 
-    Multi-conexion real: ``test_db`` es una base de datos independiente, asi que
-    dos engines/conexiones se comportan como en prod. Function-scoped: un clon por
-    test (compartido con ``db_session`` si el test pide ambos -> misma DB)."""
-    engine = create_async_engine(test_db, echo=False)
+    Multi-conexion real; cada sesion abierta sobre este engine arranca SIN
+    contexto org (fail-closed) -> el consumidor debe setear ``app.current_org`` por
+    sesion si toca tablas org-scoped. Los tests cross-tenant usan ``owner_engine``."""
+    app_dsn = swap_dsn_credentials(test_db, "app_rls", app_rls_password())
+    engine = create_async_engine(app_dsn, echo=False)
     try:
         yield engine
     finally:
@@ -184,6 +185,10 @@ async def sample_org(db_session: AsyncSession):
     sample_flex_import cuelgan de este mismo org para que el contexto sea
     coherente (un solo tenant). Tests que necesitan el organization_id lo
     obtienen de aquí.
+
+    Además scopea la sesión a este org (set_session_org_context + apply_org_context),
+    así los tests single-tenant que cuelgan de sample_* quedan auto-scopeados bajo
+    app_rls (no necesitan setear el contexto a mano sobre db_session).
     """
     from ibkr_control.db.models.organizations import Organization
     from ibkr_control.db.rls import apply_org_context, set_session_org_context

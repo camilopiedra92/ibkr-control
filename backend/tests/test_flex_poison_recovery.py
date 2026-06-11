@@ -4,9 +4,19 @@ import pytest
 from sqlalchemy import delete, select
 
 from ibkr_control.db.models.flex_raw import FlexImport
+from ibkr_control.db.rls import apply_org_context, set_session_org_context
 from ibkr_control.ingest.flex import job as flex_job
 from ibkr_control.ingest.flex import parser as flex_parser_mod
 from ibkr_control.ingest.hash_dedup import xml_hash
+
+
+async def _scope(session, org_id):
+    """Bajo app_rls, una sesión recién abierta arranca sin contexto org
+    (fail-closed). flex_imports/ingest_log son org-scoped, así que las sesiones
+    abiertas desde db_engine para re-leer deben setear app.current_org primero
+    (stash para futuras txns + apply a la autobegin ya abierta)."""
+    set_session_org_context(session, org_id=org_id, user_id=None)
+    await apply_org_context(session, org_id=org_id, user_id=None)
 
 
 @pytest.mark.asyncio
@@ -42,6 +52,7 @@ async def test_parser_failure_creates_poison_row(
 
     maker2 = async_sessionmaker(db_engine, expire_on_commit=False, class_=AS2)
     async with maker2() as s2:
+        await _scope(s2, sample_org.id)
         row = await s2.scalar(select(FlexImport).where(FlexImport.xml_hash == h))
         assert row is not None, "Expected a poison FlexImport row to be committed"
         assert row.status == "poison"
@@ -90,6 +101,7 @@ async def test_second_attempt_of_poison_xml_short_circuits(
 
     maker2 = async_sessionmaker(db_engine, expire_on_commit=False, class_=AS2)
     async with maker2() as s2:
+        await _scope(s2, sample_org.id)
         result_id = await flex_job.ingest_xml(
             s2,
             organization_id=sample_org.id,
@@ -134,10 +146,12 @@ async def test_recovery_via_delete_allows_retry(
 
     maker2 = async_sessionmaker(db_engine, expire_on_commit=False, class_=AS2)
     async with maker2() as s2:
+        await _scope(s2, sample_org.id)
         await s2.execute(delete(FlexImport).where(FlexImport.xml_hash == h))
         await s2.commit()
 
     # Verify deleted
     async with maker2() as s3:
+        await _scope(s3, sample_org.id)
         row = await s3.scalar(select(FlexImport).where(FlexImport.xml_hash == h))
         assert row is None, "Poison row should have been deleted"
