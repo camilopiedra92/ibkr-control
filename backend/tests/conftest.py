@@ -16,7 +16,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from testcontainers.postgres import PostgresContainer
 
 from ibkr_control.main import create_app
-from ibkr_control.db.base import Base  # noqa: F401 — TODO Task 3: huérfano tras quitar create_all de db_session/db_engine
 from ibkr_control.db.rls import app_rls_password
 from ibkr_control.db.session import get_async_session
 
@@ -50,7 +49,7 @@ def postgres_container():
 
 
 @pytest.fixture
-async def app_with_db(test_db, monkeypatch):  # noqa: F811 — test_db es fixture importada, no redefinida
+async def app_with_db(test_db, monkeypatch):  # noqa: F811 — parámetro de fixture pytest inyecta test_db; sombrea el import a propósito
     """The endpoint app, wired to a MIGRATED clone DB and connecting as ``app_rls``.
 
     The app's ``get_async_session`` is overridden to yield sessions on an engine
@@ -85,7 +84,7 @@ async def client(app_with_db):
 
 
 @pytest.fixture
-async def db_session(test_db):  # noqa: F811 — test_db es fixture importada, no redefinida
+async def db_session(test_db):  # noqa: F811 — parámetro de fixture pytest inyecta test_db; sombrea el import a propósito
     """Sesion de DB directa (OWNER) sobre un clon migrado del template.
 
     Para tests de schema/modelos sin HTTP layer. El schema viene del template
@@ -110,7 +109,7 @@ async def db_session(test_db):  # noqa: F811 — test_db es fixture importada, n
 
 
 @pytest.fixture
-async def db_engine(test_db):  # noqa: F811 — test_db es fixture importada, no redefinida
+async def db_engine(test_db):  # noqa: F811 — parámetro de fixture pytest inyecta test_db; sombrea el import a propósito
     """OWNER engine sobre el mismo clon migrado, para tests que abren multiples
     sesiones concurrentes (p.ej. contencion de advisory locks).
 
@@ -125,7 +124,7 @@ async def db_engine(test_db):  # noqa: F811 — test_db es fixture importada, no
 
 
 @pytest.fixture
-async def app_owner_engine(test_db):  # noqa: F811 — test_db es fixture importada, no redefinida
+async def app_owner_engine(test_db):  # noqa: F811 — parámetro de fixture pytest inyecta test_db; sombrea el import a propósito
     """OWNER engine on the SAME migrated DB the endpoint app (``app_with_db``) uses.
 
     Used by the endpoint seeding fixtures (``auth_headers_with_org`` &c.) to
@@ -133,9 +132,11 @@ async def app_owner_engine(test_db):  # noqa: F811 — test_db es fixture import
     serves requests from. Connects as the container OWNER (superuser → bypasses
     RLS; identity tables have no org-RLS anyway), so the seed is unconstrained.
 
-    Distinct from ``db_engine`` (which stays on ``postgres_container`` with the
-    owner/create_all ``db_session`` world). Endpoint seeding targets the migrated
-    DB; model-level tests stay on the create_all DB.
+    Both ``app_owner_engine`` and the model-world ``db_engine``/``db_session`` now
+    connect (as owner) to a ``test_db`` migrated clone — one source of schema. This
+    fixture exists for the ENDPOINT seeding path (``auth_headers_with_org`` &c.),
+    which seeds the same DB ``app_with_db`` serves; ``db_engine``/``db_session`` are
+    the direct-model path.
     """
     engine = create_async_engine(test_db, echo=False)
     try:
@@ -145,7 +146,7 @@ async def app_owner_engine(test_db):  # noqa: F811 — test_db es fixture import
 
 
 @pytest.fixture
-async def app_rls_db_session(test_db):  # noqa: F811 — test_db es fixture importada, no redefinida
+async def app_rls_db_session(test_db):  # noqa: F811 — parámetro de fixture pytest inyecta test_db; sombrea el import a propósito
     """A direct session on the migrated app DB, connecting as ``app_rls``.
 
     For assertions about the role the endpoint app runs under (e.g. it is NOT
