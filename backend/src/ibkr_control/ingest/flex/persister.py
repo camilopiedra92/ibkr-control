@@ -26,6 +26,8 @@ DO NOTHING absorbe colisiones cross-XML sin error.
 
 import logging
 from datetime import date
+from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -45,11 +47,12 @@ from ibkr_control.db.models.flex_raw import (
     Trade,
     Transfer,
 )
+from ibkr_control.db.models.restatements import RestatementLog
 from ibkr_control.ingest.flex._models import ParsedXML
 from ibkr_control.ingest.flex._upsert_helpers import (
     _upsert_immutable,
     _upsert_immutable_returning_inserted,
-    _upsert_snapshot,
+    _upsert_snapshot_with_audit,
 )
 from ibkr_control.ingest.hash_dedup import xml_hash
 
@@ -74,6 +77,74 @@ def _is_shadow_account(ibkr_account_id: str) -> bool:
     to keep `accounts` table free of accounts that shouldn't have participations.
     """
     return ibkr_account_id.endswith("F")
+
+
+# Map de tabla afectada -> columna del key cuya fecha define el año fiscal de la
+# fila (sealed_year, T1-D13): snapshot_date para lotes abiertos, report_date para
+# accruals, close_date para closed_lots siblings. El año se deriva de ese valor.
+_YEAR_KEY_COL = {
+    "open_position_lots": "snapshot_date",
+    "change_in_dividend_accruals": "report_date",
+    "open_dividend_accruals": "report_date",
+    "closed_lots": "close_date",
+}
+
+
+def _json_safe(value: Any) -> Any:
+    """Serializa un valor de natural-key/columna a algo JSONB/Text-friendly.
+
+    date/datetime -> ISO string; Decimal -> str (preserva escala exacta, sin
+    float lossy); None pasa; el resto str(). Usado tanto para natural_key (JSONB)
+    como para old_value/new_value (Text)."""
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (date,)):
+        return value.isoformat()
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+class _RestatementCollector:
+    """Acumula restatements detectados durante el persist (un solo import).
+
+    audit_sink (snapshot tables) y add_sibling (closed_lots) empujan acá; al final
+    persist() computa sealed_year por año afectado y hace un INSERT batched.
+    """
+
+    def __init__(self) -> None:
+        # (table_name, natural_key_dict_json, column_name, old_json, new_json, kind)
+        self.rows: list[dict[str, Any]] = []
+
+    def audit_sink(
+        self, table_name: str, natural_key: dict[str, Any], column_name: str, old: Any, new: Any
+    ) -> None:
+        self.rows.append(
+            {
+                "table_name": table_name,
+                "natural_key": {k: _json_safe(v) for k, v in natural_key.items()},
+                "_natural_key_raw": natural_key,
+                "column_name": column_name,
+                "old_value": _json_safe(old),
+                "new_value": _json_safe(new),
+                "kind": "value_update",
+            }
+        )
+
+    def add_sibling(self, table_name: str, natural_key: dict[str, Any], old: Any, new: Any) -> None:
+        self.rows.append(
+            {
+                "table_name": table_name,
+                "natural_key": {k: _json_safe(v) for k, v in natural_key.items()},
+                "_natural_key_raw": natural_key,
+                "column_name": "*",
+                "old_value": _json_safe(old),
+                "new_value": _json_safe(new),
+                "kind": "sibling_row",
+            }
+        )
 
 
 async def persist(
@@ -210,9 +281,12 @@ async def persist(
             .on_conflict_do_nothing(index_elements=["flex_import_id", "account_id"])
         )
 
+    # W3: acumulador de restatements (snapshot value_update + closed_lots sibling).
+    restatements = _RestatementCollector()
+
     # UPSERTs en orden de dependencia FK
     n_new = await _upsert_all_children(
-        session, fi, parsed, accounts_map, instruments_map, organization_id
+        session, fi, parsed, accounts_map, instruments_map, organization_id, restatements
     )
 
     # Update n_new_* en flex_imports
@@ -223,6 +297,11 @@ async def persist(
     fi.n_new_dividends = n_new["dividends"]
     fi.n_new_transfers = n_new["transfers"]
     await session.flush()
+
+    # W3: persistir restatement_log (con sealed_year computado por año afectado).
+    n_restatements = await _persist_restatements(
+        session, restatements, organization_id=organization_id, flex_import_id=fi.id
+    )
 
     # R1 latest-1 cleanup. For year_status='rolling' rows of the same
     # (organization_id, anyo, source), retain only the row just persisted (fi.id).
@@ -259,7 +338,112 @@ async def persist(
         "hash_dedup": False,
         **{f"n_observed_{k}": v for k, v in n_observed.items()},
         **{f"n_new_{k}": v for k, v in n_new.items()},
+        "n_restatements": n_restatements,
     }
+
+
+def _restatement_year(row: dict[str, Any]) -> int | None:
+    """Año fiscal de la fila afectada (T1-D13): derivado del valor-fecha del key
+    que define el año por tabla (_YEAR_KEY_COL). Devuelve None si no se puede
+    derivar (tabla sin mapeo o key sin la columna) -> sealed_year queda False."""
+    col = _YEAR_KEY_COL.get(row["table_name"])
+    if col is None:
+        return None
+    raw = row["_natural_key_raw"].get(col)
+    if isinstance(raw, date):
+        return raw.year
+    if isinstance(raw, str) and len(raw) >= 4 and raw[:4].isdigit():
+        return int(raw[:4])
+    return None
+
+
+async def _persist_restatements(
+    session: AsyncSession,
+    collector: "_RestatementCollector",
+    *,
+    organization_id: int,
+    flex_import_id: int,
+) -> int:
+    """INSERT batched de restatement_log con sealed_year computado.
+
+    sealed_year (T1-D13): el año fiscal de la fila afectada tiene un flex_imports
+    row del org con year_status='sealed'. Se consulta una sola vez por el set de
+    años distintos del batch. Devuelve el count de restatements persistidos.
+    """
+    if not collector.rows:
+        return 0
+
+    years = {y for row in collector.rows if (y := _restatement_year(row)) is not None}
+    sealed_years: set[int] = set()
+    if years:
+        result = await session.execute(
+            select(FlexImport.anyo)
+            .where(
+                FlexImport.organization_id == organization_id,
+                FlexImport.anyo.in_(years),
+                FlexImport.year_status == "sealed",
+            )
+            .distinct()
+        )
+        sealed_years = {y for (y,) in result.all()}
+
+    insert_rows = [
+        {
+            "organization_id": organization_id,
+            "flex_import_id": flex_import_id,
+            "table_name": row["table_name"],
+            "natural_key": row["natural_key"],
+            "column_name": row["column_name"],
+            "old_value": row["old_value"],
+            "new_value": row["new_value"],
+            "kind": row["kind"],
+            "sealed_year": _restatement_year(row) in sealed_years,
+        }
+        for row in collector.rows
+    ]
+    await session.execute(pg_insert(RestatementLog.__table__).values(insert_rows))
+    return len(insert_rows)
+
+
+async def _detect_closed_lot_siblings(
+    session: AsyncSession,
+    inserted,
+    *,
+    organization_id: int,
+    collector: "_RestatementCollector",
+) -> None:
+    """Por cada closed_lot recién insertado, busca filas existentes con el mismo
+    (organization_id, transaction_id, close_datetime, qty) y distinto fifo_pnl_usd.
+
+    Cada pareja (existente con distinto pnl ↔ nueva) es un sibling row: IBKR emitió
+    un segundo cierre con el mismo timestamp/qty pero PnL realizado distinto
+    (wash-sale o ajuste contable). Nunca borra; registra kind='sibling_row' una vez
+    por sibling nuevo, con old=pnl preexistente, new=pnl de la fila nueva.
+    """
+    if not inserted:
+        return
+    for row in inserted:
+        result = await session.execute(
+            select(ClosedLot.fifo_pnl_usd, ClosedLot.close_date).where(
+                ClosedLot.organization_id == organization_id,
+                ClosedLot.transaction_id == row.transaction_id,
+                ClosedLot.close_datetime == row.close_datetime,
+                ClosedLot.qty == row.qty,
+                ClosedLot.fifo_pnl_usd != row.fifo_pnl_usd,
+            )
+        )
+        for prior_pnl, prior_close_date in result.all():
+            collector.add_sibling(
+                "closed_lots",
+                {
+                    "transaction_id": row.transaction_id,
+                    "close_datetime": row.close_datetime,
+                    "qty": row.qty,
+                    "close_date": prior_close_date,
+                },
+                prior_pnl,
+                row.fifo_pnl_usd,
+            )
 
 
 async def _upsert_all_children(
@@ -269,6 +453,7 @@ async def _upsert_all_children(
     accounts_map: dict[str, int],
     instruments_map: dict[str, int],
     organization_id: int,
+    restatements: "_RestatementCollector",
 ) -> dict[str, int]:
     """Hace UPSERT de todos los children. Devuelve n_new por entity type."""
     # Resolver-only lookup para cash/transfers (W2): conid presente pero no en el
@@ -356,11 +541,22 @@ async def _upsert_all_children(
     # - Multi-execution closes against the same open_lot at different times
     # - Same close timestamp + qty but different realized PnL (wash-sale or
     #   accounting adjustments — seen on IBIT 2024-10-02 in fixture 2024).
-    n_new_closed = await _upsert_immutable(
+    inserted_closed = await _upsert_immutable_returning_inserted(
         session,
         ClosedLot.__table__,
         closed_rows,
         ["organization_id", "transaction_id", "close_datetime", "qty", "fifo_pnl_usd"],
+        ["transaction_id", "close_datetime", "qty", "fifo_pnl_usd", "close_date"],
+    )
+    n_new_closed = len(inserted_closed)
+
+    # W3 sibling detection (T1-D12): una fila recién insertada cuyo
+    # (organization_id, transaction_id, close_datetime, qty) coincide con una
+    # existente pero con distinto fifo_pnl_usd es un sibling row (caso IBIT
+    # wash-sale). Detección-only: NUNCA borra — ambas filas son hechos first-seen;
+    # solo registramos el restatement una vez por sibling nuevo.
+    await _detect_closed_lot_siblings(
+        session, inserted_closed, organization_id=organization_id, collector=restatements
     )
 
     # === CashTransactions (immutable) ===
@@ -470,11 +666,18 @@ async def _upsert_all_children(
         for op_lot in parsed.open_position_lots
         if not _is_shadow_account(op_lot.ibkr_account_id)
     ]
-    n_new_open = await _upsert_snapshot(
+    open_conflict_cols = [
+        "account_id",
+        "symbol",
+        "open_date",
+        "snapshot_date",
+        "originating_transaction_id",
+    ]
+    n_new_open = await _upsert_snapshot_with_audit(
         session,
         OpenPositionLot.__table__,
         open_rows,
-        ["account_id", "symbol", "open_date", "snapshot_date", "originating_transaction_id"],
+        open_conflict_cols,
         [
             "flex_import_id",
             "asset_class",
@@ -483,6 +686,11 @@ async def _upsert_all_children(
             "mark_price_usd",
             "mark_value_usd",
         ],
+        # CR-2 (W3): columnas materiales = las que un restatement cambiaría.
+        # mark_price/mark_value/flex_import_id son churn diario esperado (excluidas).
+        material_cols=["qty", "cost_basis_usd", "asset_class"],
+        natural_key_cols=open_conflict_cols,
+        audit_sink=restatements.audit_sink,
     )
 
     # === ChangeInDividendAccruals (snapshot) ===
@@ -523,20 +731,21 @@ async def _upsert_all_children(
         for da in parsed.change_in_dividend_accruals
         if not _is_shadow_account(da.ibkr_account_id)
     ]
-    await _upsert_snapshot(
+    change_div_conflict_cols = [
+        "account_id",
+        "conid",
+        "ex_date",
+        "pay_date",
+        "accrual_date",
+        "report_date",
+        "action_id",
+        "code",
+    ]
+    await _upsert_snapshot_with_audit(
         session,
         ChangeInDividendAccrual.__table__,
         change_div_rows,
-        [
-            "account_id",
-            "conid",
-            "ex_date",
-            "pay_date",
-            "accrual_date",
-            "report_date",
-            "action_id",
-            "code",
-        ],
+        change_div_conflict_cols,
         [
             "flex_import_id",
             "symbol",
@@ -554,6 +763,18 @@ async def _upsert_all_children(
             "level_of_detail",
             "raw_attrs",
         ],
+        # CR-2 (W3): montos materiales. symbol/isin/currency/metadata + flex_import_id
+        # excluidos (no son restatement fiscal).
+        material_cols=[
+            "quantity",
+            "gross_rate_per_share",
+            "gross_amount_usd",
+            "tax_usd",
+            "fee_usd",
+            "net_amount_usd",
+        ],
+        natural_key_cols=change_div_conflict_cols,
+        audit_sink=restatements.audit_sink,
     )
 
     # === OpenDividendAccruals (snapshot) ===
@@ -589,19 +810,20 @@ async def _upsert_all_children(
         for oda in parsed.open_dividend_accruals
         if not _is_shadow_account(oda.ibkr_account_id)
     ]
-    await _upsert_snapshot(
+    open_div_conflict_cols = [
+        "account_id",
+        "conid",
+        "ex_date",
+        "pay_date",
+        "report_date",
+        "action_id",
+        "code",
+    ]
+    await _upsert_snapshot_with_audit(
         session,
         OpenDividendAccrual.__table__,
         open_div_rows,
-        [
-            "account_id",
-            "conid",
-            "ex_date",
-            "pay_date",
-            "report_date",
-            "action_id",
-            "code",
-        ],
+        open_div_conflict_cols,
         [
             "flex_import_id",
             "symbol",
@@ -618,6 +840,17 @@ async def _upsert_all_children(
             "sub_category",
             "raw_attrs",
         ],
+        # CR-2 (W3): mismo set material que change_in_dividend_accruals.
+        material_cols=[
+            "quantity",
+            "gross_rate_per_share",
+            "gross_amount_usd",
+            "tax_usd",
+            "fee_usd",
+            "net_amount_usd",
+        ],
+        natural_key_cols=open_div_conflict_cols,
+        audit_sink=restatements.audit_sink,
     )
 
     return {
