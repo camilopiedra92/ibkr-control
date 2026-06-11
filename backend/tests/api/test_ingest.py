@@ -132,6 +132,7 @@ async def test_run_manual_emits_substep_keys_matching_frontend(monkeypatch):
     UI can render '7 dias'.
     """
     from ibkr_control.api import ingest as ingest_mod
+    from ibkr_control.ingest.flex import job as flex_job_mod
     from ibkr_control.ingest.job_tracker import get_tracker
 
     flex_kwargs: dict = {}
@@ -142,8 +143,6 @@ async def test_run_manual_emits_substep_keys_matching_frontend(monkeypatch):
     async def fake_flex_run(*_a, **kw):
         flex_kwargs.update(kw)
         return flex_job_mod.FlexRunSummary(results={7: 100}, failures={})
-
-    from ibkr_control.ingest.flex import job as flex_job_mod
 
     monkeypatch.setattr("ibkr_control.ingest.trm.job.run", fake_trm_run)
     monkeypatch.setattr("ibkr_control.ingest.flex.job.run", fake_flex_run)
@@ -169,6 +168,8 @@ async def test_run_manual_emits_substep_keys_matching_frontend(monkeypatch):
     ]
     trm_ok = next(e for e in events if e["step"] == "trm_backfill" and e.get("status") == "ok")
     assert trm_ok["n_days"] == 7
+    flex_ok = next(e for e in events if e["step"] == "flex_ytd" and e.get("status") == "ok")
+    assert flex_ok["n_connections_ok"] == 1
 
 
 async def test_run_manual_marks_failing_substep_as_failed(monkeypatch):

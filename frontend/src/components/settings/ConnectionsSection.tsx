@@ -17,6 +17,11 @@ import {
 import { RotateTokenModal } from "./RotateTokenModal";
 
 const CONNECTIONS_QUERY_KEY = ["connections"] as const;
+// /api/health/ingest embeds per-connection state (Task 8). The Settings page
+// co-renders IngestHealthTable and the dashboard renders IngestHealthBanner
+// under this same key, so every connection mutation must ALSO invalidate it —
+// otherwise both keep showing the pre-mutation connection status.
+const INGEST_HEALTH_QUERY_KEY = ["ingest-health"] as const;
 
 interface BadgeSpec {
   label: string;
@@ -67,6 +72,14 @@ function backendDetail(err: unknown, fallback: string): string {
   return typeof detail === "string" ? detail : fallback;
 }
 
+/** Every connection mutation invalidates both the list and the ingest health. */
+function invalidateConnectionState(
+  queryClient: ReturnType<typeof useQueryClient>
+) {
+  void queryClient.invalidateQueries({ queryKey: CONNECTIONS_QUERY_KEY });
+  void queryClient.invalidateQueries({ queryKey: INGEST_HEALTH_QUERY_KEY });
+}
+
 function ConnectionCard({
   conn,
   onRotate,
@@ -79,7 +92,7 @@ function ConnectionCard({
   const badge = statusBadge(conn.status);
 
   function invalidate() {
-    void queryClient.invalidateQueries({ queryKey: CONNECTIONS_QUERY_KEY });
+    invalidateConnectionState(queryClient);
   }
 
   const { mutate: disable, isPending: disabling } = useMutation({
@@ -201,7 +214,7 @@ function AddConnectionForm() {
       setToken("");
       setQueryId("");
       setDisplayName("");
-      void queryClient.invalidateQueries({ queryKey: CONNECTIONS_QUERY_KEY });
+      invalidateConnectionState(queryClient);
     },
     onError: (err) =>
       // 401 token inválido / 400 query inválido / 502 No pude alcanzar IBKR:
@@ -275,7 +288,7 @@ export function ConnectionsSection() {
 
   function handleRotateSuccess() {
     setRotateId(null);
-    void queryClient.invalidateQueries({ queryKey: CONNECTIONS_QUERY_KEY });
+    invalidateConnectionState(queryClient);
   }
 
   return (

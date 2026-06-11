@@ -56,11 +56,12 @@ function renderSection() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return render(
+  render(
     <QueryClientProvider client={queryClient}>
       <ConnectionsSection />
     </QueryClientProvider>
   );
+  return { queryClient };
 }
 
 beforeEach(() => {
@@ -157,6 +158,31 @@ describe("ConnectionsSection", () => {
         query_id: "987654",
         display_name: "Mi conexión",
       });
+    });
+  });
+
+  it("invalidates both connections and ingest-health after a mutation", async () => {
+    // /api/health/ingest embeds per-connection state (Task 8): the Settings
+    // health table and the dashboard banner read ["ingest-health"], so a
+    // connection mutation that only invalidates ["connections"] leaves them
+    // showing the stale pre-mutation status.
+    listConnections.mockResolvedValue([makeConn({ id: 1, status: "active" })]);
+    disableConnection.mockResolvedValue(makeConn({ id: 1, status: "disabled" }));
+    const { queryClient } = renderSection();
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+    await waitFor(() => {
+      expect(screen.getByText("Pausar")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Pausar"));
+    await waitFor(() => expect(disableConnection).toHaveBeenCalledWith(1));
+
+    await waitFor(() => {
+      const keys = invalidateSpy.mock.calls.map(
+        ([filters]) => (filters?.queryKey as readonly string[])[0]
+      );
+      expect(keys).toContain("connections");
+      expect(keys).toContain("ingest-health");
     });
   });
 
