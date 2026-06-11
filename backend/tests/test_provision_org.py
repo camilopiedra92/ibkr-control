@@ -5,6 +5,11 @@ Uses ``owner_session`` (bypass RLS): provisioning the FIRST tenant writes a
 transaction — a chicken-and-egg bootstrap with no pre-existing ``app.current_org``
 context to set. Tenant bootstrap is a control-plane action, so it routes to the
 named owner exception, like the other cross-tenant/control-plane seeding.
+
+Load-bearing: ``provision_org`` has NO production request-path caller — it's a
+manual owner-run CLI (``python -m ibkr_control.scripts.provision_org``), the same
+role-class as the ``migrate`` one-shot. Running it as owner here mirrors its real
+privilege; it does NOT mask an app_rls gap.
 """
 
 import pytest

@@ -33,6 +33,27 @@ from tests.conftest_template_db import (  # noqa: F401
 )
 
 
+async def scope_session_to_org(session: AsyncSession, org_id: int) -> None:
+    """Scope an already-opened app_rls session to ``org_id`` (stash + apply).
+
+    Stashes the org on ``session.info`` (so the ``after_begin`` listener re-applies
+    the GUC on every subsequent transaction) AND applies it to the autobegin
+    transaction already open on ``session``. Call immediately after opening a fresh
+    session from ``db_engine`` (or any app_rls engine), before the first query —
+    under FORCE RLS a session with no context default-denies (0 rows / WITH CHECK
+    fails). The ``sample_org`` fixture already calls this on ``db_session``; only
+    separately-opened sessions (e.g. cross-session verification) need it explicitly.
+
+    ``user_id`` is intentionally not a parameter: every call site is a system/job
+    or verification session with no authed user. A user-scoped session should call
+    ``apply_org_context`` directly with an explicit ``user_id``.
+    """
+    from ibkr_control.db.rls import apply_org_context, set_session_org_context
+
+    set_session_org_context(session, org_id=org_id, user_id=None)
+    await apply_org_context(session, org_id=org_id, user_id=None)
+
+
 @pytest.fixture(scope="session")
 def anyio_backend():
     return "asyncio"

@@ -1,7 +1,8 @@
 import pytest
 from sqlalchemy import select
 from ibkr_control.db.models.organizations import Organization
-from ibkr_control.db.rls import apply_org_context, set_session_org_context
+
+from tests.conftest import scope_session_to_org
 
 
 @pytest.mark.asyncio
@@ -40,8 +41,7 @@ async def test_party_optionally_links_to_user(db_session):
     org = Organization(type="personal", name="H")
     db_session.add(org)
     await db_session.flush()
-    set_session_org_context(db_session, org_id=org.id, user_id=None)
-    await apply_org_context(db_session, org_id=org.id, user_id=None)
+    await scope_session_to_org(db_session, org.id)
     p = Party(organization_id=org.id, display_name="Cónyuge", tax_id="999", user_id=None)
     db_session.add(p)
     await db_session.flush()
@@ -65,8 +65,7 @@ async def test_access_grant_exclusive_grantee_arc(db_session):
     firm = Organization(type="firm", name="Estudio")
     db_session.add_all([org, firm])
     await db_session.flush()
-    set_session_org_context(db_session, org_id=org.id, user_id=None)
-    await apply_org_context(db_session, org_id=org.id, user_id=None)
+    await scope_session_to_org(db_session, org.id)
     p = Party(organization_id=org.id, display_name="Owner")
     db_session.add(p)
     await db_session.flush()
@@ -96,8 +95,7 @@ async def test_participation_is_party_anchored(db_session):
     org = Organization(type="personal", name="H")
     db_session.add(org)
     await db_session.flush()
-    set_session_org_context(db_session, org_id=org.id, user_id=None)
-    await apply_org_context(db_session, org_id=org.id, user_id=None)
+    await scope_session_to_org(db_session, org.id)
     party = Party(organization_id=org.id, display_name="Owner")
     acc = Account(ibkr_account_id="U99999001", organization_id=org.id, currency="USD")
     db_session.add_all([party, acc])
