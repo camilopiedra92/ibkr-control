@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { FlexCredentialsSection } from "@/components/settings/FlexCredentialsSection";
+import { ConnectionsSection } from "@/components/settings/ConnectionsSection";
 import { XmlUploadSection } from "@/components/settings/XmlUploadSection";
 import { IngestLogTable } from "@/components/settings/IngestLogTable";
 import { ManualRefreshButton } from "@/components/settings/ManualRefreshButton";
@@ -112,8 +112,8 @@ export default function SettingsPage() {
 
       <Separator />
 
-      {/* Phase 2: Flex credentials */}
-      <FlexCredentialsSection />
+      {/* W1: Conexiones IBKR (reemplaza Flex credentials) */}
+      <ConnectionsSection />
 
       <Separator />
 

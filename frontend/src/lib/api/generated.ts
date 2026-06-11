@@ -50,6 +50,76 @@ export interface BodyUploadXmlApiImportsUploadPost {
   file: Blob;
 }
 
+export interface ConnectionCreate {
+  /**
+     * @minLength 10
+     * @maxLength 512
+     */
+  token: string;
+  /**
+     * @minLength 1
+     * @maxLength 64
+     */
+  query_id: string;
+  display_name?: string | null;
+}
+
+export type ConnectionHealthStatus = typeof ConnectionHealthStatus[keyof typeof ConnectionHealthStatus];
+
+
+export const ConnectionHealthStatus = {
+  active: 'active',
+  degraded: 'degraded',
+  reauth_required: 'reauth_required',
+  disabled: 'disabled',
+} as const;
+
+export interface ConnectionHealth {
+  id: number;
+  display_name: string | null;
+  status: ConnectionHealthStatus;
+  status_reason: string | null;
+  last_sync_at: string | null;
+}
+
+export type ConnectionReadStatus = typeof ConnectionReadStatus[keyof typeof ConnectionReadStatus];
+
+
+export const ConnectionReadStatus = {
+  active: 'active',
+  degraded: 'degraded',
+  reauth_required: 'reauth_required',
+  disabled: 'disabled',
+} as const;
+
+export interface ConnectionRead {
+  id: number;
+  institution_code: string;
+  provider_type: string;
+  display_name: string | null;
+  status: ConnectionReadStatus;
+  status_reason: string | null;
+  last_sync_at: string | null;
+  last_sync_status: string | null;
+  consecutive_failures: number;
+  query_id: string;
+  last_rotated_at: string;
+  created_at: string;
+}
+
+export interface ConnectionRotate {
+  /**
+     * @minLength 10
+     * @maxLength 512
+     */
+  token: string;
+  query_id?: string | null;
+}
+
+export interface ConnectionUpdate {
+  display_name?: string | null;
+}
+
 export interface DetectedAccount {
   ibkr_account_id: string;
   suggested_alias: string | null;
@@ -61,30 +131,6 @@ export type ErrorModelDetail = string | {[key: string]: string};
 
 export interface ErrorModel {
   detail: ErrorModelDetail;
-}
-
-export interface FlexCredentialsRead {
-  configured_at: string;
-  query_id: string;
-  last_rotated_at: string;
-}
-
-export interface FlexCredentialsUpdate {
-  token?: string | null;
-  query_id?: string | null;
-}
-
-export interface FlexCredentialsValidate {
-  /**
-     * @minLength 10
-     * @maxLength 512
-     */
-  token: string;
-  /**
-     * @minLength 1
-     * @maxLength 64
-     */
-  query_id: string;
 }
 
 export type ValidationErrorCtx = { [key: string]: unknown };
@@ -144,6 +190,7 @@ export interface IngestSourceHealth {
 
 export interface IngestHealthResponse {
   sources: IngestSourceHealth[];
+  connections: ConnectionHealth[];
   checked_at: string;
 }
 
@@ -165,6 +212,20 @@ export interface IngestLogRead {
 export interface IngestTrigger {
   /** @pattern ^(flex|trm|both)$ */
   kind: string;
+}
+
+export interface SetupConnectionPayload {
+  /**
+     * @minLength 10
+     * @maxLength 512
+     */
+  token: string;
+  /**
+     * @minLength 1
+     * @maxLength 64
+     */
+  query_id: string;
+  display_name?: string | null;
 }
 
 export interface Step2DetectFromXmlResponse {
@@ -277,8 +338,6 @@ export interface WizardStateResponse {
 }
 
 export type HealthHealthGet200 = {[key: string]: string};
-
-export type UpdateFlexCredentialsApiCredentialsFlexPut200 = { [key: string]: unknown };
 
 export type Step1SaveApiSetupStep1SavePost200 = { [key: string]: unknown };
 
@@ -1228,27 +1287,27 @@ export function useUpdateSettingsApiSettingsPatch<TData = Awaited<ReturnType<typ
 
 
 /**
- * @summary Get Flex Credentials
+ * @summary List Connections
  */
-export const getFlexCredentialsApiCredentialsFlexGet = (
+export const listConnectionsApiConnectionsGet = (
 
  signal?: AbortSignal
 ) => {
 
 
-      return axiosMutator<FlexCredentialsRead>(
-      {url: `/api/credentials/flex`, method: 'GET', signal
+      return axiosMutator<ConnectionRead[]>(
+      {url: `/api/connections`, method: 'GET', signal
     },
       );
     }
 
 
 
-export const getGetFlexCredentialsApiCredentialsFlexGetMutationOptions = <TError = unknown,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getFlexCredentialsApiCredentialsFlexGet>>, TError,void, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof getFlexCredentialsApiCredentialsFlexGet>>, TError,void, TContext> => {
+export const getListConnectionsApiConnectionsGetMutationOptions = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof listConnectionsApiConnectionsGet>>, TError,void, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof listConnectionsApiConnectionsGet>>, TError,void, TContext> => {
 
-const mutationKey = ['getFlexCredentialsApiCredentialsFlexGet'];
+const mutationKey = ['listConnectionsApiConnectionsGet'];
 const {mutation: mutationOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -1258,10 +1317,10 @@ const {mutation: mutationOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof getFlexCredentialsApiCredentialsFlexGet>>, void> = () => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof listConnectionsApiConnectionsGet>>, void> = () => {
 
 
-          return  getFlexCredentialsApiCredentialsFlexGet()
+          return  listConnectionsApiConnectionsGet()
         }
 
 
@@ -1271,38 +1330,37 @@ const {mutation: mutationOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type GetFlexCredentialsApiCredentialsFlexGetMutationResult = NonNullable<Awaited<ReturnType<typeof getFlexCredentialsApiCredentialsFlexGet>>>
+    export type ListConnectionsApiConnectionsGetMutationResult = NonNullable<Awaited<ReturnType<typeof listConnectionsApiConnectionsGet>>>
 
-    export type GetFlexCredentialsApiCredentialsFlexGetMutationError = unknown
+    export type ListConnectionsApiConnectionsGetMutationError = unknown
 
     /**
- * @summary Get Flex Credentials
+ * @summary List Connections
  */
-export const useGetFlexCredentialsApiCredentialsFlexGet = <TError = unknown,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getFlexCredentialsApiCredentialsFlexGet>>, TError,void, TContext>, }
+export const useListConnectionsApiConnectionsGet = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof listConnectionsApiConnectionsGet>>, TError,void, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof getFlexCredentialsApiCredentialsFlexGet>>,
+        Awaited<ReturnType<typeof listConnectionsApiConnectionsGet>>,
         TError,
         void,
         TContext
       > => {
-      return useMutation(getGetFlexCredentialsApiCredentialsFlexGetMutationOptions(options), queryClient);
+      return useMutation(getListConnectionsApiConnectionsGetMutationOptions(options), queryClient);
     }
 
 /**
- * Si pasa token, lo valida contra IBKR antes de guardar.
- * @summary Update Flex Credentials
+ * @summary Create Connection
  */
-export const updateFlexCredentialsApiCredentialsFlexPut = (
-    flexCredentialsUpdate: FlexCredentialsUpdate,
+export const createConnectionApiConnectionsPost = (
+    connectionCreate: ConnectionCreate,
  signal?: AbortSignal
 ) => {
 
 
-      return axiosMutator<UpdateFlexCredentialsApiCredentialsFlexPut200>(
-      {url: `/api/credentials/flex`, method: 'PUT',
+      return axiosMutator<ConnectionRead>(
+      {url: `/api/connections`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
-      data: flexCredentialsUpdate, signal
+      data: connectionCreate, signal
     },
       );
     }
@@ -1310,69 +1368,552 @@ export const updateFlexCredentialsApiCredentialsFlexPut = (
 
 
 
-export const getUpdateFlexCredentialsApiCredentialsFlexPutQueryKey = (flexCredentialsUpdate?: FlexCredentialsUpdate,) => {
+export const getCreateConnectionApiConnectionsPostQueryKey = (connectionCreate?: ConnectionCreate,) => {
     return [
-    'PUT', `/api/credentials/flex`, flexCredentialsUpdate
+    'POST', `/api/connections`, connectionCreate
     ] as const;
     }
 
 
-export const getUpdateFlexCredentialsApiCredentialsFlexPutQueryOptions = <TData = Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>, TError = HTTPValidationError>(flexCredentialsUpdate: FlexCredentialsUpdate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>, TError, TData>>, }
+export const getCreateConnectionApiConnectionsPostQueryOptions = <TData = Awaited<ReturnType<typeof createConnectionApiConnectionsPost>>, TError = HTTPValidationError>(connectionCreate: ConnectionCreate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof createConnectionApiConnectionsPost>>, TError, TData>>, }
 ) => {
 
 const {query: queryOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getUpdateFlexCredentialsApiCredentialsFlexPutQueryKey(flexCredentialsUpdate);
+  const queryKey =  queryOptions?.queryKey ?? getCreateConnectionApiConnectionsPostQueryKey(connectionCreate);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>> = ({ signal }) => updateFlexCredentialsApiCredentialsFlexPut(flexCredentialsUpdate, signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof createConnectionApiConnectionsPost>>> = ({ signal }) => createConnectionApiConnectionsPost(connectionCreate, signal);
 
 
 
 
 
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof createConnectionApiConnectionsPost>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export type UpdateFlexCredentialsApiCredentialsFlexPutQueryResult = NonNullable<Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>>
-export type UpdateFlexCredentialsApiCredentialsFlexPutQueryError = HTTPValidationError
+export type CreateConnectionApiConnectionsPostQueryResult = NonNullable<Awaited<ReturnType<typeof createConnectionApiConnectionsPost>>>
+export type CreateConnectionApiConnectionsPostQueryError = HTTPValidationError
 
 
-export function useUpdateFlexCredentialsApiCredentialsFlexPut<TData = Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>, TError = HTTPValidationError>(
- flexCredentialsUpdate: FlexCredentialsUpdate, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>, TError, TData>> & Pick<
+export function useCreateConnectionApiConnectionsPost<TData = Awaited<ReturnType<typeof createConnectionApiConnectionsPost>>, TError = HTTPValidationError>(
+ connectionCreate: ConnectionCreate, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof createConnectionApiConnectionsPost>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>,
+          Awaited<ReturnType<typeof createConnectionApiConnectionsPost>>,
           TError,
-          Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>
+          Awaited<ReturnType<typeof createConnectionApiConnectionsPost>>
         > , 'initialData'
       >, }
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useUpdateFlexCredentialsApiCredentialsFlexPut<TData = Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>, TError = HTTPValidationError>(
- flexCredentialsUpdate: FlexCredentialsUpdate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>, TError, TData>> & Pick<
+export function useCreateConnectionApiConnectionsPost<TData = Awaited<ReturnType<typeof createConnectionApiConnectionsPost>>, TError = HTTPValidationError>(
+ connectionCreate: ConnectionCreate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof createConnectionApiConnectionsPost>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>,
+          Awaited<ReturnType<typeof createConnectionApiConnectionsPost>>,
           TError,
-          Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>
+          Awaited<ReturnType<typeof createConnectionApiConnectionsPost>>
         > , 'initialData'
       >, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useUpdateFlexCredentialsApiCredentialsFlexPut<TData = Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>, TError = HTTPValidationError>(
- flexCredentialsUpdate: FlexCredentialsUpdate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>, TError, TData>>, }
+export function useCreateConnectionApiConnectionsPost<TData = Awaited<ReturnType<typeof createConnectionApiConnectionsPost>>, TError = HTTPValidationError>(
+ connectionCreate: ConnectionCreate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof createConnectionApiConnectionsPost>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Update Flex Credentials
+ * @summary Create Connection
  */
 
-export function useUpdateFlexCredentialsApiCredentialsFlexPut<TData = Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>, TError = HTTPValidationError>(
- flexCredentialsUpdate: FlexCredentialsUpdate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof updateFlexCredentialsApiCredentialsFlexPut>>, TError, TData>>, }
+export function useCreateConnectionApiConnectionsPost<TData = Awaited<ReturnType<typeof createConnectionApiConnectionsPost>>, TError = HTTPValidationError>(
+ connectionCreate: ConnectionCreate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof createConnectionApiConnectionsPost>>, TError, TData>>, }
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getUpdateFlexCredentialsApiCredentialsFlexPutQueryOptions(flexCredentialsUpdate,options)
+  const queryOptions = getCreateConnectionApiConnectionsPostQueryOptions(connectionCreate,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+/**
+ * @summary Update Connection
+ */
+export const updateConnectionApiConnectionsConnectionIdPatch = (
+    connectionId: number,
+    connectionUpdate: ConnectionUpdate,
+ signal?: AbortSignal
+) => {
+
+
+      return axiosMutator<ConnectionRead>(
+      {url: `/api/connections/${connectionId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: connectionUpdate, signal
+    },
+      );
+    }
+
+
+
+
+export const getUpdateConnectionApiConnectionsConnectionIdPatchQueryKey = (connectionId: number,
+    connectionUpdate?: ConnectionUpdate,) => {
+    return [
+    'PATCH', `/api/connections/${connectionId}`, connectionUpdate
+    ] as const;
+    }
+
+
+export const getUpdateConnectionApiConnectionsConnectionIdPatchQueryOptions = <TData = Awaited<ReturnType<typeof updateConnectionApiConnectionsConnectionIdPatch>>, TError = HTTPValidationError>(connectionId: number,
+    connectionUpdate: ConnectionUpdate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof updateConnectionApiConnectionsConnectionIdPatch>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getUpdateConnectionApiConnectionsConnectionIdPatchQueryKey(connectionId,connectionUpdate);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof updateConnectionApiConnectionsConnectionIdPatch>>> = ({ signal }) => updateConnectionApiConnectionsConnectionIdPatch(connectionId,connectionUpdate, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: connectionId !== null && connectionId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof updateConnectionApiConnectionsConnectionIdPatch>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type UpdateConnectionApiConnectionsConnectionIdPatchQueryResult = NonNullable<Awaited<ReturnType<typeof updateConnectionApiConnectionsConnectionIdPatch>>>
+export type UpdateConnectionApiConnectionsConnectionIdPatchQueryError = HTTPValidationError
+
+
+export function useUpdateConnectionApiConnectionsConnectionIdPatch<TData = Awaited<ReturnType<typeof updateConnectionApiConnectionsConnectionIdPatch>>, TError = HTTPValidationError>(
+ connectionId: number,
+    connectionUpdate: ConnectionUpdate, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof updateConnectionApiConnectionsConnectionIdPatch>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof updateConnectionApiConnectionsConnectionIdPatch>>,
+          TError,
+          Awaited<ReturnType<typeof updateConnectionApiConnectionsConnectionIdPatch>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useUpdateConnectionApiConnectionsConnectionIdPatch<TData = Awaited<ReturnType<typeof updateConnectionApiConnectionsConnectionIdPatch>>, TError = HTTPValidationError>(
+ connectionId: number,
+    connectionUpdate: ConnectionUpdate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof updateConnectionApiConnectionsConnectionIdPatch>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof updateConnectionApiConnectionsConnectionIdPatch>>,
+          TError,
+          Awaited<ReturnType<typeof updateConnectionApiConnectionsConnectionIdPatch>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useUpdateConnectionApiConnectionsConnectionIdPatch<TData = Awaited<ReturnType<typeof updateConnectionApiConnectionsConnectionIdPatch>>, TError = HTTPValidationError>(
+ connectionId: number,
+    connectionUpdate: ConnectionUpdate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof updateConnectionApiConnectionsConnectionIdPatch>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Update Connection
+ */
+
+export function useUpdateConnectionApiConnectionsConnectionIdPatch<TData = Awaited<ReturnType<typeof updateConnectionApiConnectionsConnectionIdPatch>>, TError = HTTPValidationError>(
+ connectionId: number,
+    connectionUpdate: ConnectionUpdate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof updateConnectionApiConnectionsConnectionIdPatch>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getUpdateConnectionApiConnectionsConnectionIdPatchQueryOptions(connectionId,connectionUpdate,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+/**
+ * @summary Delete Connection
+ */
+export const deleteConnectionApiConnectionsConnectionIdDelete = (
+    connectionId: number,
+ signal?: AbortSignal
+) => {
+
+
+      return axiosMutator<void>(
+      {url: `/api/connections/${connectionId}`, method: 'DELETE', signal
+    },
+      );
+    }
+
+
+
+
+export const getDeleteConnectionApiConnectionsConnectionIdDeleteQueryKey = (connectionId: number,) => {
+    return [
+    'DELETE', `/api/connections/${connectionId}`
+    ] as const;
+    }
+
+
+export const getDeleteConnectionApiConnectionsConnectionIdDeleteQueryOptions = <TData = Awaited<ReturnType<typeof deleteConnectionApiConnectionsConnectionIdDelete>>, TError = HTTPValidationError>(connectionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof deleteConnectionApiConnectionsConnectionIdDelete>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getDeleteConnectionApiConnectionsConnectionIdDeleteQueryKey(connectionId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof deleteConnectionApiConnectionsConnectionIdDelete>>> = ({ signal }) => deleteConnectionApiConnectionsConnectionIdDelete(connectionId, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: connectionId !== null && connectionId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof deleteConnectionApiConnectionsConnectionIdDelete>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type DeleteConnectionApiConnectionsConnectionIdDeleteQueryResult = NonNullable<Awaited<ReturnType<typeof deleteConnectionApiConnectionsConnectionIdDelete>>>
+export type DeleteConnectionApiConnectionsConnectionIdDeleteQueryError = HTTPValidationError
+
+
+export function useDeleteConnectionApiConnectionsConnectionIdDelete<TData = Awaited<ReturnType<typeof deleteConnectionApiConnectionsConnectionIdDelete>>, TError = HTTPValidationError>(
+ connectionId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof deleteConnectionApiConnectionsConnectionIdDelete>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof deleteConnectionApiConnectionsConnectionIdDelete>>,
+          TError,
+          Awaited<ReturnType<typeof deleteConnectionApiConnectionsConnectionIdDelete>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDeleteConnectionApiConnectionsConnectionIdDelete<TData = Awaited<ReturnType<typeof deleteConnectionApiConnectionsConnectionIdDelete>>, TError = HTTPValidationError>(
+ connectionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof deleteConnectionApiConnectionsConnectionIdDelete>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof deleteConnectionApiConnectionsConnectionIdDelete>>,
+          TError,
+          Awaited<ReturnType<typeof deleteConnectionApiConnectionsConnectionIdDelete>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDeleteConnectionApiConnectionsConnectionIdDelete<TData = Awaited<ReturnType<typeof deleteConnectionApiConnectionsConnectionIdDelete>>, TError = HTTPValidationError>(
+ connectionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof deleteConnectionApiConnectionsConnectionIdDelete>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Delete Connection
+ */
+
+export function useDeleteConnectionApiConnectionsConnectionIdDelete<TData = Awaited<ReturnType<typeof deleteConnectionApiConnectionsConnectionIdDelete>>, TError = HTTPValidationError>(
+ connectionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof deleteConnectionApiConnectionsConnectionIdDelete>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getDeleteConnectionApiConnectionsConnectionIdDeleteQueryOptions(connectionId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+/**
+ * @summary Rotate Token
+ */
+export const rotateTokenApiConnectionsConnectionIdRotateTokenPost = (
+    connectionId: number,
+    connectionRotate: ConnectionRotate,
+ signal?: AbortSignal
+) => {
+
+
+      return axiosMutator<ConnectionRead>(
+      {url: `/api/connections/${connectionId}/rotate-token`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: connectionRotate, signal
+    },
+      );
+    }
+
+
+
+
+export const getRotateTokenApiConnectionsConnectionIdRotateTokenPostQueryKey = (connectionId: number,
+    connectionRotate?: ConnectionRotate,) => {
+    return [
+    'POST', `/api/connections/${connectionId}/rotate-token`, connectionRotate
+    ] as const;
+    }
+
+
+export const getRotateTokenApiConnectionsConnectionIdRotateTokenPostQueryOptions = <TData = Awaited<ReturnType<typeof rotateTokenApiConnectionsConnectionIdRotateTokenPost>>, TError = HTTPValidationError>(connectionId: number,
+    connectionRotate: ConnectionRotate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof rotateTokenApiConnectionsConnectionIdRotateTokenPost>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getRotateTokenApiConnectionsConnectionIdRotateTokenPostQueryKey(connectionId,connectionRotate);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof rotateTokenApiConnectionsConnectionIdRotateTokenPost>>> = ({ signal }) => rotateTokenApiConnectionsConnectionIdRotateTokenPost(connectionId,connectionRotate, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: connectionId !== null && connectionId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof rotateTokenApiConnectionsConnectionIdRotateTokenPost>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type RotateTokenApiConnectionsConnectionIdRotateTokenPostQueryResult = NonNullable<Awaited<ReturnType<typeof rotateTokenApiConnectionsConnectionIdRotateTokenPost>>>
+export type RotateTokenApiConnectionsConnectionIdRotateTokenPostQueryError = HTTPValidationError
+
+
+export function useRotateTokenApiConnectionsConnectionIdRotateTokenPost<TData = Awaited<ReturnType<typeof rotateTokenApiConnectionsConnectionIdRotateTokenPost>>, TError = HTTPValidationError>(
+ connectionId: number,
+    connectionRotate: ConnectionRotate, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof rotateTokenApiConnectionsConnectionIdRotateTokenPost>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof rotateTokenApiConnectionsConnectionIdRotateTokenPost>>,
+          TError,
+          Awaited<ReturnType<typeof rotateTokenApiConnectionsConnectionIdRotateTokenPost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useRotateTokenApiConnectionsConnectionIdRotateTokenPost<TData = Awaited<ReturnType<typeof rotateTokenApiConnectionsConnectionIdRotateTokenPost>>, TError = HTTPValidationError>(
+ connectionId: number,
+    connectionRotate: ConnectionRotate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof rotateTokenApiConnectionsConnectionIdRotateTokenPost>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof rotateTokenApiConnectionsConnectionIdRotateTokenPost>>,
+          TError,
+          Awaited<ReturnType<typeof rotateTokenApiConnectionsConnectionIdRotateTokenPost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useRotateTokenApiConnectionsConnectionIdRotateTokenPost<TData = Awaited<ReturnType<typeof rotateTokenApiConnectionsConnectionIdRotateTokenPost>>, TError = HTTPValidationError>(
+ connectionId: number,
+    connectionRotate: ConnectionRotate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof rotateTokenApiConnectionsConnectionIdRotateTokenPost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Rotate Token
+ */
+
+export function useRotateTokenApiConnectionsConnectionIdRotateTokenPost<TData = Awaited<ReturnType<typeof rotateTokenApiConnectionsConnectionIdRotateTokenPost>>, TError = HTTPValidationError>(
+ connectionId: number,
+    connectionRotate: ConnectionRotate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof rotateTokenApiConnectionsConnectionIdRotateTokenPost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getRotateTokenApiConnectionsConnectionIdRotateTokenPostQueryOptions(connectionId,connectionRotate,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+/**
+ * @summary Disable Connection
+ */
+export const disableConnectionApiConnectionsConnectionIdDisablePost = (
+    connectionId: number,
+ signal?: AbortSignal
+) => {
+
+
+      return axiosMutator<ConnectionRead>(
+      {url: `/api/connections/${connectionId}/disable`, method: 'POST', signal
+    },
+      );
+    }
+
+
+
+
+export const getDisableConnectionApiConnectionsConnectionIdDisablePostQueryKey = (connectionId: number,) => {
+    return [
+    'POST', `/api/connections/${connectionId}/disable`
+    ] as const;
+    }
+
+
+export const getDisableConnectionApiConnectionsConnectionIdDisablePostQueryOptions = <TData = Awaited<ReturnType<typeof disableConnectionApiConnectionsConnectionIdDisablePost>>, TError = HTTPValidationError>(connectionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof disableConnectionApiConnectionsConnectionIdDisablePost>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getDisableConnectionApiConnectionsConnectionIdDisablePostQueryKey(connectionId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof disableConnectionApiConnectionsConnectionIdDisablePost>>> = ({ signal }) => disableConnectionApiConnectionsConnectionIdDisablePost(connectionId, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: connectionId !== null && connectionId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof disableConnectionApiConnectionsConnectionIdDisablePost>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type DisableConnectionApiConnectionsConnectionIdDisablePostQueryResult = NonNullable<Awaited<ReturnType<typeof disableConnectionApiConnectionsConnectionIdDisablePost>>>
+export type DisableConnectionApiConnectionsConnectionIdDisablePostQueryError = HTTPValidationError
+
+
+export function useDisableConnectionApiConnectionsConnectionIdDisablePost<TData = Awaited<ReturnType<typeof disableConnectionApiConnectionsConnectionIdDisablePost>>, TError = HTTPValidationError>(
+ connectionId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof disableConnectionApiConnectionsConnectionIdDisablePost>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof disableConnectionApiConnectionsConnectionIdDisablePost>>,
+          TError,
+          Awaited<ReturnType<typeof disableConnectionApiConnectionsConnectionIdDisablePost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDisableConnectionApiConnectionsConnectionIdDisablePost<TData = Awaited<ReturnType<typeof disableConnectionApiConnectionsConnectionIdDisablePost>>, TError = HTTPValidationError>(
+ connectionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof disableConnectionApiConnectionsConnectionIdDisablePost>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof disableConnectionApiConnectionsConnectionIdDisablePost>>,
+          TError,
+          Awaited<ReturnType<typeof disableConnectionApiConnectionsConnectionIdDisablePost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDisableConnectionApiConnectionsConnectionIdDisablePost<TData = Awaited<ReturnType<typeof disableConnectionApiConnectionsConnectionIdDisablePost>>, TError = HTTPValidationError>(
+ connectionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof disableConnectionApiConnectionsConnectionIdDisablePost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Disable Connection
+ */
+
+export function useDisableConnectionApiConnectionsConnectionIdDisablePost<TData = Awaited<ReturnType<typeof disableConnectionApiConnectionsConnectionIdDisablePost>>, TError = HTTPValidationError>(
+ connectionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof disableConnectionApiConnectionsConnectionIdDisablePost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getDisableConnectionApiConnectionsConnectionIdDisablePostQueryOptions(connectionId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+/**
+ * @summary Enable Connection
+ */
+export const enableConnectionApiConnectionsConnectionIdEnablePost = (
+    connectionId: number,
+ signal?: AbortSignal
+) => {
+
+
+      return axiosMutator<ConnectionRead>(
+      {url: `/api/connections/${connectionId}/enable`, method: 'POST', signal
+    },
+      );
+    }
+
+
+
+
+export const getEnableConnectionApiConnectionsConnectionIdEnablePostQueryKey = (connectionId: number,) => {
+    return [
+    'POST', `/api/connections/${connectionId}/enable`
+    ] as const;
+    }
+
+
+export const getEnableConnectionApiConnectionsConnectionIdEnablePostQueryOptions = <TData = Awaited<ReturnType<typeof enableConnectionApiConnectionsConnectionIdEnablePost>>, TError = HTTPValidationError>(connectionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof enableConnectionApiConnectionsConnectionIdEnablePost>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getEnableConnectionApiConnectionsConnectionIdEnablePostQueryKey(connectionId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof enableConnectionApiConnectionsConnectionIdEnablePost>>> = ({ signal }) => enableConnectionApiConnectionsConnectionIdEnablePost(connectionId, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: connectionId !== null && connectionId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof enableConnectionApiConnectionsConnectionIdEnablePost>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type EnableConnectionApiConnectionsConnectionIdEnablePostQueryResult = NonNullable<Awaited<ReturnType<typeof enableConnectionApiConnectionsConnectionIdEnablePost>>>
+export type EnableConnectionApiConnectionsConnectionIdEnablePostQueryError = HTTPValidationError
+
+
+export function useEnableConnectionApiConnectionsConnectionIdEnablePost<TData = Awaited<ReturnType<typeof enableConnectionApiConnectionsConnectionIdEnablePost>>, TError = HTTPValidationError>(
+ connectionId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof enableConnectionApiConnectionsConnectionIdEnablePost>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof enableConnectionApiConnectionsConnectionIdEnablePost>>,
+          TError,
+          Awaited<ReturnType<typeof enableConnectionApiConnectionsConnectionIdEnablePost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useEnableConnectionApiConnectionsConnectionIdEnablePost<TData = Awaited<ReturnType<typeof enableConnectionApiConnectionsConnectionIdEnablePost>>, TError = HTTPValidationError>(
+ connectionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof enableConnectionApiConnectionsConnectionIdEnablePost>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof enableConnectionApiConnectionsConnectionIdEnablePost>>,
+          TError,
+          Awaited<ReturnType<typeof enableConnectionApiConnectionsConnectionIdEnablePost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useEnableConnectionApiConnectionsConnectionIdEnablePost<TData = Awaited<ReturnType<typeof enableConnectionApiConnectionsConnectionIdEnablePost>>, TError = HTTPValidationError>(
+ connectionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof enableConnectionApiConnectionsConnectionIdEnablePost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Enable Connection
+ */
+
+export function useEnableConnectionApiConnectionsConnectionIdEnablePost<TData = Awaited<ReturnType<typeof enableConnectionApiConnectionsConnectionIdEnablePost>>, TError = HTTPValidationError>(
+ connectionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof enableConnectionApiConnectionsConnectionIdEnablePost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getEnableConnectionApiConnectionsConnectionIdEnablePostQueryOptions(connectionId,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -1510,11 +2051,17 @@ export const useGetStateApiSetupStateGet = <TError = unknown,
     }
 
 /**
- * Save creds (encrypt token). Does NOT call IBKR per spec D5.
+ * Save the org's ibkr_flex connection (encrypt token). Does NOT call IBKR
+ * per spec D5 — the wizard validates the token later in step2/detect.
+ *
+ * No connection yet → create Connection (status='active') + ConnectionIbkrFlex
+ * detail. Else → update the FIRST connection's detail (token/query_id/
+ * last_rotated_at) and run mark_rotated (clears reauth_required back to active).
+ * Idempotent: a re-save updates, never duplicates.
  * @summary Step1 Save
  */
 export const step1SaveApiSetupStep1SavePost = (
-    flexCredentialsValidate: FlexCredentialsValidate,
+    setupConnectionPayload: SetupConnectionPayload,
  signal?: AbortSignal
 ) => {
 
@@ -1522,7 +2069,7 @@ export const step1SaveApiSetupStep1SavePost = (
       return axiosMutator<Step1SaveApiSetupStep1SavePost200>(
       {url: `/api/setup/step1/save`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
-      data: flexCredentialsValidate, signal
+      data: setupConnectionPayload, signal
     },
       );
     }
@@ -1530,23 +2077,23 @@ export const step1SaveApiSetupStep1SavePost = (
 
 
 
-export const getStep1SaveApiSetupStep1SavePostQueryKey = (flexCredentialsValidate?: FlexCredentialsValidate,) => {
+export const getStep1SaveApiSetupStep1SavePostQueryKey = (setupConnectionPayload?: SetupConnectionPayload,) => {
     return [
-    'POST', `/api/setup/step1/save`, flexCredentialsValidate
+    'POST', `/api/setup/step1/save`, setupConnectionPayload
     ] as const;
     }
 
 
-export const getStep1SaveApiSetupStep1SavePostQueryOptions = <TData = Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError = HTTPValidationError>(flexCredentialsValidate: FlexCredentialsValidate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError, TData>>, }
+export const getStep1SaveApiSetupStep1SavePostQueryOptions = <TData = Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError = HTTPValidationError>(setupConnectionPayload: SetupConnectionPayload, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError, TData>>, }
 ) => {
 
 const {query: queryOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getStep1SaveApiSetupStep1SavePostQueryKey(flexCredentialsValidate);
+  const queryKey =  queryOptions?.queryKey ?? getStep1SaveApiSetupStep1SavePostQueryKey(setupConnectionPayload);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>> = ({ signal }) => step1SaveApiSetupStep1SavePost(flexCredentialsValidate, signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>> = ({ signal }) => step1SaveApiSetupStep1SavePost(setupConnectionPayload, signal);
 
 
 
@@ -1560,7 +2107,7 @@ export type Step1SaveApiSetupStep1SavePostQueryError = HTTPValidationError
 
 
 export function useStep1SaveApiSetupStep1SavePost<TData = Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError = HTTPValidationError>(
- flexCredentialsValidate: FlexCredentialsValidate, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError, TData>> & Pick<
+ setupConnectionPayload: SetupConnectionPayload, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>,
           TError,
@@ -1570,7 +2117,7 @@ export function useStep1SaveApiSetupStep1SavePost<TData = Awaited<ReturnType<typ
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useStep1SaveApiSetupStep1SavePost<TData = Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError = HTTPValidationError>(
- flexCredentialsValidate: FlexCredentialsValidate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError, TData>> & Pick<
+ setupConnectionPayload: SetupConnectionPayload, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>,
           TError,
@@ -1580,7 +2127,7 @@ export function useStep1SaveApiSetupStep1SavePost<TData = Awaited<ReturnType<typ
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useStep1SaveApiSetupStep1SavePost<TData = Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError = HTTPValidationError>(
- flexCredentialsValidate: FlexCredentialsValidate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError, TData>>, }
+ setupConnectionPayload: SetupConnectionPayload, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1588,11 +2135,11 @@ export function useStep1SaveApiSetupStep1SavePost<TData = Awaited<ReturnType<typ
  */
 
 export function useStep1SaveApiSetupStep1SavePost<TData = Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError = HTTPValidationError>(
- flexCredentialsValidate: FlexCredentialsValidate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError, TData>>, }
+ setupConnectionPayload: SetupConnectionPayload, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step1SaveApiSetupStep1SavePost>>, TError, TData>>, }
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getStep1SaveApiSetupStep1SavePostQueryOptions(flexCredentialsValidate,options)
+  const queryOptions = getStep1SaveApiSetupStep1SavePostQueryOptions(setupConnectionPayload,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -1606,9 +2153,19 @@ export function useStep1SaveApiSetupStep1SavePost<TData = Awaited<ReturnType<typ
 
 
 /**
- * Fetch + parse + persist YTD. Returns detected accounts (sin F).
+ * Fetch + parse + persist YTD across ALL active connections (W1).
  *
- * Retry policy per spec D10: server-side retry on 1001 with backoff [5, 15, 30]s.
+ * Iterates the org's non-disabled ibkr_flex connections, accumulating detected
+ * accounts deduped by ibkr_account_id. detect es partial-tolerant (espejo del
+ * job loop de Task 4): CUALQUIER fallo per-connection (auth, busy, transporte,
+ * parse, persist) transiciona SU estado vía connection_state + commit y el
+ * loop continúa; el error agregado solo se lanza si CERO connections
+ * produjeron cuentas. Precedencia del agregado: any auth-class → 401
+ * INVALID_TOKEN; elif any parse/persist → 422 PARSE_ERROR; else → 503
+ * IBKR_BUSY (misma shape que antes).
+ *
+ * Retry policy per spec D10: server-side retry on 1001 with backoff [5,15,30]s
+ * per connection.
  * @summary Step2 Detect
  */
 export const step2DetectApiSetupStep2DetectPost = (

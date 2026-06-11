@@ -6,19 +6,22 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  updateFlexCredentialsApiCredentialsFlexPut,
-  FlexCredentialsUpdate,
+  rotateTokenApiConnectionsConnectionIdRotateTokenPost,
+  type ConnectionRotate,
 } from "@/lib/api";
 
 interface RotateTokenModalProps {
+  /** Connection whose token is being rotated (POST /api/connections/{id}/rotate-token). */
+  connectionId: number;
   currentQueryId: string;
-  // The PUT /api/credentials/flex endpoint returns {"ok": true}, not FlexCredentialsRead.
-  // The caller is responsible for refetching updated credentials after success.
+  // The endpoint validates the new token against IBKR before persisting and
+  // returns the updated ConnectionRead. The caller refetches the list on success.
   onSuccess: () => void;
   onCancel: () => void;
 }
 
 export function RotateTokenModal({
+  connectionId,
   currentQueryId,
   onSuccess,
   onCancel,
@@ -27,32 +30,35 @@ export function RotateTokenModal({
   const [queryId, setQueryId] = useState(currentQueryId);
   const [error, setError] = useState<string | null>(null);
 
-  const { mutate: updateCreds, isPending } = useMutation({
-    mutationFn: (payload: FlexCredentialsUpdate) =>
-      updateFlexCredentialsApiCredentialsFlexPut(payload),
+  const { mutate: rotate, isPending } = useMutation({
+    mutationFn: (payload: ConnectionRotate) =>
+      rotateTokenApiConnectionsConnectionIdRotateTokenPost(connectionId, payload),
     onSuccess: () => {
-      // The endpoint returns {"ok": true}. Caller refetches credentials metadata.
       onSuccess();
     },
     onError: (err: unknown) => {
-      const e = err as { response?: { data?: { detail?: string } } };
-      setError(e?.response?.data?.detail ?? "Error al actualizar las credenciales");
+      const e = err as { response?: { data?: { detail?: unknown } } };
+      const detail = e?.response?.data?.detail;
+      setError(
+        typeof detail === "string" ? detail : "Error al rotar el token"
+      );
     },
   });
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    const payload: FlexCredentialsUpdate = {};
-    if (token.trim()) payload.token = token.trim();
+    if (!token.trim()) {
+      setError("Ingresá el nuevo token");
+      return;
+    }
+    // The rotate endpoint requires a token; query_id is optional (only sent if
+    // the user changed it).
+    const payload: ConnectionRotate = { token: token.trim() };
     if (queryId.trim() && queryId.trim() !== currentQueryId) {
       payload.query_id = queryId.trim();
     }
-    if (!payload.token && !payload.query_id) {
-      setError("Ingresa al menos el token o un nuevo Query ID");
-      return;
-    }
-    updateCreds(payload);
+    rotate(payload);
   }
 
   return (

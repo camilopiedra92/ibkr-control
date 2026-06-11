@@ -21,11 +21,15 @@ interface Step1Props {
 export function Step1Credentials({ onComplete }: Step1Props) {
   const [token, setToken] = useState("");
   const [queryId, setQueryId] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const { mutate, isPending } = useMutation({
-    mutationFn: (data: { token: string; query_id: string }) =>
-      step1SaveApiSetupStep1SavePost(data),
+    mutationFn: (data: {
+      token: string;
+      query_id: string;
+      display_name?: string | null;
+    }) => step1SaveApiSetupStep1SavePost(data),
     onSuccess: () => {
       onComplete();
     },
@@ -38,7 +42,11 @@ export function Step1Credentials({ onComplete }: Step1Props) {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    mutate({ token, query_id: queryId });
+    mutate({
+      token,
+      query_id: queryId,
+      display_name: displayName.trim() || null,
+    });
   }
 
   return (
@@ -79,6 +87,17 @@ export function Step1Credentials({ onComplete }: Step1Props) {
         <p className="text-xs text-muted-foreground">
           Solo dígitos. Lo encontrás en Flex Queries dentro de Account Management.
         </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="displayName">Nombre de la conexión (opcional)</Label>
+        <Input
+          id="displayName"
+          type="text"
+          value={displayName}
+          onChange={(e) => setDisplayName(e.target.value)}
+          placeholder="Ej: Cuenta personal"
+        />
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
