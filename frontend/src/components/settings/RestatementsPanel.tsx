@@ -207,7 +207,7 @@ export function RestatementsPanel() {
           data-testid="restatements-badge"
           className={`rounded-full px-2 py-0.5 text-xs font-medium ${badgeClass}`}
         >
-          {recent} restatements ({sealed} en año sealed)
+          {recent} restatements ({sealed} en año sealed) · últimos 7 días
         </span>
       </div>
       <p className="text-sm text-muted-foreground">

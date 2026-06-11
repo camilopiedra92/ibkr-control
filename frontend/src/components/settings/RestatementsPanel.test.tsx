@@ -94,7 +94,9 @@ describe("RestatementsPanel — badge", () => {
     renderPanel();
 
     const badge = await screen.findByTestId("restatements-badge");
-    expect(badge).toHaveTextContent("3 restatements (0 en año sealed)");
+    expect(badge).toHaveTextContent(
+      "3 restatements (0 en año sealed) · últimos 7 días"
+    );
     expect(badge.className).toMatch(/amber/);
     expect(badge.className).not.toMatch(/red/);
   });
@@ -104,7 +106,9 @@ describe("RestatementsPanel — badge", () => {
     renderPanel();
 
     const badge = await screen.findByTestId("restatements-badge");
-    expect(badge).toHaveTextContent("4 restatements (2 en año sealed)");
+    expect(badge).toHaveTextContent(
+      "4 restatements (2 en año sealed) · últimos 7 días"
+    );
     expect(badge.className).toMatch(/red/);
   });
 });
