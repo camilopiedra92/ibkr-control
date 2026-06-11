@@ -204,3 +204,53 @@ async def _upsert_immutable_returning_inserted(
         result = await session.execute(stmt)
         inserted.extend(result.all())
     return inserted
+
+
+async def _upsert_immutable_with_resolution(
+    session: AsyncSession,
+    table: Table,
+    rows: Sequence[dict[str, Any]],
+    conflict_cols: list[str],
+    returning_cols: list[str],
+    resolution_col: str = "instrument_id",
+) -> list[Row]:
+    """Como _upsert_immutable_returning_inserted + convergencia monótona (TL-D3).
+
+    Las columnas de HECHO siguen first-seen inmutables; la columna de RESOLUCIÓN
+    (enriquecimiento contra el catálogo control-plane) converge NULL->valor
+    cuando un re-ingest trae la resolución que faltaba. El WHERE hace el update
+    monótono y cero-churn: filas ya resueltas o sin resolución nueva se
+    comportan como DO NOTHING (cero versiones nuevas de tupla, cero bloat; el
+    row lock del conflicto sí se toma — irrelevante acá: el ingest está
+    serializado per-org por advisory lock).
+
+    Devuelve SOLO los INSERTs estrictos (xmax = 0): una convergencia no es una
+    fila nueva — n_new/ingest_log no se inflan (conteo honesto, spec TL-D3).
+    xmax es detalle de implementación MVCC, no API documentada — estable desde
+    PG 9.5; no "simplificar" este filtro.
+
+    Dedupe intra-batch por conflict key (last-seen gana): a diferencia del
+    DO NOTHING, el DO UPDATE rechaza afectar la misma fila dos veces en un
+    statement (CardinalityViolationError).
+    """
+    if not rows:
+        return []
+    deduped: dict[tuple, dict[str, Any]] = {}
+    for r in rows:
+        deduped[tuple(r[c] for c in conflict_cols)] = r
+    inserted: list[Row] = []
+    for batch in _chunks(list(deduped.values()), _BATCH_SIZE):
+        stmt = pg_insert(table).values(batch)
+        excluded = stmt.excluded
+        stmt = stmt.on_conflict_do_update(
+            index_elements=conflict_cols,
+            set_={resolution_col: excluded[resolution_col]},
+            where=table.c[resolution_col].is_(None) & excluded[resolution_col].is_not(None),
+        )
+        stmt = stmt.returning(
+            *[table.c[col] for col in returning_cols],
+            text("(xmax = 0) AS strictly_inserted"),
+        )
+        result = await session.execute(stmt)
+        inserted.extend(row for row in result.all() if row.strictly_inserted)
+    return inserted

@@ -5,11 +5,12 @@ from datetime import date
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ibkr_control.db.models.flex_raw import Trade, OpenPositionLot, Transfer
+from ibkr_control.db.models.flex_raw import CashTransaction, Trade, OpenPositionLot, Transfer
 from ibkr_control.ingest.flex._upsert_helpers import (
     _upsert_immutable,
     _upsert_snapshot,
     _upsert_immutable_returning_inserted,
+    _upsert_immutable_with_resolution,
     _chunks,
 )
 
@@ -177,6 +178,48 @@ async def test_upsert_immutable_returning_inserted_filters_noop(
         ["id", "transaction_id"],
     )
     assert {row.transaction_id for row in inserted2} == {"XFER-3"}
+
+
+@pytest.mark.asyncio
+async def test_upsert_with_resolution_dedupes_intra_batch_conflict_keys(
+    db_session: AsyncSession, sample_account, sample_flex_import
+):
+    """TL-D3: el DO UPDATE (a diferencia del DO NOTHING) revienta con
+    CardinalityViolation si el mismo conflict key aparece dos veces en el VALUES
+    de un statement — el helper dedupea intra-batch (last-seen gana)."""
+    iid = await _make_instrument(db_session)
+    base = dict(
+        organization_id=sample_account.organization_id,
+        flex_import_id=sample_flex_import.id,
+        account_id=sample_account.id,
+        instrument_id=None,
+        conid="265598",
+        type="Dividends",
+        currency="USD",
+        amount_usd=Decimal("5.00"),
+        description="dup key en el mismo batch",
+        date=date(2025, 2, 1),
+        symbol="AAPL",
+    )
+    rows = [
+        dict(base, transaction_id="CASH-DUP"),
+        dict(base, transaction_id="CASH-DUP", instrument_id=iid),  # last-seen gana
+    ]
+    inserted = await _upsert_immutable_with_resolution(
+        db_session,
+        CashTransaction.__table__,
+        rows,
+        ["organization_id", "transaction_id"],
+        ["transaction_id", "type"],
+    )
+    assert {row.transaction_id for row in inserted} == {"CASH-DUP"}
+
+    from sqlalchemy import select
+
+    ct = await db_session.scalar(
+        select(CashTransaction).where(CashTransaction.transaction_id == "CASH-DUP")
+    )
+    assert ct.instrument_id == iid  # la ULTIMA fila del batch es la que se insertó
 
 
 @pytest.mark.asyncio

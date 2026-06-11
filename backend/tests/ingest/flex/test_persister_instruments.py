@@ -399,6 +399,135 @@ async def test_cash_transfer_no_instrument_no_creation(db_session: AsyncSession,
 
 
 @pytest.mark.asyncio
+async def test_resolver_resolves_against_master_cross_batch(db_session: AsyncSession, sample_org):
+    """TL-D2: el lookup del resolver es contra el MASTER (DB), no solo el batch.
+    Batch 1 crea el instrument (trade creator); batch 2 trae SOLO un cash con el
+    mismo conid -> resuelve aunque no haya creator en ese batch."""
+    trade = _trade("265598", "AAPL", txn="TX-AAPL-1")
+    await persist(
+        db_session,
+        parsed=_xml("U99999001", [trade]),
+        organization_id=sample_org.id,
+        xml_bytes=b"<batch1/>",
+        source="manual_upload",
+    )
+    cash = ParsedCashTransaction(
+        transaction_id="CASH-CROSS-BATCH",
+        ibkr_account_id="U99999001",
+        type="Dividends",
+        currency="USD",
+        amount_usd=Decimal("5.00"),
+        description="AAPL dividend, posicion ya cerrada",
+        date=date(2026, 2, 1),
+        symbol="AAPL",
+        conid="265598",
+    )
+    await persist(
+        db_session,
+        parsed=_xml("U99999001", [], cash_transactions=[cash]),
+        organization_id=sample_org.id,
+        xml_bytes=b"<batch2/>",
+        source="manual_upload",
+    )
+    ct = await db_session.scalar(
+        select(CashTransaction).where(CashTransaction.transaction_id == "CASH-CROSS-BATCH")
+    )
+    assert ct.instrument_id is not None
+
+
+@pytest.mark.asyncio
+async def test_cash_instrument_id_converges_monotonically(db_session: AsyncSession, sample_org):
+    """TL-D3: una fila cash congelada con NULL converge cuando el re-ingest trae
+    la resolucion; la convergencia NO cuenta como fila nueva (n_new honesto) y
+    NO genera restatements (enriquecimiento != restatement economico)."""
+    cash = ParsedCashTransaction(
+        transaction_id="CASH-CONV",
+        ibkr_account_id="U99999001",
+        type="Dividends",
+        currency="USD",
+        amount_usd=Decimal("7.00"),
+        description="dividendo de instrument aun no visto",
+        date=date(2026, 3, 1),
+        symbol="AAPL",
+        conid="265598",
+    )
+    # Batch 1: conid irresoluble (sin creator en batch ni master) -> NULL.
+    await persist(
+        db_session,
+        parsed=_xml("U99999001", [], cash_transactions=[cash]),
+        organization_id=sample_org.id,
+        xml_bytes=b"<conv1/>",
+        source="manual_upload",
+    )
+    ct = await db_session.scalar(
+        select(CashTransaction).where(CashTransaction.transaction_id == "CASH-CONV")
+    )
+    assert ct.instrument_id is None
+    # Batch 2 (re-ingest YTD): creator + LA MISMA fila cash -> converge.
+    trade = _trade("265598", "AAPL", txn="TX-AAPL-2")
+    _, counters = await persist(
+        db_session,
+        parsed=_xml("U99999001", [trade], cash_transactions=[cash]),
+        organization_id=sample_org.id,
+        xml_bytes=b"<conv2/>",
+        source="manual_upload",
+    )
+    assert counters["n_new_cash_tx"] == 0  # convergencia != fila nueva
+    await db_session.refresh(ct)
+    assert ct.instrument_id is not None
+    assert ct.amount_usd == Decimal("7.00")  # columnas de hecho intactas
+    n_restatements = (
+        await db_session.execute(text("SELECT count(*) FROM restatement_log"))
+    ).scalar_one()
+    assert n_restatements == 0
+    n_rows = await db_session.scalar(
+        select(func.count())
+        .select_from(CashTransaction)
+        .where(CashTransaction.transaction_id == "CASH-CONV")
+    )
+    assert n_rows == 1
+
+
+@pytest.mark.asyncio
+async def test_resolved_cash_row_untouched_on_reingest(db_session: AsyncSession, sample_org):
+    """TL-D3 guard monotono: fila ya resuelta re-ingerida -> cero cambios, cero new."""
+    trade = _trade("265598", "AAPL", txn="TX-AAPL-3")
+    cash = ParsedCashTransaction(
+        transaction_id="CASH-STABLE",
+        ibkr_account_id="U99999001",
+        type="Dividends",
+        currency="USD",
+        amount_usd=Decimal("3.00"),
+        description="ya resuelto",
+        date=date(2026, 4, 1),
+        symbol="AAPL",
+        conid="265598",
+    )
+    await persist(
+        db_session,
+        parsed=_xml("U99999001", [trade], cash_transactions=[cash]),
+        organization_id=sample_org.id,
+        xml_bytes=b"<stable1/>",
+        source="manual_upload",
+    )
+    ct = await db_session.scalar(
+        select(CashTransaction).where(CashTransaction.transaction_id == "CASH-STABLE")
+    )
+    original_iid = ct.instrument_id
+    assert original_iid is not None
+    _, counters = await persist(
+        db_session,
+        parsed=_xml("U99999001", [], cash_transactions=[cash]),
+        organization_id=sample_org.id,
+        xml_bytes=b"<stable2/>",
+        source="manual_upload",
+    )
+    assert counters["n_new_cash_tx"] == 0
+    await db_session.refresh(ct)
+    assert ct.instrument_id == original_iid
+
+
+@pytest.mark.asyncio
 async def test_accrual_only_creator_without_asset_category_fails_loud(
     db_session: AsyncSession, sample_org
 ):
