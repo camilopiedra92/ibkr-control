@@ -11,6 +11,8 @@ export interface StreamEvent {
   // W1: partial-failure surfacing for flex_ytd (some connections OK, some failed).
   n_connections_ok?: number;
   n_connections_failed?: number;
+  // W3: count of material restatements detected on flex_ytd ok/partial events.
+  n_restatements?: number;
   // Phase 2.5 idempotent persister counters (spec A5)
   n_observed_trades?: number;
   n_observed_lots_closed?: number;

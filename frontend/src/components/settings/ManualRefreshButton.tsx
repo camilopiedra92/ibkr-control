@@ -120,6 +120,15 @@ export function ManualRefreshButton({ onDone }: ManualRefreshButtonProps) {
       ev.status === "partial" ? acc + (ev.n_connections_failed ?? 0) : acc,
     0
   );
+  // W3: material restatements ride on the flex_ytd ok/partial event. Sum across
+  // terminal-success events so a partial run still surfaces the count.
+  const restatementCount = events.reduce(
+    (acc, ev) =>
+      ev.status === "ok" || ev.status === "partial"
+        ? acc + (ev.n_restatements ?? 0)
+        : acc,
+    0
+  );
   const isRunning = jobId !== null && !isDone && !hasFailed;
   const substepStates = buildSubstepStates(events);
   const showSubsteps = jobId !== null;
@@ -196,6 +205,12 @@ export function ManualRefreshButton({ onDone }: ManualRefreshButtonProps) {
         <p className="text-sm text-amber-600 font-medium">
           ⚠ Completado con advertencias ({partialFailedCount} conexión/es
           fallaron). Revisá Conexiones en Settings.
+        </p>
+      )}
+
+      {(finished || partialDone) && restatementCount > 0 && (
+        <p className="text-sm text-amber-600">
+          {restatementCount} valor(es) restateado(s) — revisá Salud de ingesta.
         </p>
       )}
 
