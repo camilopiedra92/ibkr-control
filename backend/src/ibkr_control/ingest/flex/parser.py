@@ -582,7 +582,7 @@ def _parse_change_in_dividend_accruals(
             ParsedDividendAccrual(
                 ibkr_account_id=acct,
                 symbol=row.get("symbol") or "",
-                conid=_attr(row, "conid"),
+                conid=_require_conid(row, "<ChangeInDividendAccrual>"),
                 isin=_attr(row, "isin"),
                 issuer_country=_attr(row, "issuerCountryCode"),
                 currency=row.get("currency") or "USD",
@@ -628,7 +628,7 @@ def _parse_open_dividend_accruals(
             ParsedOpenDividendAccrual(
                 ibkr_account_id=acct,
                 symbol=row.get("symbol") or "",
-                conid=_attr(row, "conid"),
+                conid=_require_conid(row, "<OpenDividendAccrual>"),
                 isin=_attr(row, "isin"),
                 issuer_country=_attr(row, "issuerCountryCode"),
                 currency=row.get("currency") or "USD",

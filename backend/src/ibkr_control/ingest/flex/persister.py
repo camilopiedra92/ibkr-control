@@ -680,10 +680,13 @@ def _collect_instrument_specs(parsed: ParsedXML) -> dict[str, dict]:
     renombrado pisa al temprano). Devuelve conid -> {symbol, asset_class, name,
     currency, multiplier}.
 
-    Los accruals no traen description/currency/multiplier ni asset_class confiable
-    como atributo propio: usan asset_category (puede ser None). Aportan symbol +
-    isin; el resto queda None y NO pisa lo que un trade/lot ya escribió (merge no
-    destructivo abajo).
+    Los accruals no traen description/currency/multiplier; usan asset_category
+    (nullable en DB por fidelidad de fuente, aunque CR-1 lo verificó 100% presente
+    en los accruals reales). Aportan symbol + isin; el resto queda None y NO pisa
+    lo que un trade/lot ya escribió (merge no destructivo abajo). Si un accrual es
+    el ÚNICO creator de un conid y carece de assetCategory, _ensure_instruments
+    falla loud (asset_class es NOT NULL en instruments) en vez de dejar que el
+    INSERT reviente con un IntegrityError opaco.
     """
     specs: dict[str, dict] = {}
 
@@ -742,16 +745,14 @@ def _collect_instrument_specs(parsed: ParsedXML) -> dict[str, dict]:
             multiplier=op_lot.multiplier,
         )
         _set_isin(op_lot.conid, op_lot.isin)
+    # conid es REQUIRED en los accruals (parser _require_conid, spec review W2):
+    # sin guard de None — un accrual sin conid ya falló loud en parse-time.
     for da in parsed.change_in_dividend_accruals:
-        if da.conid:
-            _merge(da.conid, symbol=da.symbol, asset_class=da.asset_category, currency=da.currency)
-            _set_isin(da.conid, da.isin)
+        _merge(da.conid, symbol=da.symbol, asset_class=da.asset_category, currency=da.currency)
+        _set_isin(da.conid, da.isin)
     for oda in parsed.open_dividend_accruals:
-        if oda.conid:
-            _merge(
-                oda.conid, symbol=oda.symbol, asset_class=oda.asset_category, currency=oda.currency
-            )
-            _set_isin(oda.conid, oda.isin)
+        _merge(oda.conid, symbol=oda.symbol, asset_class=oda.asset_category, currency=oda.currency)
+        _set_isin(oda.conid, oda.isin)
 
     return specs
 
@@ -794,6 +795,17 @@ async def _ensure_instruments(
     missing = [c for c in conids if c not in conid_to_iid]
     for conid in missing:
         spec = specs[conid]
+        # Fail-loud (spec review W2): si el único creator de este conid fue un
+        # accrual sin assetCategory, asset_class queda None y el INSERT rebotaría
+        # con un IntegrityError opaco (NOT NULL). CR-1 verificó assetCategory 100%
+        # presente en los accruals reales — este guard atrapa drift futuro con un
+        # error accionable, igual que _require_asset_class/_require_conid.
+        if not spec["asset_class"]:
+            raise ValueError(
+                f"instrument spec for conid {conid} (symbol {spec['symbol']!r}) is "
+                "first created by an accrual that lacks assetCategory; cannot create "
+                "instrument (asset_class is NOT NULL). Check the source XML."
+            )
         instrument = Instrument(
             symbol=spec["symbol"],
             name=spec.get("name"),

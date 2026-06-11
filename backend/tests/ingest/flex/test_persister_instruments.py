@@ -347,3 +347,50 @@ async def test_fop_transfer_instrument_id_null_resolver_no_creator(
         )
     ).scalar_one()
     assert fop_iid is None
+
+
+@pytest.mark.asyncio
+async def test_accrual_only_creator_without_asset_category_fails_loud(
+    db_session: AsyncSession, sample_org
+):
+    """Spec review W2: si el ÚNICO creator de un conid es un accrual SIN
+    assetCategory, _ensure_instruments falla loud con un ValueError accionable
+    en vez de un IntegrityError opaco del NOT NULL de instruments.asset_class.
+    (CR-1 verificó assetCategory 100% presente en los accruals reales — esto
+    atrapa drift futuro.)"""
+    from ibkr_control.ingest.flex._models import ParsedDividendAccrual
+
+    accrual = ParsedDividendAccrual(
+        ibkr_account_id="U99999001",
+        symbol="ZZZZ",
+        conid="424242",
+        isin=None,
+        issuer_country=None,
+        currency="USD",
+        ex_date=date(2026, 2, 10),
+        pay_date=date(2026, 3, 1),
+        report_date=date(2026, 2, 15),
+        accrual_date=date(2026, 2, 14),
+        quantity=Decimal("10"),
+        gross_rate_per_share=None,
+        gross_amount_usd=Decimal("5.00"),
+        tax_usd=Decimal("0.75"),
+        fee_usd=None,
+        net_amount_usd=Decimal("4.25"),
+        action_id=None,
+        asset_category=None,  # the drift case the guard catches
+        sub_category=None,
+        level_of_detail=None,
+        code="Po",
+        raw_attrs={},
+    )
+    p = _xml("U99999001", [])
+    p.change_in_dividend_accruals = [accrual]
+    with pytest.raises(ValueError, match="424242.*assetCategory"):
+        await persist(
+            db_session,
+            parsed=p,
+            organization_id=sample_org.id,
+            xml_bytes=b"<accrual-no-ac/>",
+            source="manual_upload",
+        )

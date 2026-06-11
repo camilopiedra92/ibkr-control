@@ -126,7 +126,9 @@ class ParsedTransfer:
 class ParsedDividendAccrual:
     ibkr_account_id: str
     symbol: str
-    conid: str | None
+    # W2 (T1-D8): creator del securities master. conid REQUIRED (CR-1: 100%
+    # presente en los accruals reales) — fail-loud en el parser (_require_conid).
+    conid: str
     isin: str | None
     issuer_country: str | None
     currency: str
@@ -157,7 +159,9 @@ class ParsedDividendAccrual:
 class ParsedOpenDividendAccrual:
     ibkr_account_id: str
     symbol: str
-    conid: str | None
+    # W2 (T1-D8): creator del securities master. conid REQUIRED (CR-1: 100%
+    # presente en los accruals reales) — fail-loud en el parser (_require_conid).
+    conid: str
     isin: str | None
     issuer_country: str | None
     currency: str

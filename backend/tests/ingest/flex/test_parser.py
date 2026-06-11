@@ -393,3 +393,44 @@ def test_trade_missing_conid_fails_loud():
 </FlexQueryResponse>"""
     with pytest.raises(ValueError, match="conid"):
         parse(xml)
+
+
+def test_accrual_missing_conid_fails_loud():
+    """A creator <ChangeInDividendAccrual> with an empty conid raises ValueError
+    (spec review W2: accruals are creators too — same fail-loud as <Trade>)."""
+    xml = b"""<?xml version="1.0"?>
+<FlexQueryResponse>
+  <FlexStatements count="1">
+    <FlexStatement accountId="U99999001" fromDate="2026-01-01" toDate="2026-01-31"
+                   period="YearToDate" whenGenerated="2026-02-01;10:00:00">
+      <AccountInformation accountId="U99999001" currency="USD"/>
+      <ChangeInDividendAccruals>
+        <ChangeInDividendAccrual accountId="U99999001" symbol="AAPL" conid=""
+                                 reportDate="20260301" quantity="10" grossAmount="5"
+                                 tax="0.75" netAmount="4.25" code="Po"/>
+      </ChangeInDividendAccruals>
+    </FlexStatement>
+  </FlexStatements>
+</FlexQueryResponse>"""
+    with pytest.raises(ValueError, match="ChangeInDividendAccrual.*conid"):
+        parse(xml)
+
+
+def test_open_accrual_missing_conid_fails_loud():
+    """Mirror for <OpenDividendAccrual> (creator, conid required)."""
+    xml = b"""<?xml version="1.0"?>
+<FlexQueryResponse>
+  <FlexStatements count="1">
+    <FlexStatement accountId="U99999001" fromDate="2026-01-01" toDate="2026-01-31"
+                   period="YearToDate" whenGenerated="2026-02-01;10:00:00">
+      <AccountInformation accountId="U99999001" currency="USD"/>
+      <OpenDividendAccruals>
+        <OpenDividendAccrual accountId="U99999001" symbol="NKE"
+                             reportDate="20260301" quantity="10" grossAmount="5"
+                             tax="0.75" netAmount="4.25" code="Po"/>
+      </OpenDividendAccruals>
+    </FlexStatement>
+  </FlexStatements>
+</FlexQueryResponse>"""
+    with pytest.raises(ValueError, match="OpenDividendAccrual.*conid"):
+        parse(xml)
