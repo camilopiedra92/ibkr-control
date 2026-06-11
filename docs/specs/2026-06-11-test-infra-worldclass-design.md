@@ -125,11 +125,20 @@ ser "un `test_db` clonado del template". Se borra:
 
 ### D6 — Paralelismo con pytest-xdist, un contenedor + template por worker
 
-Local y CI corren `pytest -n auto`. Cada worker de xdist tiene su propio
-`PostgresContainer` + `template_migrated` (aislamiento total, sin coordinación
-cross-worker). Nombre del clon namespaced por `PYTEST_XDIST_WORKER`. CI:
-`ubuntu-latest` (4 cores) → 4 workers; testcontainers ya corre en CI (no usa
-`services: postgres`).
+Local y CI corren `pytest -n auto` (= `os.cpu_count()`). Cada worker de xdist
+tiene su propio `PostgresContainer` + `template_migrated` (aislamiento total, sin
+coordinación cross-worker). Nombre del clon namespaced por `PYTEST_XDIST_WORKER`.
+CI: `ubuntu-latest` (4 cores hoy) → 4 workers; testcontainers ya corre en CI (no
+usa `services: postgres`).
+
+**`-n auto` también en CI (NO pin `-n 4`).** El determinismo que importa es de
+correctitud, no de timing: el clon-de-template garantiza aislamiento perfecto por
+test → el nº de workers no afecta el resultado, solo la velocidad. Pinnear un
+número lo vuelve stale cuando GitHub cambia los runners (ya pasó 2→4 cores) o al
+correr en un runner más grande. El único riesgo de `auto` es memoria (N
+contenedores); mitigación opcional sin pinnear: `PYTEST_XDIST_AUTO_NUM_WORKERS`
+(env que xdist respeta) como **tope**, default sin tope. Acotar solo si se observa
+contención — no pre-optimizar un número mágico.
 
 Trade-off aceptado: N contenedores Postgres (~N×40MB RAM) + N `alembic upgrade`
 en el arranque (paralelo, ~2-4s one-time) a cambio de cero coordinación
@@ -208,21 +217,30 @@ FUNCTION (por test que toca DB)
 
 ## Rollout incremental (secuencia de PRs)
 
-Cada PR: suite verde + delta de wall-clock en la descripción.
+**Principio: un PR cambia UNA sola variable.** Empaquetar la convergencia de
+schema (create_all→clon) con la de seguridad (owner→app_rls) impediría saber, ante
+un test rojo, cuál de las dos lo rompió. Por eso son **tres PRs**, no dos — cada
+uno aísla su variable (la misma disciplina que el clon le da a los tests). Cada
+PR: suite verde + delta de wall-clock en la descripción.
 
-- **PR-A — infra + endpoint world (el 64%):** nace `template_db`/`test_db`/
-  `_maintenance_engine` + clon + `pytest-xdist`. Migra los 118 endpoint tests (que
-  ya corren como app_rls → cambio semántico mínimo, solo provisioning más rápido).
-  Borra `_migrated_app_db`. El mundo `db_session` queda intacto (todavía
-  create_all). Esperado: ~200s → ~15s en ese slice. Máximo retorno, mínimo riesgo.
-- **PR-B — convergencia del model world (305 tests):** `db_session` pasa a
-  `test_db` clonado. Retira create_all + el parche de grants/función
-  (conftest 145-156). La fidelidad cambia (algunos tests modelo pasan de
-  owner→app_rls y pueden destapar issues latentes — ese es el punto). Su propio
-  PR por blast radius.
-- **PR-C — default app_rls + `owner_session` como excepción nombrada:** fija el
-  principio de seeding (D4), formaliza los Tier 2. Se funde en PR-B si la
-  convergencia sale limpia.
+- **PR-A — infra + endpoint world (variable: provisioning del endpoint world):**
+  nace `template_db`/`test_db`/`_maintenance_engine` + clon + `pytest-xdist`.
+  Migra los 118 endpoint tests (que **ya** corren como app_rls → sin cambio
+  semántico, solo provisioning más rápido). Borra `_migrated_app_db`. El mundo
+  `db_session` queda intacto (todavía create_all). Esperado: ~200s → ~15s en ese
+  slice. Máximo retorno, mínimo riesgo.
+- **PR-B — convergencia de schema del model world (variable: provisioning del
+  model world, `create_all`→clon, SIGUE owner):** `db_session` pasa a `test_db`
+  clonado pero **conecta igual como owner** (RLS sigue bypasseado). **Cero cambio
+  semántico** — los 305 tests se comportan idénticos, solo cambia la fuente del
+  schema. Retira `create_all` + el parche de grants/función (conftest 145-156).
+  Verde = prueba de que el clon es un sustituto fiel de create_all. De-riskea
+  PR-C: deja el schema ya migrado/fiel antes de tocar el rol.
+- **PR-C — convergencia de seguridad del model world (variable: rol owner→app_rls):**
+  los tests modelo conectan como `app_rls` + `org_context`; `owner_session` queda
+  como excepción nombrada (D2/D4); formaliza los Tier 2. **Acá** se enforce­a RLS y
+  pueden saltar bugs latentes — aislado, así cualquier rojo ES el flip de rol, no
+  la fuente del schema.
 
 ## Fuera de alcance
 
