@@ -111,8 +111,9 @@ async def test_participation_is_party_anchored(db_session):
     assert not hasattr(got, "user_id")
 
 
-@pytest.mark.asyncio
-async def test_all_tenant_tables_have_organization_id(db_session):
+def test_all_tenant_tables_have_organization_id():
+    # Aserción pura sobre Base.metadata (registro de modelos en memoria) — no toca
+    # la DB, así que no pide db_session ni es async (no provisiona un clon).
     from ibkr_control.db.base import Base
     from ibkr_control.db.rls import ORG_SCOPED_TABLES
 
