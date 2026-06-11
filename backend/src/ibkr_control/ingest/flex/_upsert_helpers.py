@@ -6,7 +6,7 @@ statement (mismo patrón que TRM bulk_upsert_days post-commit 989652d).
 """
 
 from collections.abc import Callable, Iterable, Sequence
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from sqlalchemy import Table, select, text, tuple_
@@ -88,7 +88,9 @@ def _quantize_to_scale(value: Decimal, scale: int | None) -> Decimal:
     """
     if scale is None:
         return value
-    return value.quantize(Decimal(1).scaleb(-scale))
+    # PG NUMERIC redondea HALF_UP; el default de Decimal es HALF_EVEN — sin esto
+    # un valor en el boundary exacto (e.g. 255.86945 a escala 4) produce un falso positivo.
+    return value.quantize(Decimal(1).scaleb(-scale), rounding=ROUND_HALF_UP)
 
 
 def _values_differ(old: Any, new: Any, *, scale: int | None = None) -> bool:

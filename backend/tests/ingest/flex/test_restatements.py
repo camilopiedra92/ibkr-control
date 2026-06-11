@@ -204,6 +204,33 @@ async def test_mark_price_churn_not_a_restatement(db_session: AsyncSession, samp
 
 
 @pytest.mark.asyncio
+async def test_half_boundary_value_not_a_restatement(db_session: AsyncSession, sample_org):
+    """Regression (spec review W3): paridad de redondeo con PG NUMERIC.
+
+    PG NUMERIC redondea HALF_UP (255.86945 a escala 4 -> guarda 255.8695); el
+    default de Decimal.quantize es HALF_EVEN (-> 255.8694). Sin rounding=HALF_UP
+    en _quantize_to_scale, un valor de fuente en el half-boundary exacto con
+    dígito precedente par produce un value_update espurio en cada re-ingest
+    idéntico. Este caso falla con HALF_EVEN y pasa con HALF_UP."""
+    boundary = Decimal("255.86945")  # escala 5 de fuente; columna Numeric(20,4)
+    await persist(
+        db_session,
+        parsed=_xml_with_open_lots([_open_lot(cost_basis=boundary)]),
+        organization_id=sample_org.id,
+        xml_bytes=b"<v1/>",
+        source="manual_upload",
+    )
+    await persist(
+        db_session,
+        parsed=_xml_with_open_lots([_open_lot(cost_basis=boundary)]),
+        organization_id=sample_org.id,
+        xml_bytes=b"<v2/>",
+        source="manual_upload",
+    )
+    assert await _count_restatements(db_session) == 0
+
+
+@pytest.mark.asyncio
 async def test_sibling_row_detected_closed_lots(db_session: AsyncSession, sample_org):
     """persist closed lot -> re-persist variante con MISMO (txn, close_datetime,
     qty) y distinto fifo_pnl (caso IBIT wash-sale): ambas filas EXISTEN (nunca
