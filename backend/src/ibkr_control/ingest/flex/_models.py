@@ -20,6 +20,13 @@ class ParsedTrade:
     ibkr_account_id: str
     symbol: str
     asset_class: str
+    # W2 (T1-D8): creator del securities master. conid REQUIRED (CR-1: 100%
+    # presente en <Trade>); el persister crea el instrument con estos atributos.
+    conid: str
+    isin: str | None
+    description: str | None
+    currency: str | None
+    multiplier: Decimal | None
     trade_date: date
     settle_date: date | None
     qty: Decimal
@@ -38,6 +45,13 @@ class ParsedClosedLot:
     asset_class: (
         str  # XML assetCategory (STK/FUT/OPT...); raw fact, fiscal regime derived in Phase 3 domain
     )
+    # W2 (T1-D8): creator del securities master. conid REQUIRED (CR-1: 100%
+    # presente en <Lot CLOSED_LOT>).
+    conid: str
+    isin: str | None
+    description: str | None
+    currency: str | None
+    multiplier: Decimal | None
     open_date: date
     close_date: date
     close_datetime: (
@@ -57,6 +71,13 @@ class ParsedOpenPositionLot:
     asset_class: (
         str  # XML assetCategory (STK/FUT/OPT...); raw fact, fiscal regime derived in Phase 3 domain
     )
+    # W2 (T1-D8): creator del securities master. conid REQUIRED (CR-1: 100%
+    # presente en <OpenPosition>).
+    conid: str
+    isin: str | None
+    description: str | None
+    currency: str | None
+    multiplier: Decimal | None
     open_date: date
     qty: Decimal
     cost_basis_usd: Decimal
@@ -81,6 +102,9 @@ class ParsedCashTransaction:
     description: str | None
     date: date
     symbol: str | None
+    # W2 (T1-D8): resolver-only. conid nullable (CR-1: 0/23 en 2024, 80/115 en
+    # 2025) - el persister hace lookup si está presente, NUNCA crea instrument.
+    conid: str | None = None
 
 
 @dataclass
@@ -93,6 +117,9 @@ class ParsedTransfer:
     symbol: str
     qty: Decimal
     transfer_type: str
+    # W2 (T1-D8): resolver-only. conid nullable (CR-1: los FOP de GLOB y los
+    # CASH internos no traen conid) - lookup si está presente, NUNCA crea.
+    conid: str | None = None
 
 
 @dataclass
