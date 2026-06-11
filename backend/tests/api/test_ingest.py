@@ -142,7 +142,7 @@ async def test_run_manual_emits_substep_keys_matching_frontend(monkeypatch):
 
     async def fake_flex_run(*_a, **kw):
         flex_kwargs.update(kw)
-        return flex_job_mod.FlexRunSummary(results={7: 100}, failures={})
+        return flex_job_mod.FlexRunSummary(results={7: 100}, failures={}, n_restatements=3)
 
     monkeypatch.setattr("ibkr_control.ingest.trm.job.run", fake_trm_run)
     monkeypatch.setattr("ibkr_control.ingest.flex.job.run", fake_flex_run)
@@ -170,6 +170,9 @@ async def test_run_manual_emits_substep_keys_matching_frontend(monkeypatch):
     assert trm_ok["n_days"] == 7
     flex_ok = next(e for e in events if e["step"] == "flex_ytd" and e.get("status") == "ok")
     assert flex_ok["n_connections_ok"] == 1
+    # W3: the ok event carries the total restatements detected this run so the UI
+    # can surface "N valores restateados" without a second round-trip.
+    assert flex_ok["n_restatements"] == 3
 
 
 async def test_run_manual_marks_failing_substep_as_failed(monkeypatch):
@@ -209,7 +212,9 @@ async def test_run_manual_emits_partial_on_partial_flex_failure(monkeypatch):
 
     async def fake_flex_run(*_a, **_kw):
         # 1 ok (conn 7 -> import 100), 1 failed (conn 8) -> partial.
-        return flex_job_mod.FlexRunSummary(results={7: 100}, failures={8: "1018 bad token"})
+        return flex_job_mod.FlexRunSummary(
+            results={7: 100}, failures={8: "1018 bad token"}, n_restatements=2
+        )
 
     monkeypatch.setattr("ibkr_control.ingest.flex.job.run", fake_flex_run)
     monkeypatch.setattr(ingest_mod, "get_engine", lambda: object())
@@ -222,6 +227,9 @@ async def test_run_manual_emits_partial_on_partial_flex_failure(monkeypatch):
     flex_ev = next(e for e in events if e["step"] == "flex_ytd" and e.get("status") == "partial")
     assert flex_ev["n_connections_ok"] == 1
     assert flex_ev["n_connections_failed"] == 1
+    # W3: the partial event also carries n_restatements (the ones detected on the
+    # connections that DID succeed).
+    assert flex_ev["n_restatements"] == 2
     # The run proceeds to done despite the partial failure.
     assert any(e["step"] == "done" for e in events)
     # And it does NOT emit a flex_ytd 'ok' (which would be a false all-clear).

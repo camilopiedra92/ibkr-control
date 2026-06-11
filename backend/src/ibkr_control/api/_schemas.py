@@ -102,6 +102,28 @@ class IngestLogRead(BaseModel):
     trigger: str
 
 
+class RestatementRead(BaseModel):
+    """Una fila de restatement_log (W3): IBKR mutó un valor material de un hecho
+    ya persistido (value_update) o emitió un sibling con distinto fifo_pnl
+    (sibling_row). Org-scoped vía RLS — el endpoint no filtra org explícitamente.
+
+    `kind` es un Literal (no str) para que orval genere un union de strings en el
+    cliente TS, habilitando switch exhaustivo en el frontend (precedente W1 Task 8
+    con ConnectionStatus). column_name es '*' para sibling_row.
+    """
+
+    id: int
+    flex_import_id: int | None
+    table_name: str
+    natural_key: dict
+    column_name: str
+    old_value: str | None
+    new_value: str | None
+    kind: Literal["value_update", "sibling_row"]
+    sealed_year: bool
+    detected_at: datetime
+
+
 class IngestCounters(BaseModel):
     """Counters de un ingest: cuantas rows vio del XML (`n_observed_*`) y
     cuantas afectaron la DB (`n_new_*`).

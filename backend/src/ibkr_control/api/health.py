@@ -16,7 +16,7 @@ another succeeds, the manual-refresh SSE collapses to "ok"; the per-connection
 status here is what makes that partial failure VISIBLE to the frontend.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends
@@ -28,6 +28,7 @@ from ibkr_control.api._context import org_context
 from ibkr_control.api._schemas import ConnectionStatus
 from ibkr_control.db.models.connections import Connection
 from ibkr_control.db.models.ingest_log import IngestLog
+from ibkr_control.db.models.restatements import RestatementLog
 from ibkr_control.db.models.trm import TrmImport
 from ibkr_control.db.session import get_async_session
 
@@ -53,13 +54,24 @@ class ConnectionHealth(BaseModel):
     last_sync_at: datetime | None
 
 
+class RestatementHealth(BaseModel):
+    """Conteos de restatements recientes (W3). recent_count = filas detectadas en
+    los últimos 7 días; sealed_count = subconjunto que cae en un año con
+    declaración sellada (máxima severidad). Org-scoped vía RLS."""
+
+    recent_count: int
+    sealed_count: int
+
+
 class IngestHealthResponse(BaseModel):
     sources: list[IngestSourceHealth]
     connections: list[ConnectionHealth]
+    restatements: RestatementHealth
     checked_at: datetime
 
 
 _ERROR_TRUNCATE_LEN = 500
+_RESTATEMENT_WINDOW_DAYS = 7
 
 
 async def _flex_health(session: AsyncSession, *, organization_id: int) -> IngestSourceHealth:
@@ -144,6 +156,25 @@ async def _connection_health(session: AsyncSession) -> list[ConnectionHealth]:
     ]
 
 
+async def _restatement_health(session: AsyncSession) -> RestatementHealth:
+    """Restatement counts over the last 7 days (RLS scopes to the org).
+
+    recent_count counts all restatements in the window; sealed_count is the
+    subset flagged sealed_year=True ("tu declaración pudo haber cambiado").
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=_RESTATEMENT_WINDOW_DAYS)
+    recent = await session.scalar(
+        select(func.count(RestatementLog.id)).where(RestatementLog.detected_at >= cutoff)
+    )
+    sealed = await session.scalar(
+        select(func.count(RestatementLog.id)).where(
+            RestatementLog.detected_at >= cutoff,
+            RestatementLog.sealed_year.is_(True),
+        )
+    )
+    return RestatementHealth(recent_count=recent or 0, sealed_count=sealed or 0)
+
+
 @router.get("/ingest", response_model=IngestHealthResponse)
 async def get_ingest_health(
     org_id: int = Depends(org_context),
@@ -152,8 +183,10 @@ async def get_ingest_health(
     flex = await _flex_health(session, organization_id=org_id)
     trm = await _trm_health(session)
     connections = await _connection_health(session)
+    restatements = await _restatement_health(session)
     return IngestHealthResponse(
         sources=[flex, trm],
         connections=connections,
+        restatements=restatements,
         checked_at=datetime.now(timezone.utc),
     )

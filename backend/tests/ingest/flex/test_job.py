@@ -261,12 +261,14 @@ async def test_run_happy_path_with_mocked_flex_client(
 
     SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
 
-    results = (
-        await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
-    ).results
+    summary = await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    results = summary.results
     assert set(results.keys()) == {conn_id}
     flex_import_id = results[conn_id]
     assert flex_import_id is not None
+    # W3: the summary surfaces the restatement total threaded up from persist
+    # counters; a fresh ingest of an empty query produces none.
+    assert summary.n_restatements == 0
 
     async with SessionLocal() as s2:
         fi = await s2.get(FlexImport, flex_import_id)

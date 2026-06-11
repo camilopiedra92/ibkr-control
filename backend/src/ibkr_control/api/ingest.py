@@ -10,11 +10,17 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sse_starlette.sse import EventSourceResponse
 
 from ibkr_control.api._context import org_context
-from ibkr_control.api._schemas import IngestJobStarted, IngestLogRead, IngestTrigger
+from ibkr_control.api._schemas import (
+    IngestJobStarted,
+    IngestLogRead,
+    IngestTrigger,
+    RestatementRead,
+)
 from ibkr_control.auth.backend import current_active_user
 from ibkr_control.auth.models import User
 from ibkr_control.config import get_settings
 from ibkr_control.db.models.ingest_log import IngestLog
+from ibkr_control.db.models.restatements import RestatementLog
 from ibkr_control.db.session import get_async_session, get_engine
 from ibkr_control.ingest.job_tracker import get_tracker
 
@@ -131,12 +137,18 @@ async def _run_manual(kind: str, org_id: int, job_id: int) -> None:
                         "status": "partial",
                         "n_connections_ok": n_ok,
                         "n_connections_failed": n_failed,
+                        "n_restatements": summary.n_restatements,
                     },
                 )
             else:
                 tracker.emit(
                     job_id,
-                    {"step": current_step, "status": "ok", "n_connections_ok": n_ok},
+                    {
+                        "step": current_step,
+                        "status": "ok",
+                        "n_connections_ok": n_ok,
+                        "n_restatements": summary.n_restatements,
+                    },
                 )
 
         current_step = None
@@ -212,3 +224,37 @@ async def list_logs(
         .limit(limit)
     )
     return [IngestLogRead.model_validate(r, from_attributes=True) for r in result.all()]
+
+
+@router.get("/restatements", response_model=list[RestatementRead])
+async def list_restatements(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    flex_import_id: int | None = Query(None),
+    table_name: str | None = Query(None),
+    sealed_only: bool = Query(False),
+    org_id: int = Depends(org_context),
+    session: AsyncSession = Depends(get_async_session),
+) -> list[RestatementRead]:
+    """Lista las filas de restatement_log del org (RLS scopea — sin filtro org
+    explícito, house style).
+
+    Orden determinista (detected_at DESC, id DESC) para que la paginación por
+    offset sea estable ante empates de detected_at (un mismo ingest inserta el
+    batch con NOW() idéntico). sealed_only=True filtra a las filas que caen en un
+    año con declaración sellada ("tu declaración pudo haber cambiado").
+    """
+    stmt = select(RestatementLog)
+    if flex_import_id is not None:
+        stmt = stmt.where(RestatementLog.flex_import_id == flex_import_id)
+    if table_name is not None:
+        stmt = stmt.where(RestatementLog.table_name == table_name)
+    if sealed_only:
+        stmt = stmt.where(RestatementLog.sealed_year.is_(True))
+    stmt = (
+        stmt.order_by(RestatementLog.detected_at.desc(), RestatementLog.id.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    rows = await session.scalars(stmt)
+    return [RestatementRead.model_validate(r, from_attributes=True) for r in rows.all()]
