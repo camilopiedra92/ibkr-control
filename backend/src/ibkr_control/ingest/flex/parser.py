@@ -221,6 +221,12 @@ _TRADE_TYPED_ATTRS: frozenset[str] = frozenset(
         "accountId",
         "symbol",
         "assetCategory",
+        # W2: instrument identity/attributes promoted to typed fields (not raw_attrs).
+        "conid",
+        "isin",
+        "description",
+        "currency",
+        "multiplier",
         "tradeDate",
         "settleDateTarget",
         "quantity",
@@ -270,6 +276,11 @@ def _parse_trade(elem, trades: list[ParsedTrade]) -> None:
             ibkr_account_id=elem.get("accountId") or "",
             symbol=elem.get("symbol") or "",
             asset_class=_require_asset_class(elem, "<Trade>"),
+            conid=_require_conid(elem, "<Trade>"),
+            isin=_instrument_isin(elem),
+            description=_instrument_description(elem),
+            currency=_instrument_currency(elem),
+            multiplier=_instrument_multiplier(elem),
             trade_date=trade_date,
             settle_date=settle_date,
             qty=_dec(elem.get("quantity")),
@@ -295,6 +306,39 @@ def _require_asset_class(elem, context: str) -> str:
     if not asset_class:
         raise ValueError(f"{context} missing required assetCategory attribute")
     return asset_class
+
+
+def _require_conid(elem, context: str) -> str:
+    """Extract conid, failing loud if absent OR empty (W2, T1-D8).
+
+    conid is the securities-master identity for creator tags (trades, closed
+    lots, open positions, accruals). CR-1 verified 100% presence on these tags
+    against the 3 real fixtures, so a missing/empty conid is drift, not a valid
+    case — fail loud (mirror of _require_asset_class). Resolver tags (cash,
+    transfers) use ``elem.get("conid") or None`` instead and never reach here.
+    """
+    conid = elem.get("conid")
+    if not conid:
+        raise ValueError(f"{context} missing required conid attribute")
+    return conid
+
+
+def _instrument_isin(elem) -> str | None:
+    return _attr(elem, "isin")
+
+
+def _instrument_description(elem) -> str | None:
+    return _attr(elem, "description")
+
+
+def _instrument_currency(elem) -> str | None:
+    return _attr(elem, "currency")
+
+
+def _instrument_multiplier(elem) -> Decimal | None:
+    """Multiplier (futuros). XML always carries it as a string; '' -> None."""
+    raw = elem.get("multiplier")
+    return _dec(raw) if raw else None
 
 
 def _parse_lot_as_closed_lot(elem) -> ParsedClosedLot | None:
@@ -332,6 +376,11 @@ def _parse_lot_as_closed_lot(elem) -> ParsedClosedLot | None:
         ibkr_account_id=elem.get("accountId") or "",
         symbol=elem.get("symbol") or "",
         asset_class=_require_asset_class(elem, "<Lot CLOSED_LOT>"),
+        conid=_require_conid(elem, "<Lot CLOSED_LOT>"),
+        isin=_instrument_isin(elem),
+        description=_instrument_description(elem),
+        currency=_instrument_currency(elem),
+        multiplier=_instrument_multiplier(elem),
         open_date=open_date,
         close_date=close_date,
         close_datetime=close_datetime,
@@ -369,6 +418,11 @@ def _parse_closed_lots_wrapper(elem) -> list[ParsedClosedLot]:
                 ibkr_account_id=lot.get("accountId") or "",
                 symbol=lot.get("symbol") or "",
                 asset_class=_require_asset_class(lot, "<ClosedLot>"),
+                conid=_require_conid(lot, "<ClosedLot>"),
+                isin=_instrument_isin(lot),
+                description=_instrument_description(lot),
+                currency=_instrument_currency(lot),
+                multiplier=_instrument_multiplier(lot),
                 open_date=open_date,
                 close_date=close_date,
                 close_datetime=close_datetime,
@@ -401,6 +455,11 @@ def _parse_open_positions(elem) -> list[ParsedOpenPositionLot]:
                 ibkr_account_id=pos.get("accountId") or "",
                 symbol=pos.get("symbol") or "",
                 asset_class=_require_asset_class(pos, "<OpenPosition>"),
+                conid=_require_conid(pos, "<OpenPosition>"),
+                isin=_instrument_isin(pos),
+                description=_instrument_description(pos),
+                currency=_instrument_currency(pos),
+                multiplier=_instrument_multiplier(pos),
                 open_date=open_date,
                 qty=_dec(pos.get("position")),
                 cost_basis_usd=_dec(pos.get("costBasisMoney") or pos.get("costBasisPrice")),
@@ -436,6 +495,7 @@ def _parse_cash_transactions(elem) -> list[ParsedCashTransaction]:
                 description=tx.get("description") or None,
                 date=tx_date,
                 symbol=tx.get("symbol") or None,
+                conid=_attr(tx, "conid"),  # resolver-only: lookup if present, never create
             )
         )
     return out
@@ -522,7 +582,7 @@ def _parse_change_in_dividend_accruals(
             ParsedDividendAccrual(
                 ibkr_account_id=acct,
                 symbol=row.get("symbol") or "",
-                conid=_attr(row, "conid"),
+                conid=_require_conid(row, "<ChangeInDividendAccrual>"),
                 isin=_attr(row, "isin"),
                 issuer_country=_attr(row, "issuerCountryCode"),
                 currency=row.get("currency") or "USD",
@@ -568,7 +628,7 @@ def _parse_open_dividend_accruals(
             ParsedOpenDividendAccrual(
                 ibkr_account_id=acct,
                 symbol=row.get("symbol") or "",
-                conid=_attr(row, "conid"),
+                conid=_require_conid(row, "<OpenDividendAccrual>"),
                 isin=_attr(row, "isin"),
                 issuer_country=_attr(row, "issuerCountryCode"),
                 currency=row.get("currency") or "USD",
@@ -623,6 +683,7 @@ def _parse_transfers(elem) -> list[ParsedTransfer]:
             symbol=tr.get("symbol") or "",
             qty=_dec(tr.get("quantity")),
             transfer_type=tr.get("type") or tr.get("transferType") or "unknown",
+            conid=_attr(tr, "conid"),  # resolver-only: lookup if present, never create
         )
         out.append(transfer)
     return out

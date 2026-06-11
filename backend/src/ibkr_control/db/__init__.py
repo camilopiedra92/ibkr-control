@@ -9,6 +9,10 @@ from ibkr_control.db.models.connections import (  # noqa: F401
     ConnectionIbkrFlex,
 )
 from ibkr_control.db.models.trm import TrmDay, TrmImport  # noqa: F401
+from ibkr_control.db.models.instruments import (  # noqa: F401
+    Instrument,
+    InstrumentIdentifier,
+)
 from ibkr_control.db.models.counterparties import Counterparty  # noqa: F401
 from ibkr_control.db.models.flex_raw import (  # noqa: F401
     FlexImport,
@@ -38,6 +42,8 @@ __all__ = [
     "ConnectionIbkrFlex",
     "TrmDay",
     "TrmImport",
+    "Instrument",
+    "InstrumentIdentifier",
     "Counterparty",
     "FlexImport",
     "FlexImportAccount",

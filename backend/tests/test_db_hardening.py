@@ -22,8 +22,18 @@ from sqlalchemy.exc import IntegrityError
 
 from ibkr_control.db.models.accounts import Account
 from ibkr_control.db.models.flex_raw import OpenPositionLot, Trade
+from ibkr_control.db.models.instruments import Instrument
 from ibkr_control.db.models.organizations import Organization
 from ibkr_control.ingest.flex._upsert_helpers import _upsert_snapshot
+
+
+async def _make_instrument(db_session) -> int:
+    """Seed a control-plane Instrument (W2 NOT NULL FK on facts). Returns its id."""
+    inst = Instrument(symbol="VOO", asset_class="STK")
+    db_session.add(inst)
+    await db_session.flush()
+    return inst.id
+
 
 # Mismas listas que usa el persister para OpenPositionLot (persister.py
 # ~línea 466): si el persister algún día agrega created_at a update_cols,
@@ -39,11 +49,12 @@ _OPL_UPDATE = [
 ]
 
 
-def _trade_row(org_id: int, account_id: int, txn_id: str) -> Trade:
+def _trade_row(org_id: int, account_id: int, txn_id: str, instrument_id: int) -> Trade:
     return Trade(
         organization_id=org_id,
         transaction_id=txn_id,
         account_id=account_id,
+        instrument_id=instrument_id,
         symbol="VOO",
         asset_class="STK",
         trade_date=date(2026, 1, 5),
@@ -57,7 +68,8 @@ def _trade_row(org_id: int, account_id: int, txn_id: str) -> Trade:
 
 async def test_delete_account_with_trades_is_restricted(db_session, sample_org, sample_account):
     """D4: la FK trades.account_id -> accounts es RESTRICT."""
-    db_session.add(_trade_row(sample_org.id, sample_account.id, "T-RESTRICT-1"))
+    iid = await _make_instrument(db_session)
+    db_session.add(_trade_row(sample_org.id, sample_account.id, "T-RESTRICT-1", iid))
     await db_session.flush()
 
     with pytest.raises(IntegrityError):
@@ -67,7 +79,8 @@ async def test_delete_account_with_trades_is_restricted(db_session, sample_org, 
 
 async def test_delete_organization_cascades_full_tenant(db_session, sample_org, sample_account):
     """D4-bis: tenant wipe via DELETE org funciona pese al RESTRICT (multi-path)."""
-    db_session.add(_trade_row(sample_org.id, sample_account.id, "T-CASCADE-1"))
+    iid = await _make_instrument(db_session)
+    db_session.add(_trade_row(sample_org.id, sample_account.id, "T-CASCADE-1", iid))
     await db_session.flush()
 
     await db_session.execute(delete(Organization).where(Organization.id == sample_org.id))
@@ -90,9 +103,11 @@ async def test_created_at_populated_and_first_seen_on_reupsert(
     db_session, sample_org, sample_account
 ):
     """D5: created_at se puebla en INSERT y sobrevive re-upserts snapshot."""
+    iid = await _make_instrument(db_session)
     base_row = {
         "organization_id": sample_org.id,
         "account_id": sample_account.id,
+        "instrument_id": iid,
         "symbol": "VOO",
         "asset_class": "STK",
         "open_date": date(2026, 1, 5),

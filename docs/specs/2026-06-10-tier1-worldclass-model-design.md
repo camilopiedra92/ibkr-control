@@ -139,6 +139,13 @@ instrument_identifiers (control plane, global, SIN RLS)
 
 Wipe & reload (T1-D14): la migración exige tablas de hechos vacías para el NOT NULL (documentado en docstring de la migración, patrón Phase 2.9). El usuario recarga los XMLs vía wizard/manual upload.
 
+### Notas de implementación (post-review W2, 2026-06-10 — decisiones conscientes)
+
+- **Last-seen-wins intra-batch**: cuando dos creators del mismo conid traen atributos distintos en un batch, gana el último SOLO como resolución silenciosa para `currency`/`multiplier`/`name` (IBKR es internamente consistente por conid dentro de un statement; `symbol` last-seen es by-design para ticker changes; `asset_class` queda congelado first-seen — estable por conid).
+- **`trades.raw_attrs` slimming**: conid/isin/description/currency/multiplier promovidos a columnas tipadas salen del JSONB — sigue la convención existente (`_TRADE_TYPED_ATTRS` excluye lo tipado del catch-all); el dato vive ahora en `instruments`/columnas, no se pierde.
+- **Hook para W3**: el loop DO UPDATE de `_ensure_instruments` computa un boolean `changed` y descarta los valores viejos — W3 (restatement log) debe refactorizarlo para capturar old→new ANTES de mutar, no asumir que el diff existe.
+- **Orphan instruments por carrera cross-org**: el perdedor del ON CONFLICT puede dejar un `Instrument` sin identifier (inofensivo — los hechos apuntan al ganador vía re-SELECT). Aceptado; un janitor futuro puede cosecharlos.
+
 ## PR-3 — W3: Restatement log
 
 Branch: `saas/w3-restatement-log` (desde `main` post-merge PR-2).

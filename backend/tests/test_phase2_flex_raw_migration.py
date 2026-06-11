@@ -8,6 +8,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
+async def _make_instrument(db_session: AsyncSession) -> int:
+    """Seed a control-plane Instrument (W2 NOT NULL FK on facts). Returns its id."""
+    from ibkr_control.db.models.instruments import Instrument
+
+    inst = Instrument(symbol="AAPL", asset_class="STK")
+    db_session.add(inst)
+    await db_session.flush()
+    return inst.id
+
+
 @pytest.mark.asyncio
 async def test_flex_imports_tables_exist(db_session: AsyncSession):
     expected = {
@@ -40,11 +50,13 @@ async def test_trades_transaction_id_unique(db_session: AsyncSession, sample_org
     )
     db_session.add(fi)
     await db_session.commit()
+    iid = await _make_instrument(db_session)
     t1 = Trade(
         organization_id=sample_org.id,
         flex_import_id=fi.id,
         transaction_id="TXN-001",
         account_id=sample_account.id,
+        instrument_id=iid,
         symbol="AAPL",
         asset_class="STK",
         trade_date=date(2025, 1, 1),
@@ -62,6 +74,7 @@ async def test_trades_transaction_id_unique(db_session: AsyncSession, sample_org
             flex_import_id=fi.id,
             transaction_id="TXN-001",  # dup
             account_id=sample_account.id,
+            instrument_id=iid,
             symbol="AAPL",
             asset_class="STK",
             trade_date=date(2025, 1, 2),
@@ -94,12 +107,14 @@ async def test_trades_buy_sell_check(db_session: AsyncSession, sample_org, sampl
     )
     db_session.add(fi)
     await db_session.commit()
+    iid = await _make_instrument(db_session)
     db_session.add(
         Trade(
             organization_id=sample_org.id,
             flex_import_id=fi.id,
             transaction_id="TXN-BAD",
             account_id=sample_account.id,
+            instrument_id=iid,
             symbol="AAPL",
             asset_class="STK",
             trade_date=date(2025, 1, 1),
@@ -142,12 +157,14 @@ async def test_delete_flex_import_sets_children_null(
     await db_session.commit()
     fi_id = fi.id
 
+    iid = await _make_instrument(db_session)
     db_session.add(
         Trade(
             organization_id=sample_org.id,
             flex_import_id=fi_id,
             transaction_id="TXN-SET-NULL",
             account_id=sample_account.id,
+            instrument_id=iid,
             symbol="AAPL",
             asset_class="STK",
             trade_date=date(2025, 1, 1),

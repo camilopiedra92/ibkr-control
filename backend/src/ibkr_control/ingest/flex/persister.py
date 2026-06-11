@@ -24,14 +24,16 @@ Esto preserva idempotencia: mismo XML → mismos placeholders → ON CONFLICT
 DO NOTHING absorbe colisiones cross-XML sin error.
 """
 
+import logging
 from datetime import date
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ibkr_control.db.models.accounts import Account
 from ibkr_control.db.models.counterparties import Counterparty
+from ibkr_control.db.models.instruments import Instrument, InstrumentIdentifier
 from ibkr_control.db.models.flex_raw import (
     CashTransaction,
     ChangeInDividendAccrual,
@@ -50,6 +52,18 @@ from ibkr_control.ingest.flex._upsert_helpers import (
     _upsert_snapshot,
 )
 from ibkr_control.ingest.hash_dedup import xml_hash
+
+logger = logging.getLogger(__name__)
+
+# Chunk size for the conid/instrument_id SELECT ... IN (...) lookups, mirroring
+# _upsert_helpers._BATCH_SIZE: keeps the bind-param count well under asyncpg's
+# 32767 ceiling (a single-column IN is one param per value).
+_INSTRUMENT_BATCH = 5000
+
+
+def _chunked(items: list, size: int):
+    for i in range(0, len(items), size):
+        yield items[i : i + size]
 
 
 def _is_shadow_account(ibkr_account_id: str) -> bool:
@@ -133,6 +147,12 @@ async def persist(
         session, list(all_account_ids), organization_id=organization_id
     )
 
+    # W2: securities master. Creators (trades/lots/accruals) crean el instrument;
+    # cash/transfers son resolver-only (lookup por conid, nunca crean). Devuelve
+    # conid -> instrument_id para threadear en los row builders. Control plane
+    # (sin org scoping): AAPL es AAPL para todos los tenants (T1-D7).
+    instruments_map = await _ensure_instruments(session, parsed)
+
     year_status = "sealed" if parsed.period_to >= date(parsed.anyo, 12, 31) else "rolling"
 
     # Counters: n_observed_* del XML (sin filtrar por shadow account porque el
@@ -191,7 +211,9 @@ async def persist(
         )
 
     # UPSERTs en orden de dependencia FK
-    n_new = await _upsert_all_children(session, fi, parsed, accounts_map, organization_id)
+    n_new = await _upsert_all_children(
+        session, fi, parsed, accounts_map, instruments_map, organization_id
+    )
 
     # Update n_new_* en flex_imports
     fi.n_new_trades = n_new["trades"]
@@ -245,9 +267,27 @@ async def _upsert_all_children(
     fi: FlexImport,
     parsed: ParsedXML,
     accounts_map: dict[str, int],
+    instruments_map: dict[str, int],
     organization_id: int,
 ) -> dict[str, int]:
     """Hace UPSERT de todos los children. Devuelve n_new por entity type."""
+    # Resolver-only lookup para cash/transfers (W2): conid presente pero no en el
+    # map => NULL + un warning por conid (NUNCA crea instrument desde un resolver).
+    _warned_missing_conids: set[str] = set()
+
+    def _resolve_instrument(conid: str | None) -> int | None:
+        if not conid:
+            return None
+        iid = instruments_map.get(conid)
+        if iid is None and conid not in _warned_missing_conids:
+            _warned_missing_conids.add(conid)
+            logger.warning(
+                "resolver conid %s has no instrument in this batch; "
+                "instrument_id left NULL (resolver never creates instruments)",
+                conid,
+            )
+        return iid
+
     # === Trades (immutable) ===
     trade_rows = [
         {
@@ -255,6 +295,7 @@ async def _upsert_all_children(
             "organization_id": organization_id,
             "transaction_id": t.transaction_id,
             "account_id": accounts_map[t.ibkr_account_id],
+            "instrument_id": instruments_map[t.conid],
             "symbol": t.symbol,
             "asset_class": t.asset_class,
             "trade_date": t.trade_date,
@@ -295,6 +336,7 @@ async def _upsert_all_children(
             "organization_id": organization_id,
             "transaction_id": (cl.transaction_id or f"NO-TX-{cl.symbol}-{cl.close_date}-{i}"),
             "account_id": accounts_map[cl.ibkr_account_id],
+            "instrument_id": instruments_map[cl.conid],
             "symbol": cl.symbol,
             "asset_class": cl.asset_class,
             "open_date": cl.open_date,
@@ -330,6 +372,7 @@ async def _upsert_all_children(
             "organization_id": organization_id,
             "transaction_id": ct.transaction_id,
             "account_id": accounts_map[ct.ibkr_account_id],
+            "instrument_id": _resolve_instrument(ct.conid),
             "type": ct.type,
             "currency": ct.currency,
             "amount_usd": ct.amount_usd,
@@ -385,6 +428,7 @@ async def _upsert_all_children(
                 "flex_import_id": fi.id,
                 "organization_id": organization_id,
                 "transaction_id": tr.transaction_id,
+                "instrument_id": _resolve_instrument(tr.conid),
                 "transfer_date": tr.transfer_date,
                 "direction": tr.direction,
                 "src_account_id": src_acct,
@@ -412,6 +456,7 @@ async def _upsert_all_children(
             "flex_import_id": fi.id,
             "organization_id": organization_id,
             "account_id": accounts_map[op_lot.ibkr_account_id],
+            "instrument_id": instruments_map[op_lot.conid],
             "symbol": op_lot.symbol,
             "asset_class": op_lot.asset_class,
             "open_date": op_lot.open_date,
@@ -452,6 +497,7 @@ async def _upsert_all_children(
             "flex_import_id": fi.id,
             "organization_id": organization_id,
             "account_id": accounts_map[da.ibkr_account_id],
+            "instrument_id": instruments_map[da.conid],
             "symbol": da.symbol,
             "conid": da.conid,
             "isin": da.isin,
@@ -519,6 +565,7 @@ async def _upsert_all_children(
             "flex_import_id": fi.id,
             "organization_id": organization_id,
             "account_id": accounts_map[oda.ibkr_account_id],
+            "instrument_id": instruments_map[oda.conid],
             "symbol": oda.symbol,
             "conid": oda.conid,
             "isin": oda.isin,
@@ -622,6 +669,217 @@ async def _ensure_counterparties(
             existing[c.external_id] = c.id
 
     return existing
+
+
+def _collect_instrument_specs(parsed: ParsedXML) -> dict[str, dict]:
+    """Recolecta specs de instrumento de los CREATORS (W2, T1-D7).
+
+    Creators = trades, closed_lots, open_position_lots, accruals x2 (los 5 tags
+    que CR-1 confirmó con conid 100% presente). cash/transfers son resolvers — no
+    aportan specs. Last-seen gana dentro del batch (un trade tardío con el ticker
+    renombrado pisa al temprano). Devuelve conid -> {symbol, asset_class, name,
+    currency, multiplier}.
+
+    Los accruals no traen description/currency/multiplier; usan asset_category
+    (nullable en DB por fidelidad de fuente, aunque CR-1 lo verificó 100% presente
+    en los accruals reales). Aportan symbol + isin; el resto queda None y NO pisa
+    lo que un trade/lot ya escribió (merge no destructivo abajo). Si un accrual es
+    el ÚNICO creator de un conid y carece de assetCategory, _ensure_instruments
+    falla loud (asset_class es NOT NULL en instruments) en vez de dejar que el
+    INSERT reviente con un IntegrityError opaco.
+    """
+    specs: dict[str, dict] = {}
+
+    def _merge(
+        conid: str,
+        *,
+        symbol: str,
+        asset_class: str | None,
+        name: str | None = None,
+        currency: str | None = None,
+        multiplier=None,
+    ) -> None:
+        prev = specs.get(conid, {})
+        specs[conid] = {
+            "symbol": symbol or prev.get("symbol"),
+            # asset_class del instrument: el primer creator con un valor no-vacío.
+            # NOT NULL en el modelo -> garantizado por trades/lots (siempre lo traen).
+            "asset_class": asset_class or prev.get("asset_class"),
+            "name": name if name is not None else prev.get("name"),
+            "currency": currency if currency is not None else prev.get("currency"),
+            "multiplier": multiplier if multiplier is not None else prev.get("multiplier"),
+            "isin": prev.get("isin"),
+        }
+
+    def _set_isin(conid: str, isin: str | None) -> None:
+        if isin and specs.get(conid, {}).get("isin") is None:
+            specs.setdefault(conid, {})["isin"] = isin
+
+    for t in parsed.trades:
+        _merge(
+            t.conid,
+            symbol=t.symbol,
+            asset_class=t.asset_class,
+            name=t.description,
+            currency=t.currency,
+            multiplier=t.multiplier,
+        )
+        _set_isin(t.conid, t.isin)
+    for cl in parsed.closed_lots:
+        _merge(
+            cl.conid,
+            symbol=cl.symbol,
+            asset_class=cl.asset_class,
+            name=cl.description,
+            currency=cl.currency,
+            multiplier=cl.multiplier,
+        )
+        _set_isin(cl.conid, cl.isin)
+    for op_lot in parsed.open_position_lots:
+        _merge(
+            op_lot.conid,
+            symbol=op_lot.symbol,
+            asset_class=op_lot.asset_class,
+            name=op_lot.description,
+            currency=op_lot.currency,
+            multiplier=op_lot.multiplier,
+        )
+        _set_isin(op_lot.conid, op_lot.isin)
+    # conid es REQUIRED en los accruals (parser _require_conid, spec review W2):
+    # sin guard de None — un accrual sin conid ya falló loud en parse-time.
+    for da in parsed.change_in_dividend_accruals:
+        _merge(da.conid, symbol=da.symbol, asset_class=da.asset_category, currency=da.currency)
+        _set_isin(da.conid, da.isin)
+    for oda in parsed.open_dividend_accruals:
+        _merge(oda.conid, symbol=oda.symbol, asset_class=oda.asset_category, currency=oda.currency)
+        _set_isin(oda.conid, oda.isin)
+
+    return specs
+
+
+async def _ensure_instruments(
+    session: AsyncSession,
+    parsed: ParsedXML,
+) -> dict[str, int]:
+    """Securities master: garantiza instruments + identifiers para cada conid de
+    los creators. Devuelve conid -> instrument_id (W2, T1-D7/D8/D9).
+
+    Control plane (sin RLS, sin org scoping): AAPL es AAPL para todos los tenants.
+    - Resuelve por identifier ('conid', value).
+    - Para conids faltantes: INSERT instrument + identifier rows (conid siempre;
+      isin si está). ON CONFLICT (id_type, id_value) DO NOTHING + re-SELECT
+      resuelve la carrera cross-org (mismo patrón que _ensure_accounts
+      post-multihome): otro org pudo insertar el mismo conid concurrentemente.
+    - Para existentes: DO UPDATE last-seen de symbol/name/currency/multiplier +
+      updated_at SOLO si algo material cambió (comparación en Python) — evita
+      churn de updated_at en cada ingest y deja el hook limpio para W3.
+    """
+    specs = _collect_instrument_specs(parsed)
+    if not specs:
+        return {}
+
+    conids = list(specs.keys())
+
+    # Resolver conids -> instrument_id por identifiers existentes (chunked).
+    conid_to_iid: dict[str, int] = {}
+    for batch in _chunked(conids, _INSTRUMENT_BATCH):
+        rows = await session.execute(
+            select(InstrumentIdentifier.id_value, InstrumentIdentifier.instrument_id).where(
+                InstrumentIdentifier.id_type == "conid",
+                InstrumentIdentifier.id_value.in_(batch),
+            )
+        )
+        for id_value, iid in rows.all():
+            conid_to_iid[id_value] = iid
+
+    missing = [c for c in conids if c not in conid_to_iid]
+    for conid in missing:
+        spec = specs[conid]
+        # Fail-loud (spec review W2): si el único creator de este conid fue un
+        # accrual sin assetCategory, asset_class queda None y el INSERT rebotaría
+        # con un IntegrityError opaco (NOT NULL). CR-1 verificó assetCategory 100%
+        # presente en los accruals reales — este guard atrapa drift futuro con un
+        # error accionable, igual que _require_asset_class/_require_conid.
+        if not spec["asset_class"]:
+            raise ValueError(
+                f"instrument spec for conid {conid} (symbol {spec['symbol']!r}) is "
+                "first created by an accrual that lacks assetCategory; cannot create "
+                "instrument (asset_class is NOT NULL). Check the source XML."
+            )
+        instrument = Instrument(
+            symbol=spec["symbol"],
+            name=spec.get("name"),
+            asset_class=spec["asset_class"],
+            currency=spec.get("currency"),
+            multiplier=spec.get("multiplier"),
+        )
+        session.add(instrument)
+        await session.flush()  # para tener instrument.id
+
+        # conid identifier siempre; isin si el XML lo trae. ON CONFLICT DO NOTHING
+        # absorbe la carrera cross-org (otro org ya creó el mismo conid/isin).
+        identifier_rows = [{"instrument_id": instrument.id, "id_type": "conid", "id_value": conid}]
+        if spec.get("isin"):
+            identifier_rows.append(
+                {"instrument_id": instrument.id, "id_type": "isin", "id_value": spec["isin"]}
+            )
+        await session.execute(
+            pg_insert(InstrumentIdentifier.__table__)
+            .values(identifier_rows)
+            .on_conflict_do_nothing(index_elements=["id_type", "id_value"])
+        )
+
+    # Re-SELECT para resolver TODOS los conids (incluidos los que perdieron la
+    # carrera cross-org: su Instrument quedó huérfano sin identifier, pero el
+    # conid resuelve al instrument ganador). Idempotente y correcto bajo cualquier rol.
+    if missing:
+        conid_to_iid = {}
+        for batch in _chunked(conids, _INSTRUMENT_BATCH):
+            rows = await session.execute(
+                select(InstrumentIdentifier.id_value, InstrumentIdentifier.instrument_id).where(
+                    InstrumentIdentifier.id_type == "conid",
+                    InstrumentIdentifier.id_value.in_(batch),
+                )
+            )
+            for id_value, iid in rows.all():
+                conid_to_iid[id_value] = iid
+
+    # DO UPDATE last-seen de atributos para los instruments existentes, SOLO si
+    # algo material cambió (anti-churn de updated_at; hook limpio para W3).
+    iids = list(conid_to_iid.values())
+    existing_instruments: dict[int, Instrument] = {}
+    for batch in _chunked(iids, _INSTRUMENT_BATCH):
+        result = await session.scalars(select(Instrument).where(Instrument.id.in_(batch)))
+        for inst in result.all():
+            existing_instruments[inst.id] = inst
+
+    for conid, iid in conid_to_iid.items():
+        inst = existing_instruments.get(iid)
+        if inst is None:
+            continue
+        spec = specs[conid]
+        new_symbol = spec["symbol"]
+        new_name = spec.get("name")
+        new_currency = spec.get("currency")
+        new_multiplier = spec.get("multiplier")
+        changed = (
+            (new_symbol and new_symbol != inst.symbol)
+            or (new_name is not None and new_name != inst.name)
+            or (new_currency is not None and new_currency != inst.currency)
+            or (new_multiplier is not None and new_multiplier != inst.multiplier)
+        )
+        if changed:
+            if new_symbol:
+                inst.symbol = new_symbol
+            if new_name is not None:
+                inst.name = new_name
+            if new_currency is not None:
+                inst.currency = new_currency
+            if new_multiplier is not None:
+                inst.multiplier = new_multiplier
+            inst.updated_at = func.now()
+
+    return conid_to_iid
 
 
 async def _ensure_accounts(

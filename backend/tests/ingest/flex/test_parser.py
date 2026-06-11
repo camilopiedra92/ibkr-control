@@ -305,3 +305,132 @@ def test_parse_trade_fails_loud_when_asset_category_missing():
 </FlexQueryResponse>"""
     with pytest.raises(ValueError, match="assetCategory"):
         parse(xml)
+
+
+# === W2: securities master — conid extraction (T1-D7/D8) ===
+
+
+def test_creators_carry_conid_from_2025_fixture():
+    """CR-1: trades / closed_lots / open_position_lots carry a non-empty conid
+    (creators of the securities master). Verified 100% present on real data."""
+    xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
+    parsed = parse(xml)
+    assert parsed.trades, "fixture must have trades"
+    assert parsed.closed_lots, "fixture must have closed lots"
+    assert parsed.open_position_lots, "fixture must have open position lots"
+    for t in parsed.trades:
+        assert t.conid, f"trade {t.transaction_id} missing conid"
+    for cl in parsed.closed_lots:
+        assert cl.conid, "closed lot missing conid"
+    for op_lot in parsed.open_position_lots:
+        assert op_lot.conid, "open position lot missing conid"
+
+
+def test_trade_carries_instrument_attributes():
+    """The creator aporta los atributos de instrumento (isin/description/currency).
+    AAL en el fixture 2025: STK con isin US02376R1023, currency USD, multiplier 1."""
+    xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
+    parsed = parse(xml)
+    aal = next(t for t in parsed.trades if t.symbol == "AAL")
+    assert aal.conid == "139673266"
+    assert aal.isin == "US02376R1023"
+    assert aal.description == "AMERICAN AIRLINES GROUP INC"
+    assert aal.currency == "USD"
+    assert aal.multiplier == Decimal("1")
+
+
+def test_accruals_keep_conid_no_regression():
+    """The 2025 fixture's DETAIL accruals carry conid (creators)."""
+    xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
+    parsed = parse(xml)
+    for da in parsed.change_in_dividend_accruals:
+        assert da.conid, "change_in accrual missing conid"
+    for oda in parsed.open_dividend_accruals:
+        assert oda.conid, "open accrual missing conid"
+
+
+def test_cash_transactions_conid_nullable_2024():
+    """CR-1: the 2024 Flex Query does not emit conid on cash transactions →
+    resolver leaves ParsedCashTransaction.conid None."""
+    xml = (FIXTURE_DIR / "ACTIVITY_2024_sanitized.xml").read_bytes()
+    parsed = parse(xml)
+    assert parsed.cash_transactions, "fixture must have cash transactions"
+    assert all(ct.conid is None for ct in parsed.cash_transactions)
+
+
+def test_transfer_conid_is_resolver_only():
+    """Transfer is resolver-only (T1-D8): the parser reads conid through verbatim
+    (it may be present, like the sanitized FOP fixture's 160756766, or absent).
+    Because the instrument_id FK is nullable and the persister NEVER creates from a
+    resolver, the FOP transfer's instrument_id stays NULL whenever no creator
+    brought that conid — which is the case here (160756766 appears ONLY on
+    <Transfer>). CR-1 noted FOP STK conids may be absent; the sanitized fixture
+    carries one, but the nullable decision holds regardless."""
+    xml = (FIXTURE_DIR / "ACTIVITY_2026_FOP_sanitized.xml").read_bytes()
+    parsed = parse(xml)
+    assert parsed.transfers, "fixture must have transfers"
+    fop = next(t for t in parsed.transfers if t.transfer_type == "FOP")
+    # conid is read through verbatim from the XML attribute (resolver lookup later).
+    assert fop.conid == "160756766"
+
+
+def test_trade_missing_conid_fails_loud():
+    """A creator <Trade> with an empty conid raises ValueError (fail-loud, mirror
+    of the assetCategory guard) — CR-1 verified conid is 100% present."""
+    xml = b"""<?xml version="1.0"?>
+<FlexQueryResponse>
+  <FlexStatements count="1">
+    <FlexStatement accountId="U99999001" fromDate="2026-01-01" toDate="2026-01-31"
+                   period="YearToDate" whenGenerated="2026-02-01;10:00:00">
+      <AccountInformation accountId="U99999001" currency="USD"/>
+      <Trades>
+        <Trade accountId="U99999001" symbol="AAPL" assetCategory="STK" conid=""
+               tradeDate="20260115" quantity="10" tradePrice="150" proceeds="-1500"
+               ibCommission="-1" buySell="BUY" transactionID="TX-1"/>
+      </Trades>
+    </FlexStatement>
+  </FlexStatements>
+</FlexQueryResponse>"""
+    with pytest.raises(ValueError, match="conid"):
+        parse(xml)
+
+
+def test_accrual_missing_conid_fails_loud():
+    """A creator <ChangeInDividendAccrual> with an empty conid raises ValueError
+    (spec review W2: accruals are creators too — same fail-loud as <Trade>)."""
+    xml = b"""<?xml version="1.0"?>
+<FlexQueryResponse>
+  <FlexStatements count="1">
+    <FlexStatement accountId="U99999001" fromDate="2026-01-01" toDate="2026-01-31"
+                   period="YearToDate" whenGenerated="2026-02-01;10:00:00">
+      <AccountInformation accountId="U99999001" currency="USD"/>
+      <ChangeInDividendAccruals>
+        <ChangeInDividendAccrual accountId="U99999001" symbol="AAPL" conid=""
+                                 reportDate="20260301" quantity="10" grossAmount="5"
+                                 tax="0.75" netAmount="4.25" code="Po"/>
+      </ChangeInDividendAccruals>
+    </FlexStatement>
+  </FlexStatements>
+</FlexQueryResponse>"""
+    with pytest.raises(ValueError, match="ChangeInDividendAccrual.*conid"):
+        parse(xml)
+
+
+def test_open_accrual_missing_conid_fails_loud():
+    """Mirror for <OpenDividendAccrual> (creator, conid required)."""
+    xml = b"""<?xml version="1.0"?>
+<FlexQueryResponse>
+  <FlexStatements count="1">
+    <FlexStatement accountId="U99999001" fromDate="2026-01-01" toDate="2026-01-31"
+                   period="YearToDate" whenGenerated="2026-02-01;10:00:00">
+      <AccountInformation accountId="U99999001" currency="USD"/>
+      <OpenDividendAccruals>
+        <OpenDividendAccrual accountId="U99999001" symbol="NKE"
+                             reportDate="20260301" quantity="10" grossAmount="5"
+                             tax="0.75" netAmount="4.25" code="Po"/>
+      </OpenDividendAccruals>
+    </FlexStatement>
+  </FlexStatements>
+</FlexQueryResponse>"""
+    with pytest.raises(ValueError, match="OpenDividendAccrual.*conid"):
+        parse(xml)

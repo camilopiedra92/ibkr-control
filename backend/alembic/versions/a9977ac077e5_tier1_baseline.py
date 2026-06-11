@@ -33,6 +33,19 @@ tablas ``connections`` (Tasks 4-6). El baseline ya no la crea: el delta fue una
 sustracción a mano (los bloques de create_table/index/drop eran autocontenidos)
 validada por el drift test (Base.metadata == schema migrado).
 
+**Amendment #4 (W2 — securities master, T1-D7/D8/D9):** se agregan las tablas de
+control plane ``instruments`` + ``instrument_identifiers`` (globales, SIN RLS —
+NO van en ``_ORG_SCOPED_TABLES``, como ``trm_days``/``institutions``) y la
+columna ``instrument_id`` FK ``RESTRICT`` en los 7 hechos: NOT NULL en
+trades/closed_lots/open_position_lots/accruals×2 (CR-1: conid 100% presente),
+nullable en cash_transactions/transfers (la Flex Query 2024 no trae conid en
+cash; los FOP STK tampoco). Se agrega el índice ``(account_id, instrument_id)``
+en los 5 creators y ``instrument_id`` simple en cash/transfers. La sección
+autogenerada se regeneró canónicamente (container, DB virgen) y se trasplantó
+entre los marcadores — los columnas/índices/FK se fold-earon dentro de cada
+``create_table`` (baseline limpio, no ``add_column``). Las 2 tablas globales
+reciben el blanket GRANT del baseline (sección hand-written 2) — sin policy RLS.
+
 El DDL de ``upgrade()`` hasta el marcador ``end Alembic commands`` es
 autogenerado canónicamente (container, DB virgen, ``alembic revision
 --autogenerate``). Las SECCIONES HAND-WRITTEN que autogenerate NO captura
@@ -136,6 +149,57 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name=op.f("pk_institutions")),
         sa.UniqueConstraint("code", name=op.f("uq_institutions_code")),
         comment="Control plane (global, sin RLS, como trm_days): catálogo de instituciones. Seeded por migración, no input de usuario.",
+    )
+    op.create_table(
+        "instruments",
+        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("symbol", sa.String(), nullable=False),
+        sa.Column("name", sa.String(), nullable=True),
+        sa.Column("asset_class", sa.String(), nullable=False),
+        sa.Column("currency", sa.String(), nullable=True),
+        sa.Column("multiplier", sa.Numeric(precision=20, scale=4), nullable=True),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("NOW()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("NOW()"),
+            nullable=False,
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_instruments")),
+        comment="Control plane (global, sin RLS): securities master. Identidad externa en instrument_identifiers; symbol/atributos last-seen del XML IBKR. Escrito solo por el persister (T1-D9).",
+    )
+    op.create_table(
+        "instrument_identifiers",
+        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("instrument_id", sa.BigInteger(), nullable=False),
+        sa.Column("id_type", sa.String(), nullable=False),
+        sa.Column("id_value", sa.String(), nullable=False),
+        sa.CheckConstraint(
+            "id_type IN ('conid', 'isin', 'cusip', 'figi')",
+            name=op.f("ck_instrument_identifiers_id_type"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["instrument_id"],
+            ["instruments.id"],
+            name=op.f("fk_instrument_identifiers_instrument_id_instruments"),
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_instrument_identifiers")),
+        sa.UniqueConstraint(
+            "id_type", "id_value", name="uq_instrument_identifiers_id_type_id_value"
+        ),
+        comment="Identidad externa del instrumento, una fila por (tipo, valor). Multi-provider day-1 (T1-D7): conid IBKR hoy; isin cuando el XML lo trae; cusip/figi reservados.",
+    )
+    op.create_index(
+        op.f("ix_instrument_identifiers_instrument_id"),
+        "instrument_identifiers",
+        ["instrument_id"],
+        unique=False,
     )
     op.create_table(
         "organizations",
@@ -674,6 +738,7 @@ def upgrade() -> None:
         sa.Column("flex_import_id", sa.BigInteger(), nullable=True),
         sa.Column("transaction_id", sa.String(), nullable=False),
         sa.Column("account_id", sa.BigInteger(), nullable=False),
+        sa.Column("instrument_id", sa.BigInteger(), nullable=True),
         sa.Column("type", sa.String(), nullable=False),
         sa.Column("currency", sa.String(), server_default=sa.text("'USD'"), nullable=False),
         sa.Column("amount_usd", sa.Numeric(precision=20, scale=4), nullable=False),
@@ -684,6 +749,12 @@ def upgrade() -> None:
             ["account_id"],
             ["accounts.id"],
             name=op.f("fk_cash_transactions_account_id_accounts"),
+            ondelete="RESTRICT",
+        ),
+        sa.ForeignKeyConstraint(
+            ["instrument_id"],
+            ["instruments.id"],
+            name=op.f("fk_cash_transactions_instrument_id_instruments"),
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
@@ -706,6 +777,12 @@ def upgrade() -> None:
     )
     op.create_index(op.f("ix_cash_transactions_date"), "cash_transactions", ["date"], unique=False)
     op.create_index(
+        op.f("ix_cash_transactions_instrument_id"),
+        "cash_transactions",
+        ["instrument_id"],
+        unique=False,
+    )
+    op.create_index(
         op.f("ix_cash_transactions_flex_import_id"),
         "cash_transactions",
         ["flex_import_id"],
@@ -717,6 +794,7 @@ def upgrade() -> None:
         sa.Column("organization_id", sa.BigInteger(), nullable=False),
         sa.Column("flex_import_id", sa.BigInteger(), nullable=True),
         sa.Column("account_id", sa.BigInteger(), nullable=False),
+        sa.Column("instrument_id", sa.BigInteger(), nullable=False),
         sa.Column("symbol", sa.String(), nullable=False),
         sa.Column("conid", sa.String(), nullable=True),
         sa.Column("isin", sa.String(), nullable=True),
@@ -756,6 +834,12 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
+            ["instrument_id"],
+            ["instruments.id"],
+            name=op.f("fk_change_in_dividend_accruals_instrument_id_instruments"),
+            ondelete="RESTRICT",
+        ),
+        sa.ForeignKeyConstraint(
             ["flex_import_id"],
             ["flex_imports.id"],
             name=op.f("fk_change_in_dividend_accruals_flex_import_id_flex_imports"),
@@ -785,6 +869,12 @@ def upgrade() -> None:
         op.f("ix_change_in_dividend_accruals_account_id_symbol"),
         "change_in_dividend_accruals",
         ["account_id", "symbol"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_change_in_dividend_accruals_account_id_instrument_id"),
+        "change_in_dividend_accruals",
+        ["account_id", "instrument_id"],
         unique=False,
     )
     op.create_index(
@@ -845,6 +935,7 @@ def upgrade() -> None:
         sa.Column("organization_id", sa.BigInteger(), nullable=False),
         sa.Column("flex_import_id", sa.BigInteger(), nullable=True),
         sa.Column("account_id", sa.BigInteger(), nullable=False),
+        sa.Column("instrument_id", sa.BigInteger(), nullable=False),
         sa.Column("symbol", sa.String(), nullable=False),
         sa.Column("conid", sa.String(), nullable=True),
         sa.Column("isin", sa.String(), nullable=True),
@@ -882,6 +973,12 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
+            ["instrument_id"],
+            ["instruments.id"],
+            name=op.f("fk_open_dividend_accruals_instrument_id_instruments"),
+            ondelete="RESTRICT",
+        ),
+        sa.ForeignKeyConstraint(
             ["flex_import_id"],
             ["flex_imports.id"],
             name=op.f("fk_open_dividend_accruals_flex_import_id_flex_imports"),
@@ -913,6 +1010,12 @@ def upgrade() -> None:
         unique=False,
     )
     op.create_index(
+        op.f("ix_open_dividend_accruals_account_id_instrument_id"),
+        "open_dividend_accruals",
+        ["account_id", "instrument_id"],
+        unique=False,
+    )
+    op.create_index(
         op.f("ix_open_dividend_accruals_flex_import_id"),
         "open_dividend_accruals",
         ["flex_import_id"],
@@ -936,6 +1039,7 @@ def upgrade() -> None:
         sa.Column("organization_id", sa.BigInteger(), nullable=False),
         sa.Column("flex_import_id", sa.BigInteger(), nullable=True),
         sa.Column("account_id", sa.BigInteger(), nullable=False),
+        sa.Column("instrument_id", sa.BigInteger(), nullable=False),
         sa.Column("symbol", sa.String(), nullable=False),
         sa.Column("asset_class", sa.String(), nullable=False),
         sa.Column("open_date", sa.Date(), nullable=False),
@@ -955,6 +1059,12 @@ def upgrade() -> None:
             ["account_id"],
             ["accounts.id"],
             name=op.f("fk_open_position_lots_account_id_accounts"),
+            ondelete="RESTRICT",
+        ),
+        sa.ForeignKeyConstraint(
+            ["instrument_id"],
+            ["instruments.id"],
+            name=op.f("fk_open_position_lots_instrument_id_instruments"),
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
@@ -987,6 +1097,12 @@ def upgrade() -> None:
         unique=False,
     )
     op.create_index(
+        op.f("ix_open_position_lots_account_id_instrument_id"),
+        "open_position_lots",
+        ["account_id", "instrument_id"],
+        unique=False,
+    )
+    op.create_index(
         op.f("ix_open_position_lots_flex_import_id"),
         "open_position_lots",
         ["flex_import_id"],
@@ -1005,6 +1121,7 @@ def upgrade() -> None:
         sa.Column("flex_import_id", sa.BigInteger(), nullable=True),
         sa.Column("transaction_id", sa.String(), nullable=False),
         sa.Column("account_id", sa.BigInteger(), nullable=False),
+        sa.Column("instrument_id", sa.BigInteger(), nullable=False),
         sa.Column("symbol", sa.String(), nullable=False),
         sa.Column("asset_class", sa.String(), nullable=False),
         sa.Column("trade_date", sa.Date(), nullable=False),
@@ -1032,6 +1149,12 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
+            ["instrument_id"],
+            ["instruments.id"],
+            name=op.f("fk_trades_instrument_id_instruments"),
+            ondelete="RESTRICT",
+        ),
+        sa.ForeignKeyConstraint(
             ["flex_import_id"],
             ["flex_imports.id"],
             name=op.f("fk_trades_flex_import_id_flex_imports"),
@@ -1052,6 +1175,12 @@ def upgrade() -> None:
     op.create_index(
         op.f("ix_trades_account_id_symbol"), "trades", ["account_id", "symbol"], unique=False
     )
+    op.create_index(
+        op.f("ix_trades_account_id_instrument_id"),
+        "trades",
+        ["account_id", "instrument_id"],
+        unique=False,
+    )
     op.create_index(op.f("ix_trades_flex_import_id"), "trades", ["flex_import_id"], unique=False)
     op.create_index(op.f("ix_trades_trade_date"), "trades", ["trade_date"], unique=False)
     op.create_table(
@@ -1066,6 +1195,7 @@ def upgrade() -> None:
         sa.Column("src_counterparty_id", sa.BigInteger(), nullable=True),
         sa.Column("dst_account_id", sa.BigInteger(), nullable=True),
         sa.Column("dst_counterparty_id", sa.BigInteger(), nullable=True),
+        sa.Column("instrument_id", sa.BigInteger(), nullable=True),
         sa.Column("symbol", sa.String(), nullable=False),
         sa.Column("qty", sa.Numeric(precision=20, scale=8), nullable=False),
         sa.Column("transfer_type", sa.String(), nullable=False),
@@ -1088,6 +1218,12 @@ def upgrade() -> None:
             ["dst_counterparty_id"],
             ["counterparties.id"],
             name=op.f("fk_transfers_dst_counterparty_id_counterparties"),
+            ondelete="RESTRICT",
+        ),
+        sa.ForeignKeyConstraint(
+            ["instrument_id"],
+            ["instruments.id"],
+            name=op.f("fk_transfers_instrument_id_instruments"),
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
@@ -1130,6 +1266,9 @@ def upgrade() -> None:
         op.f("ix_transfers_flex_import_id"), "transfers", ["flex_import_id"], unique=False
     )
     op.create_index(
+        op.f("ix_transfers_instrument_id"), "transfers", ["instrument_id"], unique=False
+    )
+    op.create_index(
         op.f("ix_transfers_src_account_id"), "transfers", ["src_account_id"], unique=False
     )
     op.create_index(
@@ -1142,6 +1281,7 @@ def upgrade() -> None:
         sa.Column("flex_import_id", sa.BigInteger(), nullable=True),
         sa.Column("transaction_id", sa.String(), nullable=False),
         sa.Column("account_id", sa.BigInteger(), nullable=False),
+        sa.Column("instrument_id", sa.BigInteger(), nullable=False),
         sa.Column("symbol", sa.String(), nullable=False),
         sa.Column("asset_class", sa.String(), nullable=False),
         sa.Column("open_date", sa.Date(), nullable=False),
@@ -1167,6 +1307,12 @@ def upgrade() -> None:
             ["account_id"],
             ["accounts.id"],
             name=op.f("fk_closed_lots_account_id_accounts"),
+            ondelete="RESTRICT",
+        ),
+        sa.ForeignKeyConstraint(
+            ["instrument_id"],
+            ["instruments.id"],
+            name=op.f("fk_closed_lots_instrument_id_instruments"),
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
@@ -1199,6 +1345,12 @@ def upgrade() -> None:
         op.f("ix_closed_lots_account_id_symbol"),
         "closed_lots",
         ["account_id", "symbol"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_closed_lots_account_id_instrument_id"),
+        "closed_lots",
+        ["account_id", "instrument_id"],
         unique=False,
     )
     op.create_index(
@@ -1408,6 +1560,11 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_connections_institution_id"), table_name="connections")
     op.drop_table("connections")
     op.drop_table("accounts")
+    op.drop_index(
+        op.f("ix_instrument_identifiers_instrument_id"), table_name="instrument_identifiers"
+    )
+    op.drop_table("instrument_identifiers")
+    op.drop_table("instruments")
     op.drop_index(op.f("ix_users_email"), table_name="users")
     op.drop_table("users")
     op.drop_table("trm_imports")
