@@ -261,7 +261,9 @@ async def test_run_happy_path_with_mocked_flex_client(
 
     SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
 
-    results = await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    results = (
+        await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    ).results
     assert set(results.keys()) == {conn_id}
     flex_import_id = results[conn_id]
     assert flex_import_id is not None
@@ -335,7 +337,9 @@ async def test_run_iterates_all_active_connections(
     monkeypatch.setattr(client_mod.FlexClient, "poll_statement", fake_poll_statement)
 
     SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
-    results = await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    results = (
+        await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    ).results
 
     assert set(results.keys()) == {conn_a, conn_b}
     assert all(v is not None for v in results.values())
@@ -401,7 +405,9 @@ async def test_run_skips_disabled_connections(
     monkeypatch.setattr(client_mod.FlexClient, "poll_statement", fake_poll_statement)
 
     SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
-    results = await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    results = (
+        await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    ).results
 
     assert set(results.keys()) == {conn_active}
 
@@ -451,11 +457,16 @@ async def test_run_auth_error_transitions_reauth_required(
     monkeypatch.setattr(client_mod.FlexClient, "poll_statement", fake_poll_statement)
 
     SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
-    results = await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    summary = await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    results = summary.results
 
     # B succeeded; A is absent from results (it failed before persist).
     assert conn_b in results and results[conn_b] is not None
     assert conn_a not in results
+    # A's failure is reported in the summary so _run_manual can surface 'partial'.
+    assert conn_a in summary.failures
+    assert "1018" in summary.failures[conn_a]
+    assert conn_b not in summary.failures
 
     async with SessionLocal() as s2:
         a = await s2.get(Connection, conn_a)
@@ -575,11 +586,15 @@ async def test_run_idempotent_across_different_xmls_with_overlapping_trades(
 
     SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
 
-    res_1 = await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    res_1 = (
+        await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    ).results
     fi_id_1 = res_1[conn_id]
     assert fi_id_1 is not None
 
-    res_2 = await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    res_2 = (
+        await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    ).results
     fi_id_2 = res_2[conn_id]
     assert fi_id_2 is not None
     assert fi_id_2 != fi_id_1, "Different XML bytes should create a new FlexImport"
@@ -648,10 +663,14 @@ async def test_run_returns_none_if_hash_already_known(
 
     SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
 
-    res_1 = await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    res_1 = (
+        await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    ).results
     assert res_1[conn_id] is not None
 
-    res_2 = await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    res_2 = (
+        await flex_job_mod.run(SessionLocal, organization_id=sample_org.id, trigger="cron")
+    ).results
     assert res_2[conn_id] is None
 
     async with SessionLocal() as s2:
@@ -717,7 +736,9 @@ async def test_run_logs_info_on_ok_hash_skip(
     monkeypatch.setattr(client_mod.FlexClient, "poll_statement", AsyncMock(return_value=xml))
 
     session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
-    result = await flex_job_mod.run(session_factory, organization_id=sample_org.id, trigger="cron")
+    result = (
+        await flex_job_mod.run(session_factory, organization_id=sample_org.id, trigger="cron")
+    ).results
 
     assert result[conn_id] is None
     assert "duplicate hash" in caplog.text and "skipped" in caplog.text
@@ -766,7 +787,9 @@ async def test_run_logs_warning_on_poison_hash_skip(
     monkeypatch.setattr(client_mod.FlexClient, "poll_statement", AsyncMock(return_value=xml))
 
     session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
-    result = await flex_job_mod.run(session_factory, organization_id=sample_org.id, trigger="cron")
+    result = (
+        await flex_job_mod.run(session_factory, organization_id=sample_org.id, trigger="cron")
+    ).results
 
     assert result[conn_id] is None
     assert "previously poisoned" in caplog.text

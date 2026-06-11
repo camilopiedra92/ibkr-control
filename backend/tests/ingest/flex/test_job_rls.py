@@ -118,7 +118,8 @@ async def test_run_succeeds_under_app_rls_and_isolates_org(rls_job_env, monkeypa
     monkeypatch.setattr(client_mod.FlexClient, "poll_statement", fake_poll_statement)
 
     # Run as app_rls for org A — must succeed (connection found, persisted).
-    results = await flex_job_mod.run(app_factory, organization_id=org_a, trigger="cron")
+    summary = await flex_job_mod.run(app_factory, organization_id=org_a, trigger="cron")
+    results = summary.results
     assert set(results.keys()) == {conn_a}
     flex_import_id = results[conn_a]
     assert flex_import_id is not None

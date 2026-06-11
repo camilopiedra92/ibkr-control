@@ -114,8 +114,30 @@ async def _run_manual(kind: str, org_id: int, job_id: int) -> None:
         if kind in ("flex", "both"):
             current_step = "flex_ytd"
             tracker.emit(job_id, {"step": current_step, "status": "running"})
-            await flex_job_mod.run(session_local, organization_id=org_id, trigger="manual")
-            tracker.emit(job_id, {"step": current_step, "status": "ok"})
+            summary = await flex_job_mod.run(
+                session_local, organization_id=org_id, trigger="manual"
+            )
+            # Partial failure: >=1 connection succeeded (run() did not raise) but
+            # some failed. Surface it as 'partial' so the UI red/amber-flags the
+            # row instead of falsely claiming "Completado correctamente". Total
+            # failure keeps the raise->failed path below (run() re-raised already).
+            n_ok = len(summary.results)
+            n_failed = len(summary.failures)
+            if n_failed:
+                tracker.emit(
+                    job_id,
+                    {
+                        "step": current_step,
+                        "status": "partial",
+                        "n_connections_ok": n_ok,
+                        "n_connections_failed": n_failed,
+                    },
+                )
+            else:
+                tracker.emit(
+                    job_id,
+                    {"step": current_step, "status": "ok", "n_connections_ok": n_ok},
+                )
 
         current_step = None
         tracker.emit(job_id, {"step": "done"})

@@ -15,6 +15,7 @@ Patron de transaccion en ingest_xml:
 
 import logging
 from datetime import date, datetime, timezone
+from typing import NamedTuple
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -34,6 +35,22 @@ from ibkr_control.ingest.lock import advisory_lock
 from ibkr_control.ingest.log import ingest_log_entry
 
 logger = logging.getLogger(__name__)
+
+
+class FlexRunSummary(NamedTuple):
+    """Resultado de run(): exitos + fallos de un ciclo de fetch per-org.
+
+    - results: {connection_id: flex_import_id | None} solo de las conexiones que
+      terminaron OK (None = hash dedup, sin cambios). Igual que el dict que run()
+      devolvia antes (W1 Task 4) — los callers que solo miran exitos leen .results.
+    - failures: {connection_id: reason} de las conexiones que fallaron (auth o
+      transitorio). Permite a _run_manual emitir un SSE 'partial' con el conteo
+      sin perder cuales fallaron. El contrato de raise NO cambia: run() solo
+      re-lanza si results quedo vacio Y failures no.
+    """
+
+    results: dict[int, int | None]
+    failures: dict[int, str]
 
 
 async def _insert_poison_row(
@@ -293,14 +310,17 @@ async def run(
     *,
     organization_id: int,
     trigger: str,  # 'cron' | 'manual' | 'wizard'
-) -> dict[int, int | None]:
+) -> FlexRunSummary:
     """Fetchea + ingiere TODAS las connections ibkr_flex activas del org.
 
-    Devuelve {connection_id: flex_import_id | None} (None = hash dedup, sin
-    cambios). Aislamiento per-connection: el fallo de una conexión transiciona
-    SU estado (connection_state) y registra SU ingest_log row, pero no bloquea
-    a las demás. Si results quedó vacío y hubo excepción, re-lanza la última
-    (contrato con _run_manual: el SSE debe mostrar el fallo).
+    Devuelve FlexRunSummary(results, failures): results trae solo las conexiones
+    que terminaron OK ({connection_id: flex_import_id | None}, None = hash dedup
+    sin cambios); failures trae {connection_id: reason} de las que fallaron.
+    Aislamiento per-connection: el fallo de una conexión transiciona SU estado
+    (connection_state) y registra SU ingest_log row, pero no bloquea a las demás.
+    Si results quedó vacío y hubo excepción, re-lanza la última (contrato con
+    _run_manual: el SSE debe mostrar el fallo total). Un fallo PARCIAL (algunas
+    OK, algunas en failures) NO re-lanza — _run_manual lo surfacea como 'partial'.
 
     Toma advisory_lock por (source='flex', scope_id=organization_id) UNA vez para
     todo el loop — bloquea concurrent runs del mismo org (flex es per-org). Si
@@ -312,6 +332,7 @@ async def run(
     re-aplicado — sin esto, todo write post-primer-commit default-deny.
     """
     results: dict[int, int | None] = {}
+    failures: dict[int, str] = {}
     last_exc: Exception | None = None
 
     async with session_factory() as session:
@@ -363,6 +384,7 @@ async def run(
                         conn, reason=str(exc), now=datetime.now(timezone.utc)
                     )
                     await session.commit()
+                    failures[conn.id] = str(exc)
                     last_exc = exc
                     continue
                 except Exception as exc:
@@ -373,6 +395,7 @@ async def run(
                         conn, reason=str(exc), now=datetime.now(timezone.utc)
                     )
                     await session.commit()
+                    failures[conn.id] = str(exc)
                     last_exc = exc
                     continue
                 connection_state.mark_sync_ok(conn, now=datetime.now(timezone.utc))
@@ -380,4 +403,4 @@ async def run(
 
     if not results and last_exc is not None:
         raise last_exc
-    return results
+    return FlexRunSummary(results=results, failures=failures)
