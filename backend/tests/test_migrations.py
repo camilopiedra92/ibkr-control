@@ -13,8 +13,8 @@ from ibkr_control.db.base import Base
 @pytest.fixture
 def fresh_postgres():
     # Container dedicado al test de migrations: garantizamos DB vacia.
-    # No reusar el session-scoped del conftest porque ese crea tablas via
-    # Base.metadata.create_all (otra ruta, no alembic).
+    # No reusar el session-scoped del conftest porque este test necesita una DB
+    # vacia y no-migrada para correr `alembic upgrade head` desde cero.
     with PostgresContainer("postgres:16-alpine", driver="psycopg2") as pg:
         yield pg
 

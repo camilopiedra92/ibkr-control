@@ -24,9 +24,9 @@ async def _seed_connection(
     from ibkr_control.db.models.institutions import Institution
     from ibkr_control.ingest.flex.crypto import encrypt_token
 
-    # The `institutions` catalog is seeded by the baseline migration. The
-    # create_all-backed db_session world does NOT run migrations, so ensure the
-    # 'ibkr' row exists here (idempotent) — harmless on migrated DBs.
+    # The `institutions` catalog is seeded by the baseline migration. Idempotent
+    # guard — on migrated clones the 'ibkr' row already exists; kept for safety /
+    # non-migrated paths.
     inst_id = await session.scalar(select(Institution.id).where(Institution.code == "ibkr"))
     if inst_id is None:
         inst = Institution(code="ibkr", name="Interactive Brokers")
