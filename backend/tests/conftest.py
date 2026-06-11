@@ -16,7 +16,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from testcontainers.postgres import PostgresContainer
 
 from ibkr_control.main import create_app
-from ibkr_control.db.base import Base
 from ibkr_control.db.rls import app_rls_password
 from ibkr_control.db.session import get_async_session
 
@@ -50,7 +49,7 @@ def postgres_container():
 
 
 @pytest.fixture
-async def app_with_db(test_db, monkeypatch):  # noqa: F811 — test_db es fixture importada, no redefinida
+async def app_with_db(test_db, monkeypatch):  # noqa: F811 — parámetro de fixture pytest inyecta test_db; sombrea el import a propósito
     """The endpoint app, wired to a MIGRATED clone DB and connecting as ``app_rls``.
 
     The app's ``get_async_session`` is overridden to yield sessions on an engine
@@ -85,60 +84,39 @@ async def client(app_with_db):
 
 
 @pytest.fixture
-async def db_session(postgres_container, monkeypatch):
-    """Sesion de DB directa para tests de schema/modelos (sin HTTP layer).
+async def db_session(test_db):  # noqa: F811 — parámetro de fixture pytest inyecta test_db; sombrea el import a propósito
+    """Sesion de DB directa (OWNER) sobre un clon migrado del template.
 
-    Crea las tablas via Base.metadata.create_all (misma ruta que app_with_db),
-    pero expone la sesion directamente para hacer DML/DDL checks.
-    Cada test obtiene una sesion limpia; las tablas se recrean por test.
+    Para tests de schema/modelos sin HTTP layer. El schema viene del template
+    migrado via ``alembic upgrade head`` (NO de ``Base.metadata.create_all``), asi
+    que estos tests corren contra el schema que se deploya: constraints,
+    server_defaults, las policies RLS con FORCE, el rol ``app_rls`` y la funcion
+    SECURITY DEFINER, y los seeds de control-plane (p.ej. ``institutions.ibkr``)
+    existen igual que en prod. Conecta como el OWNER del contenedor (superuser ->
+    bypassa RLS aun bajo FORCE), igual que antes; el flip a ``app_rls`` es PR-C.
+
+    Cada test recibe su propio clon (``test_db`` es function-scoped), asi que el
+    aislamiento ya no necesita ``create_all``/``drop_all``: el clon nace pristino
+    y se dropea en el teardown de ``test_db``.
     """
-    url = postgres_container.get_connection_url()
-    monkeypatch.setenv("DATABASE_URL", url)
-    monkeypatch.setenv("JWT_SECRET", "test-secret-32-chars-minimum-please-ok")
-
-    from ibkr_control.config import get_settings
-
-    get_settings.cache_clear()
-
-    import ibkr_control.db  # noqa: F401 — registra todos los modelos en Base.metadata
-
-    engine = create_async_engine(url)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        # create_all builds tables but NOT roles/functions (those live only in
-        # migrations). Apply the app_rls role grants (idempotent CREATE ROLE) +
-        # the SECURITY DEFINER enum function (H1) so cron tests exercising
-        # _run_flex_for_all_orgs against this create_all world can call
-        # system_credentialed_org_ids() (its GRANT targets app_rls). SQL is the
-        # SSOT in db/rls.py.
-        from sqlalchemy import text as _text
-
-        from ibkr_control.db.rls import app_role_grants_sql, system_enum_function_sql
-
-        for _stmt in [*app_role_grants_sql(), *system_enum_function_sql()]:
-            await conn.execute(_text(_stmt))
-
+    engine = create_async_engine(test_db)
     session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-
-    async with session_maker() as session:
-        yield session
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-    await engine.dispose()
+    try:
+        async with session_maker() as session:
+            yield session
+    finally:
+        await engine.dispose()
 
 
 @pytest.fixture
-async def db_engine(postgres_container):
-    """Engine sharing the testcontainer with db_session; used by tests that need to
-    open multiple concurrent sessions (e.g. advisory lock contention) on the
-    owner + create_all world.
+async def db_engine(test_db):  # noqa: F811 — parámetro de fixture pytest inyecta test_db; sombrea el import a propósito
+    """OWNER engine sobre el mismo clon migrado, para tests que abren multiples
+    sesiones concurrentes (p.ej. contencion de advisory locks).
 
-    Function-scoped (not session-scoped) so it does not outlive per-test DB state.
-    Uses the same postgres_container URL as db_session (asyncpg driver included).
-    """
-    url = postgres_container.get_connection_url()
-    engine = create_async_engine(url, echo=False)
+    Multi-conexion real: ``test_db`` es una base de datos independiente, asi que
+    dos engines/conexiones se comportan como en prod. Function-scoped: un clon por
+    test (compartido con ``db_session`` si el test pide ambos -> misma DB)."""
+    engine = create_async_engine(test_db, echo=False)
     try:
         yield engine
     finally:
@@ -146,7 +124,7 @@ async def db_engine(postgres_container):
 
 
 @pytest.fixture
-async def app_owner_engine(test_db):  # noqa: F811 — test_db es fixture importada, no redefinida
+async def app_owner_engine(test_db):  # noqa: F811 — parámetro de fixture pytest inyecta test_db; sombrea el import a propósito
     """OWNER engine on the SAME migrated DB the endpoint app (``app_with_db``) uses.
 
     Used by the endpoint seeding fixtures (``auth_headers_with_org`` &c.) to
@@ -154,9 +132,11 @@ async def app_owner_engine(test_db):  # noqa: F811 — test_db es fixture import
     serves requests from. Connects as the container OWNER (superuser → bypasses
     RLS; identity tables have no org-RLS anyway), so the seed is unconstrained.
 
-    Distinct from ``db_engine`` (which stays on ``postgres_container`` with the
-    owner/create_all ``db_session`` world). Endpoint seeding targets the migrated
-    DB; model-level tests stay on the create_all DB.
+    Both ``app_owner_engine`` and the model-world ``db_engine``/``db_session`` now
+    connect (as owner) to a ``test_db`` migrated clone — one source of schema. This
+    fixture exists for the ENDPOINT seeding path (``auth_headers_with_org`` &c.),
+    which seeds the same DB ``app_with_db`` serves; ``db_engine``/``db_session`` are
+    the direct-model path.
     """
     engine = create_async_engine(test_db, echo=False)
     try:
@@ -166,7 +146,7 @@ async def app_owner_engine(test_db):  # noqa: F811 — test_db es fixture import
 
 
 @pytest.fixture
-async def app_rls_db_session(test_db):  # noqa: F811 — test_db es fixture importada, no redefinida
+async def app_rls_db_session(test_db):  # noqa: F811 — parámetro de fixture pytest inyecta test_db; sombrea el import a propósito
     """A direct session on the migrated app DB, connecting as ``app_rls``.
 
     For assertions about the role the endpoint app runs under (e.g. it is NOT

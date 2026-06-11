@@ -12,15 +12,15 @@ import pytest
 import respx
 from httpx import HTTPStatusError, Response
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from ibkr_control.ingest.trm import job as trm_job
 
 
 @pytest.mark.asyncio
-async def test_run_with_no_new_rows_returns_ok_zero(db_session: AsyncSession, db_engine):
-    # db_session creates the schema via Base.metadata.create_all;
-    # db_engine provides additional sessions for the job (same container).
+async def test_run_with_no_new_rows_returns_ok_zero(db_engine):
+    # The migrated ``test_db`` clone (via db_engine) provides the schema; this
+    # engine yields the sessions the job runs against.
     SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
     with respx.mock(base_url="https://www.datos.gov.co") as router:
         router.get("/resource/ceyp-9c7c.json").mock(return_value=Response(200, json=[]))
@@ -39,8 +39,9 @@ async def test_run_with_no_new_rows_returns_ok_zero(db_session: AsyncSession, db
 
 
 @pytest.mark.asyncio
-async def test_run_inserts_new_days_and_records_import(db_session: AsyncSession, db_engine):
-    # db_session creates the schema; db_engine provides job sessions.
+async def test_run_inserts_new_days_and_records_import(db_engine):
+    # The migrated ``test_db`` clone (via db_engine) provides the schema; this
+    # engine yields the sessions the job runs against.
     SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
     payload = [
         {
@@ -84,8 +85,9 @@ async def test_run_inserts_new_days_and_records_import(db_session: AsyncSession,
 
 
 @pytest.mark.asyncio
-async def test_run_raises_on_http_error_and_writes_no_log(db_session: AsyncSession, db_engine):
-    # db_session creates the schema; db_engine provides job sessions.
+async def test_run_raises_on_http_error_and_writes_no_log(db_engine):
+    # The migrated ``test_db`` clone (via db_engine) provides the schema; this
+    # engine yields the sessions the job runs against.
     SessionLocal = async_sessionmaker(db_engine, expire_on_commit=False)
     with respx.mock(base_url="https://www.datos.gov.co") as router:
         router.get("/resource/ceyp-9c7c.json").mock(
@@ -104,7 +106,7 @@ async def test_run_raises_on_http_error_and_writes_no_log(db_session: AsyncSessi
 
 
 @pytest.mark.asyncio
-async def test_run_persist_failure_leaves_no_partial_data(db_session: AsyncSession, db_engine):
+async def test_run_persist_failure_leaves_no_partial_data(db_engine):
     """A failure during persist must roll back the whole tx — no partial trm_days,
     no trm_imports, no ingest_log. The plain transaction (no SAVEPOINT) relies on
     the session context manager rolling back when the exception propagates."""

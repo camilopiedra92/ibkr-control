@@ -37,8 +37,8 @@ def _maintenance_engine(postgres_container):
     """Engine SINCRONO AUTOCOMMIT sobre la DB `postgres` para CREATE/DROP DATABASE.
 
     AUTOCOMMIT porque CREATE/DROP DATABASE no corren en transaccion. Conecta a
-    `postgres` (no al `test` del model world, no al template) para no bloquear un
-    CREATE ... TEMPLATE ni colisionar con el create_all del model world.
+    `postgres` (no al template ni al test DB) para no mantener una conexion que
+    bloquearia un CREATE ... TEMPLATE.
     """
     engine = create_engine(
         _sync_maint_url(postgres_container.get_connection_url()),
