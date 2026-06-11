@@ -31,6 +31,11 @@ from tests.conftest_ephemeral_db import (  # noqa: F401
     build_alembic_config,
     swap_dsn_credentials,
 )
+from tests.conftest_template_db import (  # noqa: F401
+    _maintenance_engine,
+    template_db,
+    test_db,
+)
 
 
 @pytest.fixture(scope="session")
