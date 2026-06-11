@@ -11,8 +11,8 @@ from ibkr_control.db.rls import app_rls_password
 from tests.conftest_ephemeral_db import swap_dsn_credentials
 
 
-async def test_guard_raises_for_owner_superuser(_migrated_app_db):
-    engine = create_async_engine(_migrated_app_db)  # owner == bootstrap superuser
+async def test_guard_raises_for_owner_superuser(test_db):
+    engine = create_async_engine(test_db)  # owner == bootstrap superuser
     try:
         with pytest.raises(RuntimeError, match="bypass"):
             await assert_runtime_role_enforces_rls(engine)
@@ -20,8 +20,8 @@ async def test_guard_raises_for_owner_superuser(_migrated_app_db):
         await engine.dispose()
 
 
-async def test_guard_passes_for_app_rls(_migrated_app_db):
-    app_dsn = swap_dsn_credentials(_migrated_app_db, "app_rls", app_rls_password())
+async def test_guard_passes_for_app_rls(test_db):
+    app_dsn = swap_dsn_credentials(test_db, "app_rls", app_rls_password())
     engine = create_async_engine(app_dsn)
     try:
         await assert_runtime_role_enforces_rls(engine)  # no raise
@@ -44,13 +44,13 @@ async def test_app_rls_role_is_not_superuser_and_not_bypassrls(app_rls_db_sessio
     assert row.bypass is False
 
 
-async def test_guard_raises_for_nonsuperuser_bypassrls(_migrated_app_db):
+async def test_guard_raises_for_nonsuperuser_bypassrls(test_db):
     """Lock the rolbypassrls arm specifically: a NON-superuser role that carries
     BYPASSRLS must be rejected. is_superuser is false here, so this can only pass
     via the rolbypassrls branch (the other two tests both go through the
     superuser path).
     """
-    owner_engine = create_async_engine(_migrated_app_db)
+    owner_engine = create_async_engine(test_db)
     try:
         # CREATE/DROP ROLE cannot run inside a transaction block -> AUTOCOMMIT.
         async with owner_engine.connect() as conn:
@@ -63,7 +63,7 @@ async def test_guard_raises_for_nonsuperuser_bypassrls(_migrated_app_db):
                 )
             )
 
-        bypass_dsn = swap_dsn_credentials(_migrated_app_db, "guard_bypass_test", "guard_bypass_pw")
+        bypass_dsn = swap_dsn_credentials(test_db, "guard_bypass_test", "guard_bypass_pw")
         bypass_engine = create_async_engine(bypass_dsn)
         try:
             with pytest.raises(RuntimeError, match="bypass"):

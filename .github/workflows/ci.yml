@@ -24,7 +24,7 @@ jobs:
       - name: Pytest
         run: |
           cd backend
-          uv run pytest -v
+          uv run pytest -n auto
 
   frontend:
     runs-on: ubuntu-latest
