@@ -553,6 +553,8 @@ async def test_external_transfer_peer_becomes_counterparty_not_account(
         symbol="GLOB",
         qty=Decimal("94"),
         transfer_type="FOP",
+        asset_class="STK",
+        conid="160756766",
     )
     p = _minimal_parsed(n_trades=0, account_id=OWN)  # OWN in <AccountInformation>
     p.transfers = [transfer]

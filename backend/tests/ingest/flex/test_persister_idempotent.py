@@ -270,6 +270,8 @@ async def test_transfer_not_duplicated_on_reingest(
         symbol="GLOB",
         qty=Decimal("94"),
         transfer_type="FOP",
+        asset_class="STK",
+        conid="160756766",
     )
     p1 = _minimal_parsed(n_trades=0, account_id=sample_account.ibkr_account_id)
     p1.transfers = [transfer]

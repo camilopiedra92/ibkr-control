@@ -312,10 +312,12 @@ def _require_conid(elem, context: str) -> str:
     """Extract conid, failing loud if absent OR empty (W2, T1-D8).
 
     conid is the securities-master identity for creator tags (trades, closed
-    lots, open positions, accruals). CR-1 verified 100% presence on these tags
-    against the 3 real fixtures, so a missing/empty conid is drift, not a valid
-    case — fail loud (mirror of _require_asset_class). Resolver tags (cash,
-    transfers) use ``elem.get("conid") or None`` instead and never reach here.
+    lots, open positions, accruals, and — per TL-D1 — security transfers with
+    assetCategory != 'CASH'). CR-1 + the TL-D1 census verified 100% presence on
+    these tags against the 3 real fixtures, so a missing/empty conid is drift,
+    not a valid case — fail loud (mirror of _require_asset_class). Resolver tags
+    (cash transactions, CASH transfers) use ``elem.get("conid") or None``
+    instead and never reach here.
     """
     conid = elem.get("conid")
     if not conid:
@@ -674,6 +676,14 @@ def _parse_transfers(elem) -> list[ParsedTransfer]:
             src = account_id
             dst = peer_account
 
+        asset_class = _require_asset_class(tr, "<Transfer>")
+        if asset_class == "CASH":
+            # Movimiento interno de plata: sin instrumento por diseño (TL-D1).
+            conid = _attr(tr, "conid")  # data real: siempre None (censo 100%)
+        else:
+            # Security transfer: spec completo de instrumento en el tag -> creator.
+            conid = _require_conid(tr, "<Transfer>")
+
         transfer = ParsedTransfer(
             transaction_id=tr.get("transactionID") or "",
             transfer_date=transfer_date,
@@ -683,7 +693,10 @@ def _parse_transfers(elem) -> list[ParsedTransfer]:
             symbol=tr.get("symbol") or "",
             qty=_dec(tr.get("quantity")),
             transfer_type=tr.get("type") or tr.get("transferType") or "unknown",
-            conid=_attr(tr, "conid"),  # resolver-only: lookup if present, never create
+            asset_class=asset_class,
+            conid=conid,
+            isin=_instrument_isin(tr),
+            description=_instrument_description(tr),
         )
         out.append(transfer)
     return out
