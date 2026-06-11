@@ -31,6 +31,7 @@ from typing import Any
 
 from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ibkr_control.db.models.accounts import Account
@@ -50,6 +51,7 @@ from ibkr_control.db.models.flex_raw import (
 from ibkr_control.db.models.restatements import RestatementLog
 from ibkr_control.ingest.flex._models import ParsedXML
 from ibkr_control.ingest.flex._upsert_helpers import (
+    _MAX_BIND_PARAMS,
     _upsert_immutable,
     _upsert_immutable_returning_inserted,
     _upsert_snapshot_with_audit,
@@ -401,13 +403,17 @@ async def _persist_restatements(
         }
         for row in collector.rows
     ]
-    await session.execute(pg_insert(RestatementLog.__table__).values(insert_rows))
+    # Chunk key-count-aware (mismo criterio que _upsert_helpers): cada row expande
+    # len(cols) bind params; dividir el techo por el ancho de la fila.
+    chunk_size = max(1, _MAX_BIND_PARAMS // len(insert_rows[0]))
+    for batch in _chunked(insert_rows, chunk_size):
+        await session.execute(pg_insert(RestatementLog.__table__).values(batch))
     return len(insert_rows)
 
 
 async def _detect_closed_lot_siblings(
     session: AsyncSession,
-    inserted,
+    inserted: list[Row],
     *,
     organization_id: int,
     collector: "_RestatementCollector",
@@ -419,9 +425,16 @@ async def _detect_closed_lot_siblings(
     un segundo cierre con el mismo timestamp/qty pero PnL realizado distinto
     (wash-sale o ajuste contable). Nunca borra; registra kind='sibling_row' una vez
     por sibling nuevo, con old=pnl preexistente, new=pnl de la fila nueva.
+
+    Dedupe same-batch: si AMBAS filas de la pareja se insertaron en este mismo
+    batch (caso real IBIT 2024, transactionID=29018827751: dos <Lot> con mismo
+    timestamp/qty y pnls distintos en UN solo XML), cada una "ve" a la otra en su
+    query y la pareja se loguearía DOS veces (espejo old<->new). Trackeamos la
+    pareja NO-ordenada (key + frozenset de ambos pnls) y emitimos una sola vez.
     """
     if not inserted:
         return
+    seen_pairs: set[tuple] = set()
     for row in inserted:
         result = await session.execute(
             select(ClosedLot.fifo_pnl_usd, ClosedLot.close_date).where(
@@ -433,6 +446,15 @@ async def _detect_closed_lot_siblings(
             )
         )
         for prior_pnl, prior_close_date in result.all():
+            pair = (
+                row.transaction_id,
+                row.close_datetime,
+                row.qty,
+                frozenset({prior_pnl, row.fifo_pnl_usd}),
+            )
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
             collector.add_sibling(
                 "closed_lots",
                 {

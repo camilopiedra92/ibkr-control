@@ -20,6 +20,13 @@ _BATCH_SIZE = 5000
 # params/row → ~125 rows/batch worst case; 5000 dejamos espacio holgado para
 # entities chicas (~5 cols).
 
+_MAX_BIND_PARAMS = 30000
+# Techo de bind params para chunking key-count-aware (W3): los chunks que expanden
+# N params POR ITEM (tuple_-IN de natural keys de 8 columnas, INSERTs multi-col)
+# deben dividir este techo por el ancho del item — _BATCH_SIZE plano con keys de
+# 8 cols daría 40k params, sobre el límite int16 de asyncpg (32767) que el repo
+# ya quemó en TRM bulk_upsert (989652d).
+
 
 def _chunks(rows: Sequence[dict[str, Any]], size: int) -> Iterable[list[dict[str, Any]]]:
     for i in range(0, len(rows), size):
@@ -149,7 +156,10 @@ async def _upsert_snapshot_with_audit(
     existing_by_key: dict[tuple, Row] = {}
     keys = list(incoming_by_key.keys())
     select_cols = [*key_cols, *(table.c[c] for c in material_cols)]
-    for batch in _chunks(keys, _BATCH_SIZE):  # type: ignore[arg-type]
+    # Chunk key-count-aware: cada key expande len(key_cols) bind params (8 en los
+    # accruals) — el tamaño del chunk debe dividir el techo por ese ancho.
+    chunk_size = max(1, _MAX_BIND_PARAMS // max(1, len(key_cols)))
+    for batch in _chunks(keys, chunk_size):  # type: ignore[arg-type]
         stmt = select(*select_cols).where(tuple_(*key_cols).in_(batch))
         result = await session.execute(stmt)
         for row in result.all():

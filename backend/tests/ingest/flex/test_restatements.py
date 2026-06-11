@@ -267,6 +267,38 @@ async def test_sibling_row_detected_closed_lots(db_session: AsyncSession, sample
 
 
 @pytest.mark.asyncio
+async def test_sibling_pair_in_single_batch_logged_once(db_session: AsyncSession, sample_org):
+    """Regression (quality review Task 1): pareja de siblings en UN MISMO XML.
+
+    Caso real ACTIVITY_2024 (transactionID=29018827751, dateTime=20241002;101005,
+    qty=17, pnls 51.61965 vs 51.969907): ambas filas se insertan en el mismo batch
+    y cada una "ve" a la otra en su query -> sin el dedupe de pareja no-ordenada
+    se loguearían 2 restatements espejo (old<->new invertidos) para 1 pareja
+    lógica. Deben quedar las 2 filas en closed_lots (nunca borra) y EXACTAMENTE
+    1 sibling_row."""
+    lots = [
+        _closed_lot(fifo_pnl=Decimal("51.61965"), txn="29018827751"),
+        _closed_lot(fifo_pnl=Decimal("51.969907"), txn="29018827751"),
+    ]
+    await persist(
+        db_session,
+        parsed=_xml_with_closed_lots(lots),
+        organization_id=sample_org.id,
+        xml_bytes=b"<same-batch-siblings/>",
+        source="manual_upload",
+    )
+
+    n_lots = await db_session.scalar(
+        select(func.count()).select_from(ClosedLot).where(ClosedLot.transaction_id == "29018827751")
+    )
+    assert n_lots == 2
+
+    rows = (await db_session.scalars(select(RestatementLog))).all()
+    assert len(rows) == 1
+    assert rows[0].kind == "sibling_row"
+
+
+@pytest.mark.asyncio
 async def test_sealed_year_flag(db_session: AsyncSession, sample_org):
     """Con el flex_imports del año marcado year_status='sealed', el restatement
     cae con sealed_year=True; sin sealed, False."""

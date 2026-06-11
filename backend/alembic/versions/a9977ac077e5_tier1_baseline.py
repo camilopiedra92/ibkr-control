@@ -46,6 +46,15 @@ entre los marcadores — los columnas/índices/FK se fold-earon dentro de cada
 ``create_table`` (baseline limpio, no ``add_column``). Las 2 tablas globales
 reciben el blanket GRANT del baseline (sección hand-written 2) — sin policy RLS.
 
+**Amendment #5 (W3 — restatement log, T1-D10..D13):** se agrega la tabla
+org-scoped ``restatement_log`` (señal auditable de mutación material: DO UPDATE
+en snapshot tables + sibling rows de closed_lots; poblada SOLO por el persister,
+detection-only). DDL en la sección autogenerada (regenerada canónicamente:
+container, DB virgen, splice entre marcadores) + entrada en
+``_ORG_SCOPED_TABLES`` (su policy RLS sale del loop de la sección hand-written
+3) — los tres en lockstep con ``db/rls.py::ORG_SCOPED_TABLES`` (el guard
+``test_org_scoped_snapshot_matches_live_ssot`` lo exige).
+
 El DDL de ``upgrade()`` hasta el marcador ``end Alembic commands`` es
 autogenerado canónicamente (container, DB virgen, ``alembic revision
 --autogenerate``). Las SECCIONES HAND-WRITTEN que autogenerate NO captura
