@@ -131,6 +131,27 @@ def test_system_function_exists_and_is_security_definer(fresh_postgres, monkeypa
     )
 
 
+def test_authz_grant_function_exists_and_is_security_definer(fresh_postgres, monkeypatch):
+    """authz_grant_party_ids() (amendment #8, SP2-D3) is SECURITY DEFINER with the
+    same envelope as system_credentialed_org_ids(): the authorization resolver
+    calls it BEFORE org RLS context exists, so without the definer envelope the
+    grant_visibility policy would default-deny and lock everyone out."""
+    sync_url = _upgrade_head(fresh_postgres, monkeypatch)
+    engine = create_engine(sync_url)
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT prosecdef, prosrc FROM pg_proc WHERE proname='authz_grant_party_ids'")
+        ).one()
+    engine.dispose()
+    prosecdef, prosrc = row
+    assert prosecdef is True, "authz_grant_party_ids() must be SECURITY DEFINER"
+    assert "FROM access_grants" in prosrc, "the function body must resolve access_grants"
+    assert "FROM memberships" in prosrc, "the function must resolve firm-org grants via memberships"
+    assert "valid_to > CURRENT_DATE" in prosrc, (
+        "vigencia must be half-open [valid_from, valid_to) — valid_to == today is inactive"
+    )
+
+
 def test_institutions_seeded(fresh_postgres, monkeypatch):
     """The baseline seeds the global institutions catalog with the ibkr row
     (control-plane data, not user input — W1 T1-D3)."""

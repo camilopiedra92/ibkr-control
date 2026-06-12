@@ -1,7 +1,7 @@
 """SP2 schema: CHECK half-open de access_grants (SP2-D8), restatement_log.account_id
 (SP2-D9) y la función SECURITY DEFINER authz_grant_party_ids (SP2-D3)."""
 
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import text
 
@@ -65,14 +65,17 @@ async def test_authz_grant_party_ids_returns_only_vigentes(
     await owner_session.commit()
     await owner_session.refresh(accountant)
 
-    today = date.today()
+    # valid_from de AYER, no hoy: la función compara contra CURRENT_DATE (UTC del
+    # server Postgres) y date.today() es fecha LOCAL del host — en hosts al este
+    # de UTC, local > UTC en la madrugada y el grant quedaría fuera (flake).
+    yesterday = date.today() - timedelta(days=1)
     db_session.add_all(
         [
             AccessGrant(  # vigente, directo al user
                 grantor_party_id=sample_party.id,
                 grantee_user_id=accountant.id,
                 organization_id=sample_org.id,
-                valid_from=today,
+                valid_from=yesterday,
             ),
         ]
     )
@@ -105,8 +108,6 @@ async def test_authz_grant_party_ids_via_firm_membership(
     db_session, sample_org, sample_party, owner_session
 ):
     """Grant a un org-firm: cualquier member del firm resuelve los party_ids."""
-    from datetime import date as _date
-
     from ibkr_control.auth.models import User
     from ibkr_control.db.models.memberships import Membership
 
@@ -123,7 +124,9 @@ async def test_authz_grant_party_ids_via_firm_membership(
             grantor_party_id=sample_party.id,
             grantee_organization_id=firm.id,
             organization_id=sample_org.id,
-            valid_from=_date.today(),
+            # Ayer, no hoy: CURRENT_DATE (UTC) vs date.today() (local) — ver
+            # test_authz_grant_party_ids_returns_only_vigentes.
+            valid_from=date.today() - timedelta(days=1),
         )
     )
     await db_session.commit()
