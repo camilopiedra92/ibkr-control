@@ -22,6 +22,14 @@ ALLOWLISTED_PREFIXES: dict[str, str] = {
 }
 
 
+def _matches_prefix(path: str, prefix: str) -> bool:
+    """Match con boundary de segmento: /api/auth cubre /api/auth y /api/auth/...
+    pero NO /api/authz-anything (startswith pelado = bypass latente del guard).
+    El brazo == es necesario: /api/settings y /api/users existen como path exacto.
+    """
+    return path == prefix or path.startswith(prefix + "/")
+
+
 def _has_scope(route: APIRoute) -> bool:
     """True si la ruta (o cualquier sub-dependency en su arbol) lleva el marker
     ._authz_scope que require_scope adjunta a su closure. Recursivo porque
@@ -44,11 +52,13 @@ def test_every_route_declares_scope_or_is_allowlisted():
     unprotected = []
     for route in app.routes:
         if not isinstance(route, APIRoute):
-            continue  # docs, openapi, etc. — no son APIRoute de la app
+            # NOTE: solo se barren APIRoute — WS/Mount/sub-apps quedan fuera
+            # del guard; revisar si se agregan. (docs/openapi caen aca tambien)
+            continue
         for method in route.methods - {"HEAD", "OPTIONS"}:
             if (method, route.path) in ALLOWLIST:
                 continue
-            if any(route.path.startswith(p) for p in ALLOWLISTED_PREFIXES):
+            if any(_matches_prefix(route.path, p) for p in ALLOWLISTED_PREFIXES):
                 continue
             if not _has_scope(route):
                 unprotected.append((method, route.path))
@@ -59,7 +69,12 @@ def test_every_route_declares_scope_or_is_allowlisted():
 
 
 def test_allowlist_has_no_stale_entries():
-    """Una entrada del allowlist cuya ruta ya no existe es ruido — falla."""
+    """Una entrada del allowlist cuya ruta ya no existe es ruido — falla.
+
+    Idem para los prefijos: un prefijo muerto/typo'd seria una exencion
+    silenciosa acumulandose — cada prefijo debe matchear >=1 ruta viva
+    (con el MISMO matcher de boundary de segmento que usa el sweep).
+    """
     app = create_app()
     actual = {
         (m, r.path)
@@ -69,3 +84,9 @@ def test_allowlist_has_no_stale_entries():
     }
     stale = [k for k in ALLOWLIST if k not in actual]
     assert not stale, f"Entradas del allowlist sin ruta viva: {stale}"
+
+    live_paths = {path for _, path in actual}
+    dead_prefixes = [
+        p for p in ALLOWLISTED_PREFIXES if not any(_matches_prefix(path, p) for path in live_paths)
+    ]
+    assert not dead_prefixes, f"Prefijos del allowlist sin ninguna ruta viva: {dead_prefixes}"
