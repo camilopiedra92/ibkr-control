@@ -212,8 +212,9 @@ async def test_cash_without_conid_leaves_instrument_id_null(db_session: AsyncSes
 
 @pytest.mark.asyncio
 async def test_resolver_with_unknown_conid_does_not_create(db_session: AsyncSession, sample_org):
-    """A cash transaction whose conid has NO instrument in the batch -> instrument_id
-    NULL (resolver never creates instruments)."""
+    """A cash transaction whose conid has NO instrument in the batch NOR in the
+    securities master (TL-D2: lookup is DB-wide) -> instrument_id NULL (resolver
+    never creates instruments)."""
     cash = ParsedCashTransaction(
         transaction_id="CASH-DIV",
         ibkr_account_id="U99999001",
