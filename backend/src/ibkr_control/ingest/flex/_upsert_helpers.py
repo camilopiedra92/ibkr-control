@@ -85,13 +85,14 @@ async def _upsert_snapshot(
 
 
 def _quantize_to_scale(value: Decimal, scale: int | None) -> Decimal:
-    """Cuantiza un Decimal a la escala de la columna (como lo guardaría Postgres).
+    """Cuantiza un Decimal a la escala declarada de la columna (como lo guardaría PG).
 
-    El persister recibe valores full-precision del XML (e.g. 255.869378) pero la
-    columna es NUMERIC(20,4), así que Postgres trunca/redondea a 255.8694. Comparar
-    el valor STORED (ya cuantizado, leído de la DB) contra el INCOMING crudo daría
-    un falso positivo en cada re-ingest. Cuantizamos el incoming igual que la DB
-    antes de diffear. scale None (sin escala declarada) => sin cuantizar.
+    Post spec 2026-06-12 (PD-1/PD-3) las columnas fuente-IBKR son NUMERIC
+    unconstrained -> scale=None -> pass-through: la comparación es exacta, que
+    con storage exacto es la semántica correcta. El helper queda latente para
+    columnas con scale documentada (e.g. si trm/participations se vuelven
+    material cols algún día): "comparar a precisión de storage" sigue siendo
+    el principio; hoy la precisión de storage es la de la fuente.
     """
     if scale is None:
         return value
@@ -103,9 +104,9 @@ def _quantize_to_scale(value: Decimal, scale: int | None) -> Decimal:
 def _values_differ(old: Any, new: Any, *, scale: int | None = None) -> bool:
     """Comparación material-aware de dos valores de columna.
 
-    Numeric/Decimal: cuantiza ambos a la escala de la columna (lo que la DB
-    guardaría) y compara por valor numérico — así un re-ingest del mismo valor
-    de fuente NO marca restatement por la pérdida de precisión del NUMERIC(p,s).
+    Numeric/Decimal: compara a precisión de storage (con NUMERIC unconstrained
+    = exacta; con scale declarada, cuantiza ambos como la DB) — así un re-ingest
+    del mismo valor de fuente NUNCA marca restatement.
     El resto: igualdad directa de Python. None vs no-None => difieren.
     """
     if isinstance(old, Decimal) or isinstance(new, Decimal):

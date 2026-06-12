@@ -49,7 +49,7 @@ class Instrument(Base):
     name: Mapped[str | None] = mapped_column(String, nullable=True)
     asset_class: Mapped[str] = mapped_column(String, nullable=False)
     currency: Mapped[str | None] = mapped_column(String, nullable=True)
-    multiplier: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), nullable=True)
+    multiplier: Mapped[Decimal | None] = mapped_column(Numeric(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("NOW()")
     )
