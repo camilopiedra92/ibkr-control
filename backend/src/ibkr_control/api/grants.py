@@ -7,13 +7,14 @@ queda doblemente guardado (scope grants:write + WITH CHECK org = current_org).
 """
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ibkr_control.api._schemas import GrantCreate, GrantRead
 from ibkr_control.authz import AuthzContext, require_scope
 from ibkr_control.db.models.access_grants import AccessGrant
+from ibkr_control.db.models.memberships import Membership
 from ibkr_control.db.models.parties import Party
 from ibkr_control.db.session import get_async_session
 
@@ -40,7 +41,23 @@ async def list_grants(
     session: AsyncSession = Depends(get_async_session),
 ) -> list[GrantRead]:
     # RLS (grant_visibility) scopea: grantor-org + grantee — ambas direcciones.
-    rows = await session.scalars(select(AccessGrant).order_by(AccessGrant.id))
+    stmt = select(AccessGrant).order_by(AccessGrant.id)
+    # El brazo grantor-org de la policy es visibilidad de grado MEMBER. Un
+    # grantee que entra al org del cliente (X-Organization-Id, legítimo para
+    # data-plane) NO la hereda: sin este filtro enumeraría TODOS los grants
+    # que el cliente otorgó (incl. a otros contadores — leak de grantee_user_id
+    # y de su existencia). SP2-D5: el grantee lista solo los grants que LO
+    # habilitan; el rol read_only conserva grants:read intacto.
+    if ctx.party_ids is not None:  # actor == "grantee"
+        stmt = stmt.where(
+            or_(
+                AccessGrant.grantee_user_id == ctx.user_id,
+                AccessGrant.grantee_organization_id.in_(
+                    select(Membership.organization_id).where(Membership.user_id == ctx.user_id)
+                ),
+            )
+        )
+    rows = await session.scalars(stmt)
     return [_ser(g, org_id=ctx.org_id) for g in rows.all()]
 
 

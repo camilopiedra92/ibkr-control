@@ -162,3 +162,39 @@ async def test_grantee_lists_received_grants_from_own_org(client, grantee_world)
     assert r.status_code == 200
     [g] = r.json()
     assert g["direction"] == "received"
+
+
+async def test_grantee_cannot_enumerate_other_grants_of_client_org(
+    client, grantee_world, owner_engine
+):
+    """Leak (review holístico): CPA1 entrando al org del cliente con el header
+    que legítimamente usa para restatements NO debe ver los grants que el
+    cliente otorgó a OTROS contadores — solo los dirigidos a él (SP2-D5:
+    'el grantee lista sus grants desde su propio org')."""
+    from ibkr_control.auth.models import User
+    from ibkr_control.db.models.parties import Party
+
+    w = grantee_world
+    # Segundo contador independiente, mismo party como grantor.
+    await client.post(
+        "/api/auth/register",
+        json={"email": "cpa2@firm.com", "password": "supersecret123", "name": "CPA 2"},
+    )
+    maker = async_sessionmaker(owner_engine, expire_on_commit=False, class_=AsyncSession)
+    async with maker() as s:
+        cpa2 = await s.scalar(select(User).where(User.email == "cpa2@firm.com"))
+        party = await s.scalar(select(Party).where(Party.organization_id == w["client_org_id"]))
+        cpa2_id, party_id = cpa2.id, party.id
+    r = await client.post(
+        "/api/grants",
+        headers=w["owner_headers"],
+        json={"grantor_party_id": party_id, "grantee_user_id": cpa2_id},
+    )
+    assert r.status_code == 201, r.text
+
+    headers = {**w["cpa_headers"], "X-Organization-Id": str(w["client_org_id"])}
+    r = await client.get("/api/grants", headers=headers)
+    assert r.status_code == 200
+    body = r.json()
+    assert {g["id"] for g in body} == {w["grant_id"]}  # SOLO el suyo
+    assert all(g["grantee_user_id"] != cpa2_id for g in body)  # cero leak de cpa2
