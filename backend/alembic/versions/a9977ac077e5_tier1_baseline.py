@@ -69,6 +69,17 @@ servicio migrate contra DB virgen, splice entre marcadores, mismo revision id)
 y validado por el drift test (Base.metadata == schema migrado). SIN cambios RLS
 (``_ORG_SCOPED_TABLES`` intacto).
 
+**Amendment #7 (precisión decimal exacta, PD-1/PD-2 — spec 2026-06-12):** las
+27 columnas NUMERIC cuyo valor proviene del XML Flex (hechos x7 +
+``instruments.multiplier``) pasan de ``Numeric(p,s)`` a ``NUMERIC``
+unconstrained — la fuente IBKR no documenta precisión (censo real: hasta 9
+decimales en ``ibCommission``/``positionValue`` vs scale 4 declarada; Migration
+F refutada) y la scale declarada redondeaba en el write path (114 falsos
+positivos del golden W3). Política nueva: scale declarada solo con contrato de
+fuente documentado (``trm.value_cop``, ``participations.pct`` se quedan).
+Regenerado canónicamente en container (autogenerate temporal contra DB virgen,
+splice entre marcadores, mismo revision id). SIN cambios RLS.
+
 El DDL de ``upgrade()`` hasta el marcador ``end Alembic commands`` es
 autogenerado canónicamente (container, DB virgen, ``alembic revision
 --autogenerate``). Las SECCIONES HAND-WRITTEN que autogenerate NO captura
@@ -181,7 +192,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(), nullable=True),
         sa.Column("asset_class", sa.String(), nullable=False),
         sa.Column("currency", sa.String(), nullable=True),
-        sa.Column("multiplier", sa.Numeric(precision=20, scale=4), nullable=True),
+        sa.Column("multiplier", sa.Numeric(), nullable=True),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -766,7 +777,7 @@ def upgrade() -> None:
         sa.Column("conid", sa.String(), nullable=True),
         sa.Column("type", sa.String(), nullable=False),
         sa.Column("currency", sa.String(), server_default=sa.text("'USD'"), nullable=False),
-        sa.Column("amount_usd", sa.Numeric(precision=20, scale=4), nullable=False),
+        sa.Column("amount_usd", sa.Numeric(), nullable=False),
         sa.Column("description", sa.String(), nullable=True),
         sa.Column("date", sa.Date(), nullable=False),
         sa.Column("symbol", sa.String(), nullable=True),
@@ -829,12 +840,12 @@ def upgrade() -> None:
         sa.Column("pay_date", sa.Date(), nullable=True),
         sa.Column("report_date", sa.Date(), nullable=False),
         sa.Column("accrual_date", sa.Date(), nullable=True),
-        sa.Column("quantity", sa.Numeric(precision=20, scale=8), nullable=False),
-        sa.Column("gross_rate_per_share", sa.Numeric(precision=20, scale=6), nullable=True),
-        sa.Column("gross_amount_usd", sa.Numeric(precision=20, scale=4), nullable=False),
-        sa.Column("tax_usd", sa.Numeric(precision=20, scale=4), nullable=False),
-        sa.Column("fee_usd", sa.Numeric(precision=20, scale=4), nullable=True),
-        sa.Column("net_amount_usd", sa.Numeric(precision=20, scale=4), nullable=False),
+        sa.Column("quantity", sa.Numeric(), nullable=False),
+        sa.Column("gross_rate_per_share", sa.Numeric(), nullable=True),
+        sa.Column("gross_amount_usd", sa.Numeric(), nullable=False),
+        sa.Column("tax_usd", sa.Numeric(), nullable=False),
+        sa.Column("fee_usd", sa.Numeric(), nullable=True),
+        sa.Column("net_amount_usd", sa.Numeric(), nullable=False),
         sa.Column("action_id", sa.String(), nullable=True),
         sa.Column("asset_category", sa.String(), nullable=True),
         sa.Column("sub_category", sa.String(), nullable=True),
@@ -969,12 +980,12 @@ def upgrade() -> None:
         sa.Column("ex_date", sa.Date(), nullable=True),
         sa.Column("pay_date", sa.Date(), nullable=True),
         sa.Column("report_date", sa.Date(), nullable=False),
-        sa.Column("quantity", sa.Numeric(precision=20, scale=8), nullable=False),
-        sa.Column("gross_rate_per_share", sa.Numeric(precision=20, scale=6), nullable=True),
-        sa.Column("gross_amount_usd", sa.Numeric(precision=20, scale=4), nullable=False),
-        sa.Column("tax_usd", sa.Numeric(precision=20, scale=4), nullable=False),
-        sa.Column("fee_usd", sa.Numeric(precision=20, scale=4), nullable=True),
-        sa.Column("net_amount_usd", sa.Numeric(precision=20, scale=4), nullable=False),
+        sa.Column("quantity", sa.Numeric(), nullable=False),
+        sa.Column("gross_rate_per_share", sa.Numeric(), nullable=True),
+        sa.Column("gross_amount_usd", sa.Numeric(), nullable=False),
+        sa.Column("tax_usd", sa.Numeric(), nullable=False),
+        sa.Column("fee_usd", sa.Numeric(), nullable=True),
+        sa.Column("net_amount_usd", sa.Numeric(), nullable=False),
         sa.Column("action_id", sa.String(), nullable=True),
         sa.Column("asset_category", sa.String(), nullable=True),
         sa.Column("sub_category", sa.String(), nullable=True),
@@ -1068,10 +1079,10 @@ def upgrade() -> None:
         sa.Column("symbol", sa.String(), nullable=False),
         sa.Column("asset_class", sa.String(), nullable=False),
         sa.Column("open_date", sa.Date(), nullable=False),
-        sa.Column("qty", sa.Numeric(precision=20, scale=8), nullable=False),
-        sa.Column("cost_basis_usd", sa.Numeric(precision=20, scale=4), nullable=False),
-        sa.Column("mark_price_usd", sa.Numeric(precision=20, scale=6), nullable=True),
-        sa.Column("mark_value_usd", sa.Numeric(precision=20, scale=4), nullable=True),
+        sa.Column("qty", sa.Numeric(), nullable=False),
+        sa.Column("cost_basis_usd", sa.Numeric(), nullable=False),
+        sa.Column("mark_price_usd", sa.Numeric(), nullable=True),
+        sa.Column("mark_value_usd", sa.Numeric(), nullable=True),
         sa.Column("snapshot_date", sa.Date(), nullable=False),
         sa.Column("originating_transaction_id", sa.String(), nullable=False),
         sa.Column(
@@ -1199,10 +1210,10 @@ def upgrade() -> None:
         sa.Column("asset_class", sa.String(), nullable=False),
         sa.Column("trade_date", sa.Date(), nullable=False),
         sa.Column("settle_date", sa.Date(), nullable=True),
-        sa.Column("qty", sa.Numeric(precision=20, scale=8), nullable=False),
-        sa.Column("price_usd", sa.Numeric(precision=20, scale=6), nullable=False),
-        sa.Column("proceeds_usd", sa.Numeric(precision=20, scale=4), nullable=False),
-        sa.Column("commission_usd", sa.Numeric(precision=20, scale=4), nullable=False),
+        sa.Column("qty", sa.Numeric(), nullable=False),
+        sa.Column("price_usd", sa.Numeric(), nullable=False),
+        sa.Column("proceeds_usd", sa.Numeric(), nullable=False),
+        sa.Column("commission_usd", sa.Numeric(), nullable=False),
         sa.Column("open_close", sa.String(), nullable=True),
         sa.Column("buy_sell", sa.String(), nullable=False),
         sa.Column(
@@ -1272,7 +1283,7 @@ def upgrade() -> None:
         sa.Column("asset_class", sa.String(), nullable=False),
         sa.Column("conid", sa.String(), nullable=True),
         sa.Column("symbol", sa.String(), nullable=False),
-        sa.Column("qty", sa.Numeric(precision=20, scale=8), nullable=False),
+        sa.Column("qty", sa.Numeric(), nullable=False),
         sa.Column("transfer_type", sa.String(), nullable=False),
         sa.CheckConstraint(
             "(asset_class = 'CASH') = (instrument_id IS NULL)",
@@ -1371,10 +1382,10 @@ def upgrade() -> None:
             nullable=False,
             comment="Naive POR DISEÑO (D3 sp1-db-hardening): IBKR emite 'YYYYMMDD;HHMMSS' sin timezone (exchange-local); timestamptz inventaría una zona. La regla 730d (Art. 300 ET) opera a granularidad de día sobre close_date.",
         ),
-        sa.Column("qty", sa.Numeric(precision=20, scale=8), nullable=False),
-        sa.Column("cost_basis_usd", sa.Numeric(precision=20, scale=4), nullable=False),
-        sa.Column("proceeds_usd", sa.Numeric(precision=20, scale=4), nullable=False),
-        sa.Column("fifo_pnl_usd", sa.Numeric(precision=20, scale=4), nullable=False),
+        sa.Column("qty", sa.Numeric(), nullable=False),
+        sa.Column("cost_basis_usd", sa.Numeric(), nullable=False),
+        sa.Column("proceeds_usd", sa.Numeric(), nullable=False),
+        sa.Column("fifo_pnl_usd", sa.Numeric(), nullable=False),
         sa.Column("source_trade_id", sa.BigInteger(), nullable=True),
         sa.Column(
             "created_at",
