@@ -114,6 +114,7 @@ class RestatementRead(BaseModel):
 
     id: int
     flex_import_id: int | None
+    account_id: int
     table_name: str
     natural_key: dict
     column_name: str

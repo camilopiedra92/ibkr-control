@@ -119,10 +119,7 @@ async def test_grantee_reads_party_scoped_restatements(client, grantee_world):
     headers = {**w["cpa_headers"], "X-Organization-Id": str(w["client_org_id"])}
     r = await client.get("/api/ingest/restatements", headers=headers)
     assert r.status_code == 200, r.text
-    # RestatementRead no expone account_id directo; el natural_key sembrado lo
-    # lleva (no cambia el SIGNIFICADO: solo la cuenta del party sobrevive el
-    # filtro visible_account_ids — la barrera 3).
-    accounts = {row["natural_key"]["account_id"] for row in r.json()}
+    accounts = {row["account_id"] for row in r.json()}
     assert accounts == {w["party_account_id"]}  # la cuenta ajena al party NO
 
 

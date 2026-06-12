@@ -97,6 +97,9 @@ async def test_restatements_returns_seeded_rows(
     assert len(rows) == 1
     row = rows[0]
     assert row["id"] == rid
+    # SP2: account_id es de primera clase en la response (el filtro party-scoped
+    # del grantee keyea sobre el; ver test_grantee_e2e).
+    assert isinstance(row["account_id"], int)
     assert row["table_name"] == "open_position_lots"
     assert row["natural_key"] == {"account_id": 1, "symbol": "ICSH", "open_date": "2025-01-02"}
     assert row["column_name"] == "cost_basis_usd"
