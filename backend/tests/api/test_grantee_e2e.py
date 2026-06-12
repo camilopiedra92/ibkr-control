@@ -42,6 +42,8 @@ async def grantee_world(client, auth_headers_with_org, owner_engine):
         org = await s.scalar(select(Organization).where(Organization.name == "Org Owner Household"))
         party = await s.scalar(select(Party).where(Party.organization_id == org.id))
         # Cuentas + participación del party SOLO en la primera + restatements.
+        # set_config es inerte aquí (owner_engine = superuser, bypassa RLS aun
+        # bajo FORCE) — se deja solo como documentación de intención de scope.
         await s.execute(text("SELECT set_config('app.current_org', :o, true)"), {"o": str(org.id)})
         acc1 = Account(
             ibkr_account_id="U10000001", organization_id=org.id, alias="a1", currency="USD"
@@ -142,6 +144,7 @@ async def test_grantee_denied_admin_plane_and_writes(client, grantee_world):
         json={"display_name": "x", "query_id": "1", "token": "tok-abcdefghij"},
     )
     assert r.status_code == 403
+    assert r.json()["detail"] == "INSUFFICIENT_SCOPE"
 
 
 async def test_revocation_is_immediate(client, grantee_world):
