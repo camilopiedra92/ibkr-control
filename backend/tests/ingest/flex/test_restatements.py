@@ -388,6 +388,50 @@ async def test_n_restatements_counter_in_persist_result(db_session: AsyncSession
 
 
 @pytest.mark.asyncio
+async def test_restatement_rows_carry_account_id(db_session: AsyncSession, sample_org):
+    """SP2-D9: cada fila de restatement_log lleva el account_id del hecho afectado
+    — en AMBOS kinds (value_update vía audit_sink + sibling_row vía add_sibling)."""
+    from ibkr_control.db.models.accounts import Account
+
+    # value_update: mismo natural key, qty material cambia entre ingests.
+    await persist(
+        db_session,
+        parsed=_xml_with_open_lots([_open_lot(cost_basis=Decimal("1000.0000"))]),
+        organization_id=sample_org.id,
+        xml_bytes=b"<acct-a/>",
+        source="manual_upload",
+    )
+    await persist(
+        db_session,
+        parsed=_xml_with_open_lots([_open_lot(cost_basis=Decimal("1234.5600"))]),
+        organization_id=sample_org.id,
+        xml_bytes=b"<acct-b/>",
+        source="manual_upload",
+    )
+    # sibling_row: mismo (txn, close_datetime, qty), distinto fifo_pnl.
+    await persist(
+        db_session,
+        parsed=_xml_with_closed_lots([_closed_lot(fifo_pnl=Decimal("10.00"))]),
+        organization_id=sample_org.id,
+        xml_bytes=b"<acct-c/>",
+        source="manual_upload",
+    )
+    await persist(
+        db_session,
+        parsed=_xml_with_closed_lots([_closed_lot(fifo_pnl=Decimal("-2.50"))]),
+        organization_id=sample_org.id,
+        xml_bytes=b"<acct-d/>",
+        source="manual_upload",
+    )
+
+    acct = await db_session.scalar(select(Account).where(Account.ibkr_account_id == "U99999001"))
+    rows = (await db_session.scalars(select(RestatementLog))).all()
+    kinds = {r.kind for r in rows}
+    assert kinds == {"value_update", "sibling_row"}
+    assert all(r.account_id == acct.id for r in rows)
+
+
+@pytest.mark.asyncio
 async def test_restatement_log_has_rls(db_session: AsyncSession):
     """restatement_log es org-scoped: aparece con RLS habilitado en pg_class bajo
     el schema migrado (cubierto además por test_rls.py vía ORG_SCOPED_TABLES). Acá

@@ -114,6 +114,7 @@ class RestatementRead(BaseModel):
 
     id: int
     flex_import_id: int | None
+    account_id: int
     table_name: str
     natural_key: dict
     column_name: str
@@ -221,21 +222,20 @@ class WizardStateResponse(BaseModel):
 
 
 class GrantCreate(BaseModel):
-    grantee_email: str
-    valid_from: date
+    grantor_party_id: int
+    grantee_organization_id: int | None = None
+    grantee_user_id: int | None = None
+    valid_from: date | None = None  # default: CURRENT_DATE (en el endpoint)
     valid_to: date | None = None
 
 
 class GrantRead(BaseModel):
-    grantor_user_id: int
-    grantee_user_id: int
-    grantor_email: str
-    grantee_email: str
+    id: int
+    grantor_party_id: int
+    grantee_organization_id: int | None
+    grantee_user_id: int | None
+    organization_id: int
     role: str
     valid_from: date
     valid_to: date | None
-
-
-class GrantListResponse(BaseModel):
-    granted: list[GrantRead]
-    received: list[GrantRead]
+    direction: Literal["granted", "received"]

@@ -80,6 +80,16 @@ fuente documentado (``trm.value_cop``, ``participations.pct`` se quedan).
 Regenerado canónicamente en container (autogenerate temporal contra DB virgen,
 splice entre marcadores, mismo revision id). SIN cambios RLS.
 
+**Amendment #8 (SP2 — authorization):** (a) ``ck_access_grants_valid_range``
+pasa a ``valid_to >= valid_from`` (vigencia half-open [from, to): intervalo
+vacío legal para revoke same-day, SP2-D8); (b) ``restatement_log.account_id``
+FK RESTRICT NOT NULL + índice ``(organization_id, account_id)`` (filtro
+party-scoped del grantee, SP2-D9); (c) función SECURITY DEFINER
+``authz_grant_party_ids(p_user_id, p_org_id)`` (bootstrap del resolver de
+autorización — frozen idéntico a ``db/rls.py::authz_grant_function_sql()``,
+SP2-D3). Regenerado canónicamente en container (autogenerate temporal contra
+DB virgen, splice entre markers).
+
 El DDL de ``upgrade()`` hasta el marcador ``end Alembic commands`` es
 autogenerado canónicamente (container, DB virgen, ``alembic revision
 --autogenerate``). Las SECCIONES HAND-WRITTEN que autogenerate NO captura
@@ -525,7 +535,7 @@ def upgrade() -> None:
             name=op.f("ck_access_grants_grantee_arc"),
         ),
         sa.CheckConstraint(
-            "valid_to IS NULL OR valid_to > valid_from", name=op.f("ck_access_grants_valid_range")
+            "valid_to IS NULL OR valid_to >= valid_from", name=op.f("ck_access_grants_valid_range")
         ),
         sa.ForeignKeyConstraint(
             ["grantee_organization_id"],
@@ -1155,6 +1165,7 @@ def upgrade() -> None:
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
         sa.Column("organization_id", sa.BigInteger(), nullable=False),
         sa.Column("flex_import_id", sa.BigInteger(), nullable=True),
+        sa.Column("account_id", sa.BigInteger(), nullable=False),
         sa.Column("table_name", sa.String(), nullable=False),
         sa.Column("natural_key", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.Column("column_name", sa.String(), nullable=False),
@@ -1170,6 +1181,12 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(
             "kind IN ('value_update', 'sibling_row')", name=op.f("ck_restatement_log_kind")
+        ),
+        sa.ForeignKeyConstraint(
+            ["account_id"],
+            ["accounts.id"],
+            name=op.f("fk_restatement_log_account_id_accounts"),
+            ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["flex_import_id"],
@@ -1196,6 +1213,12 @@ def upgrade() -> None:
         op.f("ix_restatement_log_organization_id"),
         "restatement_log",
         ["organization_id", sa.literal_column("detected_at DESC")],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_restatement_log_organization_id_account_id"),
+        "restatement_log",
+        ["organization_id", "account_id"],
         unique=False,
     )
     op.create_table(
@@ -1555,6 +1578,31 @@ def upgrade() -> None:
     op.execute("REVOKE EXECUTE ON FUNCTION system_credentialed_org_ids() FROM PUBLIC")
     op.execute(f"GRANT EXECUTE ON FUNCTION system_credentialed_org_ids() TO {_APP_ROLE}")
 
+    # --- (6) authz_grant_party_ids() SECURITY DEFINER function (SP2-D3) ------
+    # Frozen from db/rls.py::authz_grant_function_sql() (amendment #8, SP2): the
+    # authorization resolver runs BEFORE org RLS context is set, so "may user U
+    # enter org X?" is inherently cross-org — same security envelope as
+    # system_credentialed_org_ids() (SECURITY DEFINER, owner RLS-exempt, pinned
+    # search_path anti-hijack, REVOKE PUBLIC + GRANT app_rls least privilege).
+    # Resolves the grantor party_ids of grants vigentes (half-open [from, to),
+    # CURRENT_DATE) toward the user (direct grantee_user_id OR via a firm-org
+    # membership). Not in Base.metadata -> drift test ignores it.
+    op.execute(
+        "CREATE OR REPLACE FUNCTION authz_grant_party_ids("
+        "p_user_id bigint, p_org_id bigint) "
+        "RETURNS SETOF bigint LANGUAGE sql STABLE SECURITY DEFINER "
+        "SET search_path = pg_catalog, public AS $$ "
+        "SELECT g.grantor_party_id FROM access_grants g "
+        "WHERE g.organization_id = p_org_id "
+        "AND (g.grantee_user_id = p_user_id "
+        "OR g.grantee_organization_id IN ("
+        "SELECT m.organization_id FROM memberships m WHERE m.user_id = p_user_id)) "
+        "AND g.valid_from <= CURRENT_DATE "
+        "AND (g.valid_to IS NULL OR g.valid_to > CURRENT_DATE) $$"
+    )
+    op.execute("REVOKE EXECUTE ON FUNCTION authz_grant_party_ids(bigint, bigint) FROM PUBLIC")
+    op.execute(f"GRANT EXECUTE ON FUNCTION authz_grant_party_ids(bigint, bigint) TO {_APP_ROLE}")
+
 
 def downgrade() -> None:
     """Downgrade schema."""
@@ -1562,6 +1610,7 @@ def downgrade() -> None:
     # the function from a1f2c3d4e5b6, apscheduler_jobs from 7fdaf6528762). The
     # RLS policies are dropped implicitly with their tables below; the role is
     # dropped last (after its grants are gone with the tables).
+    op.execute("DROP FUNCTION IF EXISTS authz_grant_party_ids(bigint, bigint)")
     op.execute("DROP FUNCTION IF EXISTS system_credentialed_org_ids()")
     op.execute("DROP INDEX IF EXISTS ix_apscheduler_jobs_next_run_time")
     op.execute("DROP TABLE IF EXISTS apscheduler_jobs")
@@ -1584,6 +1633,9 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_trades_account_id_symbol"), table_name="trades")
     op.drop_index(op.f("ix_trades_account_id_instrument_id"), table_name="trades")
     op.drop_table("trades")
+    op.drop_index(
+        op.f("ix_restatement_log_organization_id_account_id"), table_name="restatement_log"
+    )
     op.drop_index(op.f("ix_restatement_log_organization_id"), table_name="restatement_log")
     op.drop_index(op.f("ix_restatement_log_flex_import_id"), table_name="restatement_log")
     op.drop_table("restatement_log")

@@ -26,8 +26,20 @@ async def _seed_restatement(owner_engine, *, org_name: str, **values) -> int:
         await session.execute(
             text("SELECT set_config('app.current_org', :o, true)").bindparams(o=str(org_id))
         )
+        # restatement_log.account_id is NOT NULL FK → accounts (SP2-D9). Seed (or
+        # reuse) an account in this org so the FK + NOT NULL are satisfied.
+        account_id = await session.scalar(
+            text(
+                "INSERT INTO accounts (organization_id, ibkr_account_id) "
+                "VALUES (:o, :a) "
+                "ON CONFLICT (organization_id, ibkr_account_id) DO UPDATE "
+                "SET ibkr_account_id = EXCLUDED.ibkr_account_id "
+                "RETURNING id"
+            ).bindparams(o=org_id, a="U99999001")
+        )
         cols = {
             "organization_id": org_id,
+            "account_id": account_id,
             "table_name": "open_position_lots",
             "natural_key": "{}",
             "column_name": "qty",
@@ -54,7 +66,7 @@ async def test_restatements_empty_when_none(client: AsyncClient, auth_headers_wi
 
 
 async def test_restatements_requires_org(client: AsyncClient, auth_headers: dict):
-    """A user with no org membership cannot resolve org_context → 403."""
+    """A user with no org membership cannot resolve an authz context (require_scope) → 403."""
     resp = await client.get("/api/ingest/restatements", headers=auth_headers)
     assert resp.status_code == 403
 
@@ -85,6 +97,9 @@ async def test_restatements_returns_seeded_rows(
     assert len(rows) == 1
     row = rows[0]
     assert row["id"] == rid
+    # SP2: account_id es de primera clase en la response (el filtro party-scoped
+    # del grantee keyea sobre el; ver test_grantee_e2e).
+    assert isinstance(row["account_id"], int)
     assert row["table_name"] == "open_position_lots"
     assert row["natural_key"] == {"account_id": 1, "symbol": "ICSH", "open_date": "2025-01-02"}
     assert row["column_name"] == "cost_basis_usd"

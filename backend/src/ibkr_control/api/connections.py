@@ -11,13 +11,13 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ibkr_control.api._context import org_context
 from ibkr_control.api._schemas import (
     ConnectionCreate,
     ConnectionRead,
     ConnectionRotate,
     ConnectionUpdate,
 )
+from ibkr_control.authz import AuthzContext, require_scope
 from ibkr_control.db.models.connections import Connection, ConnectionIbkrFlex
 from ibkr_control.db.models.institutions import Institution
 from ibkr_control.db.session import get_async_session
@@ -80,7 +80,7 @@ async def _serialize(session: AsyncSession, conn: Connection) -> ConnectionRead:
 
 @router.get("", response_model=list[ConnectionRead])
 async def list_connections(
-    org_id: int = Depends(org_context),
+    ctx: AuthzContext = Depends(require_scope("ops:read")),
     session: AsyncSession = Depends(get_async_session),
 ) -> list[ConnectionRead]:
     conns = (await session.scalars(select(Connection).order_by(Connection.id))).all()
@@ -90,7 +90,7 @@ async def list_connections(
 @router.post("", response_model=ConnectionRead, status_code=201)
 async def create_connection(
     payload: ConnectionCreate,
-    org_id: int = Depends(org_context),
+    ctx: AuthzContext = Depends(require_scope("connections:write")),
     session: AsyncSession = Depends(get_async_session),
 ) -> ConnectionRead:
     await _validate_token_against_ibkr(payload.token, payload.query_id)
@@ -100,7 +100,7 @@ async def create_connection(
         # dejar que el FK NOT NULL explote en un IntegrityError opaco.
         raise HTTPException(status_code=500, detail="Institution 'ibkr' seed missing")
     conn = Connection(
-        organization_id=org_id,
+        organization_id=ctx.org_id,
         institution_id=inst_id,
         provider_type="ibkr_flex",
         display_name=payload.display_name,
@@ -110,7 +110,7 @@ async def create_connection(
     session.add(
         ConnectionIbkrFlex(
             connection_id=conn.id,
-            organization_id=org_id,
+            organization_id=ctx.org_id,
             token_encrypted=flex_crypto_mod.encrypt_token(payload.token),
             query_id=payload.query_id,
         )
@@ -123,7 +123,7 @@ async def create_connection(
 async def update_connection(
     connection_id: int,
     payload: ConnectionUpdate,
-    org_id: int = Depends(org_context),
+    ctx: AuthzContext = Depends(require_scope("connections:write")),
     session: AsyncSession = Depends(get_async_session),
 ) -> ConnectionRead:
     conn = await _get_or_404(session, connection_id)
@@ -137,7 +137,7 @@ async def update_connection(
 async def rotate_token(
     connection_id: int,
     payload: ConnectionRotate,
-    org_id: int = Depends(org_context),
+    ctx: AuthzContext = Depends(require_scope("connections:write")),
     session: AsyncSession = Depends(get_async_session),
 ) -> ConnectionRead:
     conn = await _get_or_404(session, connection_id)
@@ -155,7 +155,7 @@ async def rotate_token(
 @router.post("/{connection_id}/disable", response_model=ConnectionRead)
 async def disable_connection(
     connection_id: int,
-    org_id: int = Depends(org_context),
+    ctx: AuthzContext = Depends(require_scope("connections:write")),
     session: AsyncSession = Depends(get_async_session),
 ) -> ConnectionRead:
     conn = await _get_or_404(session, connection_id)
@@ -167,7 +167,7 @@ async def disable_connection(
 @router.post("/{connection_id}/enable", response_model=ConnectionRead)
 async def enable_connection(
     connection_id: int,
-    org_id: int = Depends(org_context),
+    ctx: AuthzContext = Depends(require_scope("connections:write")),
     session: AsyncSession = Depends(get_async_session),
 ) -> ConnectionRead:
     conn = await _get_or_404(session, connection_id)
@@ -179,7 +179,7 @@ async def enable_connection(
 @router.delete("/{connection_id}", status_code=204)
 async def delete_connection(
     connection_id: int,
-    org_id: int = Depends(org_context),
+    ctx: AuthzContext = Depends(require_scope("connections:write")),
     session: AsyncSession = Depends(get_async_session),
 ) -> Response:
     conn = await _get_or_404(session, connection_id)

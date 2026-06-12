@@ -9,7 +9,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sse_starlette.sse import EventSourceResponse
 
-from ibkr_control.api._context import org_context
 from ibkr_control.api._schemas import (
     IngestJobStarted,
     IngestLogRead,
@@ -18,6 +17,7 @@ from ibkr_control.api._schemas import (
 )
 from ibkr_control.auth.backend import current_active_user
 from ibkr_control.auth.models import User
+from ibkr_control.authz import AuthzContext, require_scope, visible_account_ids
 from ibkr_control.config import get_settings
 from ibkr_control.db.models.ingest_log import IngestLog
 from ibkr_control.db.models.restatements import RestatementLog
@@ -31,8 +31,7 @@ router = APIRouter(prefix="/ingest", tags=["ingest"])
 async def trigger_manual_refresh(
     payload: IngestTrigger,
     background: BackgroundTasks,
-    user: User = Depends(current_active_user),
-    org_id: int = Depends(org_context),
+    ctx: AuthzContext = Depends(require_scope("ingest:trigger")),
     session: AsyncSession = Depends(get_async_session),
 ) -> IngestJobStarted:
     """Trigger manual del ingest. Rate-limited via UPDATE atomico condicional.
@@ -54,7 +53,7 @@ async def trigger_manual_refresh(
 
     result = await session.execute(
         update(Organization)
-        .where(Organization.id == org_id)
+        .where(Organization.id == ctx.org_id)
         .where(
             or_(
                 Organization.last_ingest_trigger_at.is_(None),
@@ -67,7 +66,7 @@ async def trigger_manual_refresh(
 
     if result.rowcount == 0:
         current = await session.scalar(
-            select(Organization.last_ingest_trigger_at).where(Organization.id == org_id)
+            select(Organization.last_ingest_trigger_at).where(Organization.id == ctx.org_id)
         )
         wait_seconds = (
             int((cooldown - (now - current)).total_seconds())
@@ -79,7 +78,7 @@ async def trigger_manual_refresh(
             detail=f"Espera {wait_seconds}s antes de reintentar",
         )
 
-    job_id = await _launch_manual_job(payload.kind, user.id, org_id, background)
+    job_id = await _launch_manual_job(payload.kind, ctx.user_id, ctx.org_id, background)
     return IngestJobStarted(job_id=job_id)
 
 
@@ -210,7 +209,7 @@ async def stream_progress(
 @router.get("/logs", response_model=list[IngestLogRead])
 async def list_logs(
     limit: int = Query(10, ge=1, le=100),
-    org_id: int = Depends(org_context),
+    ctx: AuthzContext = Depends(require_scope("ops:read")),
     session: AsyncSession = Depends(get_async_session),
 ) -> list[IngestLogRead]:
     # Per-org ingest activity. The old `| user_id IS NULL` clause existed to
@@ -219,7 +218,7 @@ async def list_logs(
     # own flex/manual ingest log.
     result = await session.scalars(
         select(IngestLog)
-        .where(IngestLog.organization_id == org_id)
+        .where(IngestLog.organization_id == ctx.org_id)
         .order_by(IngestLog.started_at.desc())
         .limit(limit)
     )
@@ -233,7 +232,7 @@ async def list_restatements(
     flex_import_id: int | None = Query(None),
     table_name: str | None = Query(None),
     sealed_only: bool = Query(False),
-    org_id: int = Depends(org_context),
+    ctx: AuthzContext = Depends(require_scope("data:read")),
     session: AsyncSession = Depends(get_async_session),
 ) -> list[RestatementRead]:
     """Lista las filas de restatement_log del org (RLS scopea — sin filtro org
@@ -251,6 +250,9 @@ async def list_restatements(
         stmt = stmt.where(RestatementLog.table_name == table_name)
     if sealed_only:
         stmt = stmt.where(RestatementLog.sealed_year.is_(True))
+    visible = await visible_account_ids(session, ctx)
+    if visible is not None:
+        stmt = stmt.where(RestatementLog.account_id.in_(visible))
     stmt = (
         stmt.order_by(RestatementLog.detected_at.desc(), RestatementLog.id.desc())
         .limit(limit)

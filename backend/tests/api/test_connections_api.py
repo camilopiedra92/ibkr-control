@@ -255,13 +255,13 @@ async def test_rls_isolation_org_b_cannot_see_org_a(
 
 
 async def test_connections_require_auth(client: AsyncClient):
-    """Sin auth -> 401 (org_context depende de current_active_user)."""
+    """Sin auth -> 401 (require_scope depende de current_active_user)."""
     resp = await client.get("/api/connections")
     assert resp.status_code == 401
 
 
 async def test_create_connection_403_when_no_org(client: AsyncClient, auth_headers: dict):
-    """Usuario sin membership no resuelve org_context -> 403."""
+    """Usuario sin membership no resuelve contexto authz (require_scope) -> 403."""
     resp = await client.post(
         "/api/connections",
         json={"token": "valid-token-abc123", "query_id": "QID-1"},

@@ -127,6 +127,8 @@ class _RestatementCollector:
         self.rows.append(
             {
                 "table_name": table_name,
+                # SP2-D9: las 3 snapshot tables tienen account_id (DB id) en su key.
+                "account_id": natural_key["account_id"],
                 "natural_key": {k: _json_safe(v) for k, v in natural_key.items()},
                 "_natural_key_raw": natural_key,
                 "column_name": column_name,
@@ -136,10 +138,21 @@ class _RestatementCollector:
             }
         )
 
-    def add_sibling(self, table_name: str, natural_key: dict[str, Any], old: Any, new: Any) -> None:
+    def add_sibling(
+        self,
+        table_name: str,
+        account_id: int,
+        natural_key: dict[str, Any],
+        old: Any,
+        new: Any,
+    ) -> None:
         self.rows.append(
             {
                 "table_name": table_name,
+                # SP2-D9: el account del closed_lot afectado; un transaction_id
+                # pertenece a una sola cuenta (semántica de la fuente IBKR), así
+                # que el sibling preexistente comparte account.
+                "account_id": account_id,
                 "natural_key": {k: _json_safe(v) for k, v in natural_key.items()},
                 "_natural_key_raw": natural_key,
                 "column_name": "*",
@@ -396,6 +409,7 @@ async def _persist_restatements(
             "organization_id": organization_id,
             "flex_import_id": flex_import_id,
             "table_name": row["table_name"],
+            "account_id": row["account_id"],
             "natural_key": row["natural_key"],
             "column_name": row["column_name"],
             "old_value": row["old_value"],
@@ -459,6 +473,7 @@ async def _detect_closed_lot_siblings(
             seen_pairs.add(pair)
             collector.add_sibling(
                 "closed_lots",
+                row.account_id,
                 {
                     "transaction_id": row.transaction_id,
                     "close_datetime": row.close_datetime,
@@ -574,7 +589,7 @@ async def _upsert_all_children(
         ClosedLot.__table__,
         closed_rows,
         ["organization_id", "transaction_id", "close_datetime", "qty", "fifo_pnl_usd"],
-        ["transaction_id", "close_datetime", "qty", "fifo_pnl_usd", "close_date"],
+        ["transaction_id", "close_datetime", "qty", "fifo_pnl_usd", "close_date", "account_id"],
     )
     n_new_closed = len(inserted_closed)
 

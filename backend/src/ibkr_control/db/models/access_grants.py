@@ -4,6 +4,9 @@ Party-scoped (grantor_party_id). Grantee is exactly one of org|user (exclusive
 arc). organization_id = the grantor party's org (the household that granted).
 RLS on this table is SPECIAL (grantor-org OR grantee can see it) — added later.
 Enforcement of the grant (who may switch into whose org) is SP2.
+
+Vigencia half-open [valid_from, valid_to): valid_to == hoy => inactivo ya;
+intervalo vacío legal (revoke same-day, SP2-D8).
 """
 
 from datetime import date, datetime
@@ -22,7 +25,7 @@ class AccessGrant(Base):
             name="grantee_arc",
         ),
         CheckConstraint("role IN ('read_only')", name="role"),
-        CheckConstraint("valid_to IS NULL OR valid_to > valid_from", name="valid_range"),
+        CheckConstraint("valid_to IS NULL OR valid_to >= valid_from", name="valid_range"),
         # D1 sp1-db-hardening: la policy RLS grant_visibility evalúa
         # grantor/grantee en CADA query a esta tabla, y SP2 la pone en el hot
         # path de autorización.
