@@ -17,7 +17,7 @@ from ibkr_control.api._schemas import (
 )
 from ibkr_control.auth.backend import current_active_user
 from ibkr_control.auth.models import User
-from ibkr_control.authz import AuthzContext, require_scope
+from ibkr_control.authz import AuthzContext, require_scope, visible_account_ids
 from ibkr_control.config import get_settings
 from ibkr_control.db.models.ingest_log import IngestLog
 from ibkr_control.db.models.restatements import RestatementLog
@@ -250,6 +250,9 @@ async def list_restatements(
         stmt = stmt.where(RestatementLog.table_name == table_name)
     if sealed_only:
         stmt = stmt.where(RestatementLog.sealed_year.is_(True))
+    visible = await visible_account_ids(session, ctx)
+    if visible is not None:
+        stmt = stmt.where(RestatementLog.account_id.in_(visible))
     stmt = (
         stmt.order_by(RestatementLog.detected_at.desc(), RestatementLog.id.desc())
         .limit(limit)
