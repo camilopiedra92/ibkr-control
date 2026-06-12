@@ -1,4 +1,6 @@
-"""resolve_authz - el PDP (SP2-D1/D3). Funciones puras: deciden, no setean RLS.
+"""resolve_authz - el PDP (SP2-D1/D3). Decide, no setea RLS - los errores van
+como HTTPException directo (PEP/PDP conviven en el monolito; el swap futuro
+reemplaza este modulo entero).
 
 Memberships primero (sin RLS - identidad); grants despues via la funcion
 SECURITY DEFINER authz_grant_party_ids (el resolver corre ANTES de que exista
