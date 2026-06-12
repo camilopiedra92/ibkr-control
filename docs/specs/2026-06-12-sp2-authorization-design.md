@@ -106,6 +106,23 @@ Resolución:
 4. La fecha de vigencia se evalúa con `CURRENT_DATE` de la DB (UTC). Granularidad
    DATE es deliberada (el grant es una relación fiscal, no una sesión).
 
+**Mecanismo de lectura de grants (descubierto al planificar — bootstrap del
+resolver):** el resolver corre **antes** de setear contexto RLS, y bajo `app_rls`
++ FORCE la policy `grant_visibility` default-denia sin GUCs. Peor: el arm
+`grantee_organization_id = current_org` solo expone el grant de un org-firm con
+`current_org` = el org del FIRM — que no es ni el org solicitado ni un contexto
+que el resolver pueda adivinar (el user puede ser member de N orgs). La pregunta
+"¿puede el user U entrar al org X?" es inherentemente cross-org → mismo patrón
+que SP1-hardening H1: función **`SECURITY DEFINER`** estrecha
+`authz_grant_party_ids(p_user_id, p_org_id) RETURNS SETOF bigint` (grantor
+parties de los grants vigentes de X hacia U o hacia los orgs de U; `SET
+search_path` pinned, `REVOKE PUBLIC` + `GRANT EXECUTE TO app_rls`; builder en
+`db/rls.py` + frozen en el baseline, lockstep como `system_credentialed_org_ids`).
+No agrega exposición: `app_rls` ya puede setear cualquier GUC org — RLS protege
+contra bugs, no contra código de app malicioso; la función mantiene la lectura
+cross-org auditada en UN punto. La policy `grant_visibility` queda intacta (sigue
+sirviendo el caso "listar mis grants desde mi propio org", SP2-D5).
+
 Errores (default-deny, sin leak de existencia):
 
 | Caso | Código |
@@ -148,6 +165,11 @@ Decisiones finas dentro de la tabla:
   operación interna del org, no parte de la data fiscal compartida.
 - `member` lee todo pero escribe nada — la semántica fina adicional de roles
   (gestión de memberships, transferencia de ownership) es SP3.
+- Precisión sobre "imports" en la tabla: el único endpoint de imports HOY es
+  `POST /api/imports/upload` (un write: ingesta XML manual) → scope
+  `ingest:trigger` (admin+). El *listado* de imports como data-plane del grantee
+  llega con su consumidor (Phase 3); la fila de la tabla fija la decisión para
+  entonces. La superficie data-plane del grantee en SP2 es restatements.
 
 ### SP2-D6 — Grantee: tres barreras independientes
 
@@ -218,7 +240,8 @@ inalcanzable para el grantee.)
 
 ### SP2-D10 — Migración: un amendment al baseline (T1-D14 vigente)
 
-UN amendment al baseline pristino `a9977ac077e5` con SP2-D8 + SP2-D9, **regenerado
+UN amendment al baseline pristino `a9977ac077e5` con SP2-D8 + SP2-D9 + la función
+`authz_grant_party_ids` (SP2-D3), **regenerado
 canónicamente dentro del container** (lección Phase 2.9 / transfer-lineage: el camino
 valida formato y ordering topológico; hand-edit prohibido) + wipe & reload dev
 (`down -v`, recarga por wizard). La política expira al primer deploy.
