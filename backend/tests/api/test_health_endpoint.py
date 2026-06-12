@@ -337,8 +337,20 @@ async def _seed_restatement(owner_engine, *, org_name: str, **values) -> int:
         await session.execute(
             text("SELECT set_config('app.current_org', :o, true)").bindparams(o=str(org_id))
         )
+        # restatement_log.account_id is NOT NULL FK → accounts (SP2-D9). Seed (or
+        # reuse) an account in this org so the FK + NOT NULL are satisfied.
+        account_id = await session.scalar(
+            text(
+                "INSERT INTO accounts (organization_id, ibkr_account_id) "
+                "VALUES (:o, :a) "
+                "ON CONFLICT (organization_id, ibkr_account_id) DO UPDATE "
+                "SET ibkr_account_id = EXCLUDED.ibkr_account_id "
+                "RETURNING id"
+            ).bindparams(o=org_id, a="U99999001")
+        )
         cols = {
             "organization_id": org_id,
+            "account_id": account_id,
             "table_name": "open_position_lots",
             "column_name": "qty",
             "kind": "value_update",
