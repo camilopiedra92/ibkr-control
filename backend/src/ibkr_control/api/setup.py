@@ -40,10 +40,8 @@ from ibkr_control.api._schemas import (
     Step3UploadResponse,
     WizardStateResponse,
 )
-from ibkr_control.api._context import org_context
 from ibkr_control.api._step3_stash import get_stash
-from ibkr_control.auth.backend import current_active_user
-from ibkr_control.auth.models import User
+from ibkr_control.authz import AuthzContext, require_scope
 from ibkr_control.config import get_settings
 from ibkr_control.db.models.accounts import Account
 from ibkr_control.db.models.connections import Connection, ConnectionIbkrFlex
@@ -226,8 +224,7 @@ async def _trm_backfill_background(user_id: int, job_id: int) -> None:
 
 @router.get("/state", response_model=WizardStateResponse)
 async def get_state(
-    user: User = Depends(current_active_user),
-    org_id: int = Depends(org_context),
+    ctx: AuthzContext = Depends(require_scope("setup:write")),
     session: AsyncSession = Depends(get_async_session),
 ) -> WizardStateResponse:
     has_creds = (
@@ -239,22 +236,22 @@ async def get_state(
         await session.scalar(
             select(func.count())
             .select_from(Participation)
-            .where(Participation.organization_id == org_id)
+            .where(Participation.organization_id == ctx.org_id)
         )
     ) > 0
     n_xmls = (
         await session.scalar(
             select(func.count(FlexImport.id)).where(
-                FlexImport.organization_id == org_id,
+                FlexImport.organization_id == ctx.org_id,
                 FlexImport.source == "manual_upload",
             )
         )
     ) or 0
 
-    org = await session.get(Organization, org_id)
+    org = await session.get(Organization, ctx.org_id)
     p = org.setup_progress or {}
     stash = get_stash()
-    pending = [e.temp_id for e in stash.list_for_user(user_id=user.id)]
+    pending = [e.temp_id for e in stash.list_for_user(user_id=ctx.user_id)]
 
     return WizardStateResponse(
         step1_credentials=has_creds,
@@ -273,7 +270,7 @@ async def get_state(
 @router.post("/step1/save")
 async def step1_save(
     payload: SetupConnectionPayload,
-    org_id: int = Depends(org_context),
+    ctx: AuthzContext = Depends(require_scope("setup:write")),
     session: AsyncSession = Depends(get_async_session),
 ) -> dict:
     """Save the org's ibkr_flex connection (encrypt token). Does NOT call IBKR
@@ -292,7 +289,7 @@ async def step1_save(
             # Seed roto (la migracion baseline inserta 'ibkr') -- fail-loud.
             raise HTTPException(status_code=500, detail="Institution 'ibkr' seed missing")
         conn = Connection(
-            organization_id=org_id,
+            organization_id=ctx.org_id,
             institution_id=inst_id,
             provider_type="ibkr_flex",
             display_name=payload.display_name,
@@ -302,7 +299,7 @@ async def step1_save(
         session.add(
             ConnectionIbkrFlex(
                 connection_id=conn.id,
-                organization_id=org_id,
+                organization_id=ctx.org_id,
                 token_encrypted=encrypted,
                 query_id=payload.query_id,
             )
@@ -370,7 +367,7 @@ def _classify_detect_failure(exc: Exception):
 
 @router.post("/step2/detect", response_model=Step2DetectResponse)
 async def step2_detect(
-    org_id: int = Depends(org_context),
+    ctx: AuthzContext = Depends(require_scope("setup:write")),
     session: AsyncSession = Depends(get_async_session),
 ) -> Step2DetectResponse:
     """Fetch + parse + persist YTD across ALL active connections (W1).
@@ -420,7 +417,7 @@ async def step2_detect(
             flex_import_id, counters = await flex_persister_mod.persist(
                 session,
                 parsed=parsed,
-                organization_id=org_id,
+                organization_id=ctx.org_id,
                 xml_bytes=xml_bytes,
                 source="web_service",
                 connection_id=conn.id,
@@ -476,7 +473,7 @@ async def step2_detect(
 @router.post("/step2/detect_from_xml", response_model=Step2DetectFromXmlResponse)
 async def step2_detect_from_xml(
     file: UploadFile = File(...),
-    org_id: int = Depends(org_context),
+    ctx: AuthzContext = Depends(require_scope("setup:write")),
     session: AsyncSession = Depends(get_async_session),
 ) -> Step2DetectFromXmlResponse:
     """Fallback when IBKR is unreachable: parse uploaded XML and persist it as
@@ -501,7 +498,7 @@ async def step2_detect_from_xml(
     _flex_import_id, _counters = await flex_persister_mod.persist(
         session,
         parsed=parsed,
-        organization_id=org_id,
+        organization_id=ctx.org_id,
         xml_bytes=content,
         source="manual_upload",
     )
@@ -520,8 +517,7 @@ async def step2_detect_from_xml(
 async def step2_save(
     payload: Step2SaveRequest,
     background: BackgroundTasks,
-    user: User = Depends(current_active_user),
-    org_id: int = Depends(org_context),
+    ctx: AuthzContext = Depends(require_scope("setup:write")),
     session: AsyncSession = Depends(get_async_session),
 ) -> Step2SaveResponse:
     """Persist accounts + participations. Dispatches TRM backfill in background (per D6)."""
@@ -530,15 +526,15 @@ async def step2_save(
     # ibkr_account_id must already exist in `accounts` (it gets there via
     # step2/detect's persist() call, which skips F-shadow accounts).
     flex_imports_count = await session.scalar(
-        select(func.count(FlexImport.id)).where(FlexImport.organization_id == org_id)
+        select(func.count(FlexImport.id)).where(FlexImport.organization_id == ctx.org_id)
     )
     if not flex_imports_count:
         raise HTTPException(status_code=400, detail="NO_DETECT_YET")
 
     # Provenance gate: only accounts that appear in THIS org's imports are
     # claimable — not the whole shared `accounts` table.
-    existing_account_ids = await _org_imported_account_ids(session, org_id)
-    party_id = await _founding_party_id(session, org_id, user.id)
+    existing_account_ids = await _org_imported_account_ids(session, ctx.org_id)
+    party_id = await _founding_party_id(session, ctx.org_id, ctx.user_id)
 
     for item in payload.accounts:
         if _is_shadow(item.ibkr_account_id):
@@ -562,7 +558,7 @@ async def step2_save(
     for item in payload.accounts:
         acc = await session.scalar(
             select(Account).where(
-                Account.organization_id == org_id,
+                Account.organization_id == ctx.org_id,
                 Account.ibkr_account_id == item.ibkr_account_id,
             )
         )
@@ -586,7 +582,7 @@ async def step2_save(
             Participation(
                 party_id=party_id,
                 account_id=acc.id,
-                organization_id=org_id,
+                organization_id=ctx.org_id,
                 pct=item.pct,
                 valid_from=today,
                 valid_to=None,
@@ -597,8 +593,8 @@ async def step2_save(
     # Register the job BEFORE add_task so the wizard banner can subscribe to
     # /api/ingest/stream/{job_id} the moment it receives this response without
     # racing the background task start (D12 fix — was fire-and-forget).
-    job_id = get_tracker().create_job(user_id=user.id)
-    background.add_task(_trm_backfill_background, user_id=user.id, job_id=job_id)
+    job_id = get_tracker().create_job(user_id=ctx.user_id)
+    background.add_task(_trm_backfill_background, user_id=ctx.user_id, job_id=job_id)
     return Step2SaveResponse(ok=True, trm_backfill_job_id=job_id)
 
 
@@ -608,8 +604,7 @@ async def step2_save(
 @router.post("/step3/upload", response_model=Step3UploadResponse)
 async def step3_upload(
     file: UploadFile = File(...),
-    user: User = Depends(current_active_user),
-    org_id: int = Depends(org_context),
+    ctx: AuthzContext = Depends(require_scope("setup:write")),
     session: AsyncSession = Depends(get_async_session),
 ) -> Step3UploadResponse:
     """Stash one XML in memory. Detect new accounts vs already-configured."""
@@ -621,7 +616,9 @@ async def step3_upload(
     sha = hashlib.sha256(content).hexdigest()
 
     existing_import = await session.scalar(
-        select(FlexImport).where(FlexImport.organization_id == org_id, FlexImport.xml_hash == sha)
+        select(FlexImport).where(
+            FlexImport.organization_id == ctx.org_id, FlexImport.xml_hash == sha
+        )
     )
     if existing_import is not None:
         raise HTTPException(
@@ -630,7 +627,7 @@ async def step3_upload(
         )
 
     stash = get_stash()
-    if stash.find_by_sha256(user_id=user.id, sha256=sha) is not None:
+    if stash.find_by_sha256(user_id=ctx.user_id, sha256=sha) is not None:
         raise HTTPException(
             status_code=409,
             detail={"code": "DUPLICATE_XML_STASHED"},
@@ -647,7 +644,7 @@ async def step3_upload(
     existing_accounts = {
         a.ibkr_account_id
         for a in (
-            await session.scalars(select(Account).where(Account.organization_id == org_id))
+            await session.scalars(select(Account).where(Account.organization_id == ctx.org_id))
         ).all()
     }
 
@@ -659,7 +656,7 @@ async def step3_upload(
     anyo = parsed.anyo
 
     temp_id = stash.put(
-        user_id=user.id,
+        user_id=ctx.user_id,
         data={
             "parsed": parsed,
             "xml_bytes": content,
@@ -684,16 +681,15 @@ async def step3_upload(
 @router.post("/step3/save_new_accounts")
 async def step3_save_new_accounts(
     payload: Step3SaveNewAccountsRequest,
-    user: User = Depends(current_active_user),
-    org_id: int = Depends(org_context),
+    ctx: AuthzContext = Depends(require_scope("setup:write")),
     session: AsyncSession = Depends(get_async_session),
 ) -> dict:
     """Persist accounts + participations for newly-detected IDs from Step 3 uploads."""
     # Provenance gate: only ids the user actually uploaded in Step 3 are
     # claimable — guard before any create/mutate so a guessed id can neither
     # fabricate an account nor grant participation.
-    stashed_ids = _user_stashed_account_ids(user.id)
-    party_id = await _founding_party_id(session, org_id, user.id)
+    stashed_ids = _user_stashed_account_ids(ctx.user_id)
+    party_id = await _founding_party_id(session, ctx.org_id, ctx.user_id)
     today = date.today()
     for item in payload.accounts:
         if _is_shadow(item.ibkr_account_id):
@@ -714,13 +710,13 @@ async def step3_save_new_accounts(
             )
         acc = await session.scalar(
             select(Account).where(
-                Account.organization_id == org_id,
+                Account.organization_id == ctx.org_id,
                 Account.ibkr_account_id == item.ibkr_account_id,
             )
         )
         if acc is None:
             acc = Account(
-                organization_id=org_id,
+                organization_id=ctx.org_id,
                 ibkr_account_id=item.ibkr_account_id,
                 alias=item.alias,
                 currency="USD",
@@ -746,7 +742,7 @@ async def step3_save_new_accounts(
             Participation(
                 party_id=party_id,
                 account_id=acc.id,
-                organization_id=org_id,
+                organization_id=ctx.org_id,
                 pct=item.pct,
                 valid_from=today,
                 valid_to=None,
@@ -759,8 +755,7 @@ async def step3_save_new_accounts(
 @router.post("/step3/commit", response_model=Step3CommitResponse)
 async def step3_commit(
     payload: Step3CommitRequest,
-    user: User = Depends(current_active_user),
-    org_id: int = Depends(org_context),
+    ctx: AuthzContext = Depends(require_scope("setup:write")),
     session: AsyncSession = Depends(get_async_session),
 ) -> Step3CommitResponse:
     """Drain stash, persist all selected XMLs in one transaction.
@@ -775,9 +770,9 @@ async def step3_commit(
     # Validate first pass: all temp_ids exist + every referenced account was
     # resolved by THIS ORG (has a participation) — provenance/isolation scope,
     # not mere global existence.
-    configured_accounts = await _org_configured_account_ids(session, org_id)
+    configured_accounts = await _org_configured_account_ids(session, ctx.org_id)
     for temp_id in payload.temp_ids:
-        entry = stash.get(user_id=user.id, temp_id=temp_id)
+        entry = stash.get(user_id=ctx.user_id, temp_id=temp_id)
         if entry is None:
             raise HTTPException(
                 status_code=410,
@@ -808,7 +803,7 @@ async def step3_commit(
         "n_new_transfers",
     )
     for temp_id in payload.temp_ids:
-        entry = stash.pop(user_id=user.id, temp_id=temp_id)
+        entry = stash.pop(user_id=ctx.user_id, temp_id=temp_id)
         if entry is None:
             continue  # belt-and-suspenders; validate pass already checked
         data = entry.data
@@ -816,14 +811,14 @@ async def step3_commit(
         flex_import_id, counters = await flex_persister_mod.persist(
             session,
             parsed=parsed,
-            organization_id=org_id,
+            organization_id=ctx.org_id,
             xml_bytes=data["xml_bytes"],
             source="manual_upload",
         )
         flex_import_ids.append(flex_import_id)
         total_rows += sum(counters.get(k, 0) for k in _NEW_KEYS)
 
-    org = await session.get(Organization, org_id)
+    org = await session.get(Organization, ctx.org_id)
     _set_progress(org, "step3_xmls", True)
     await session.commit()
     return Step3CommitResponse(
@@ -837,11 +832,11 @@ async def step3_commit(
 
 @router.post("/finish")
 async def finish(
-    org_id: int = Depends(org_context),
+    ctx: AuthzContext = Depends(require_scope("setup:write")),
     session: AsyncSession = Depends(get_async_session),
 ) -> dict:
     """Mark setup_completed_at. Validates preconditions (creds + at least 1 participation + step3 marked)."""
-    org = await session.get(Organization, org_id)
+    org = await session.get(Organization, ctx.org_id)
     if org.setup_completed_at is not None:
         return {"ok": True, "already_completed": True}
 
@@ -849,7 +844,7 @@ async def finish(
         await session.scalar(
             select(func.count())
             .select_from(Participation)
-            .where(Participation.organization_id == org_id)
+            .where(Participation.organization_id == ctx.org_id)
         )
     ) > 0
     if not has_parts:

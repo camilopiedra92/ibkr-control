@@ -7,9 +7,9 @@ below (``_CURRENT_ORG`` / ``_CURRENT_USER``). Co-located so the SET LOCAL writer
 and its NULLIF(...,'')::bigint reader convention live in one cohesive module.
 
 This module imports nothing from the project (only sqlalchemy), so it sits at
-the bottom of the dependency graph — the web layer (``api/_context``) and the
-ingest layer (``ingest/flex/job``) both import ``apply_org_context`` from here
-without inverting the inner→outer direction.
+the bottom of the dependency graph — the web layer (``authz/scopes`` via the
+``require_scope`` PEP) and the ingest layer (``ingest/flex/job``) both import
+``apply_org_context`` from here without inverting the inner→outer direction.
 """
 
 import os

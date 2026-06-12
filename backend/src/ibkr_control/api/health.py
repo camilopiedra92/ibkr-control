@@ -24,8 +24,8 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ibkr_control.api._context import org_context
 from ibkr_control.api._schemas import ConnectionStatus
+from ibkr_control.authz import AuthzContext, require_scope
 from ibkr_control.db.models.connections import Connection
 from ibkr_control.db.models.ingest_log import IngestLog
 from ibkr_control.db.models.restatements import RestatementLog
@@ -177,10 +177,10 @@ async def _restatement_health(session: AsyncSession) -> RestatementHealth:
 
 @router.get("/ingest", response_model=IngestHealthResponse)
 async def get_ingest_health(
-    org_id: int = Depends(org_context),
+    ctx: AuthzContext = Depends(require_scope("ops:read")),
     session: AsyncSession = Depends(get_async_session),
 ) -> IngestHealthResponse:
-    flex = await _flex_health(session, organization_id=org_id)
+    flex = await _flex_health(session, organization_id=ctx.org_id)
     trm = await _trm_health(session)
     connections = await _connection_health(session)
     restatements = await _restatement_health(session)

@@ -5,9 +5,7 @@ from lxml.etree import XMLSyntaxError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ibkr_control.api._context import org_context
-from ibkr_control.auth.backend import current_active_user
-from ibkr_control.auth.models import User
+from ibkr_control.authz import AuthzContext, require_scope
 from ibkr_control.config import get_settings
 from ibkr_control.db.models.flex_raw import FlexImport
 from ibkr_control.db.session import get_async_session
@@ -24,8 +22,7 @@ _CHUNK_SIZE = 64 * 1024  # 64 KB streaming chunks
 @router.post("/upload")
 async def upload_xml(
     file: UploadFile = File(...),
-    user: User = Depends(current_active_user),
-    org_id: int = Depends(org_context),
+    ctx: AuthzContext = Depends(require_scope("ingest:trigger")),
     session: AsyncSession = Depends(get_async_session),
 ) -> dict:
     settings = get_settings()
@@ -66,7 +63,7 @@ async def upload_xml(
     # org haya subido el mismo XML NO lo hace duplicado para este org.
     h = xml_hash(xml_bytes)
     existing = await session.scalar(
-        select(FlexImport).where(FlexImport.organization_id == org_id, FlexImport.xml_hash == h)
+        select(FlexImport).where(FlexImport.organization_id == ctx.org_id, FlexImport.xml_hash == h)
     )
     if existing is not None:
         raise HTTPException(
@@ -94,7 +91,7 @@ async def upload_xml(
     # actually hit DB — 0s on dedup'd re-uploads) per spec A5.
     flex_import_id = await flex_job_mod.ingest_xml(
         session,
-        organization_id=org_id,
+        organization_id=ctx.org_id,
         xml_bytes=xml_bytes,
         source="manual_upload",
         trigger="wizard",
