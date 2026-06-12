@@ -149,8 +149,9 @@ class _RestatementCollector:
         self.rows.append(
             {
                 "table_name": table_name,
-                # SP2-D9: el account del closed_lot afectado (same transaction_id =>
-                # same account por construcción del natural key).
+                # SP2-D9: el account del closed_lot afectado; un transaction_id
+                # pertenece a una sola cuenta (semántica de la fuente IBKR), así
+                # que el sibling preexistente comparte account.
                 "account_id": account_id,
                 "natural_key": {k: _json_safe(v) for k, v in natural_key.items()},
                 "_natural_key_raw": natural_key,
