@@ -19,18 +19,35 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, SessionTransaction
 
 
-def _org_context_set_config(org_id: int, user_id: int | None) -> tuple[str, dict[str, str]]:
-    """SQL + params to SET LOCAL the RLS GUCs. Single source for both the
-    explicit apply (apply_org_context) and the after_begin listener. '' for a
-    no-user context (NULLIF(...,'')::bigint -> NULL: clean default-deny)."""
+def _org_context_set_config(
+    org_id: int, user_id: int | None, read_only: bool = False
+) -> tuple[str, dict[str, str]]:
+    """SQL + params to SET LOCAL the RLS GUCs (+ transaction_read_only, SP2-D6).
+
+    Single source for both the explicit apply (apply_org_context) and the
+    after_begin listener. '' for a no-user context (NULLIF(...,'')::bigint -> NULL:
+    clean default-deny).
+
+    transaction_read_only via set_config(..., true) == SET LOCAL: tightening to
+    read-only is allowed mid-transaction (the resolver's SELECTs precede it); the
+    reverse (off after on, post-query) is what Postgres rejects — never our path
+    because each new transaction starts read-write and the listener applies the
+    stashed flag at after_begin (before any statement).
+    """
     return (
-        "SELECT set_config('app.current_org', :o, true), set_config('app.current_user', :u, true)",
-        {"o": str(org_id), "u": "" if user_id is None else str(user_id)},
+        "SELECT set_config('app.current_org', :o, true), "
+        "set_config('app.current_user', :u, true), "
+        "set_config('transaction_read_only', :r, true)",
+        {
+            "o": str(org_id),
+            "u": "" if user_id is None else str(user_id),
+            "r": "on" if read_only else "off",
+        },
     )
 
 
 async def apply_org_context(
-    session: AsyncSession, *, org_id: int, user_id: int | None = None
+    session: AsyncSession, *, org_id: int, user_id: int | None = None, read_only: bool = False
 ) -> None:
     """SET LOCAL the RLS GUCs for this transaction.
 
@@ -41,9 +58,14 @@ async def apply_org_context(
     default-deny), whereas the literal string ``'None'`` would raise 22P02
     (invalid bigint) on any access_grants query. So a no-user context must set ''
     here.
+
+    ``read_only`` (SP2-D6 barrier 2): a grantee (read-only accountant) context
+    additionally sets ``transaction_read_only=on`` so any write dies at the DB
+    (25006), independent of the app-layer scope check. Default ``False`` keeps
+    member/system contexts read-write.
     """
     # set_config(key, value, is_local=true) == SET LOCAL; parameterized (no injection).
-    sql, params = _org_context_set_config(org_id, user_id)
+    sql, params = _org_context_set_config(org_id, user_id, read_only)
     await session.execute(text(sql), params)
 
 
@@ -51,9 +73,12 @@ async def apply_org_context(
 # listener. The stash lives on the SYNC session's .info (what the listener reads).
 _ORG_KEY = "rls_org_id"
 _USER_KEY = "rls_user_id"
+_READ_ONLY_KEY = "rls_read_only"
 
 
-def set_session_org_context(session: AsyncSession, *, org_id: int, user_id: int | None) -> None:
+def set_session_org_context(
+    session: AsyncSession, *, org_id: int, user_id: int | None, read_only: bool = False
+) -> None:
     """Stash the RLS context on the session for the after_begin listener.
 
     Writes to the underlying sync session's ``.info`` — the same dict the
@@ -62,9 +87,14 @@ def set_session_org_context(session: AsyncSession, *, org_id: int, user_id: int 
     GUC to the *currently open* transaction is org_context's job (it awaits
     apply_org_context right after this), because the membership lookup may have
     already opened a transaction before org_id was known.
+
+    ``read_only`` (SP2-D6 barrier 2) is stashed too so the self-healing listener
+    re-applies ``transaction_read_only=on`` on every new transaction of a grantee
+    context. Default ``False``.
     """
     session.sync_session.info[_ORG_KEY] = org_id
     session.sync_session.info[_USER_KEY] = user_id
+    session.sync_session.info[_READ_ONLY_KEY] = read_only
 
 
 @event.listens_for(Session, "after_begin")
@@ -76,13 +106,15 @@ def _reapply_org_context(
     SET LOCAL is transaction-scoped; without this, the GUC would vanish after
     any commit mid-request. Fires on the sync Session under the async wrapper;
     ``connection`` is a sync Connection, so we execute synchronously here. Same
-    GUC contract as apply_org_context ('' for a no-user context).
+    GUC contract as apply_org_context ('' for a no-user context, read_only flag
+    re-applied from the stash so a grantee transaction stays read-only post-commit).
     """
     org_id = session.info.get(_ORG_KEY)
     if org_id is None:
         return
     user_id = session.info.get(_USER_KEY)
-    sql, params = _org_context_set_config(org_id, user_id)
+    read_only = session.info.get(_READ_ONLY_KEY, False)
+    sql, params = _org_context_set_config(org_id, user_id, read_only)
     connection.execute(text(sql), params)
 
 
