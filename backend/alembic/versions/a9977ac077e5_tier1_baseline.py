@@ -63,10 +63,10 @@ creator/resolver va por calidad de evidencia, no por tag). Delta: columnas
 ``transfers.asset_class`` (NOT NULL) + ``transfers.conid`` (nullable) +
 ``cash_transactions.conid`` (nullable, fidelidad de fuente TL-D4) y el CHECK
 bicondicional ``ck_transfers_transfer_cash_iff_no_instrument``
-(``(asset_class = 'CASH') = (instrument_id IS NULL)``, TL-D5). Delta editado a
-mano dentro de los ``create_table`` existentes (3 columnas + 1 CHECK,
-autocontenido — mismo criterio que la sustracción del amendment #3) y validado
-por el drift test (Base.metadata == schema migrado). SIN cambios RLS
+(``(asset_class = 'CASH') = (instrument_id IS NULL)``, TL-D5). Amendment #6
+regenerado canónicamente en container (2026-06-11: autogenerate temporal vía
+servicio migrate contra DB virgen, splice entre marcadores, mismo revision id)
+y validado por el drift test (Base.metadata == schema migrado). SIN cambios RLS
 (``_ORG_SCOPED_TABLES`` intacto).
 
 El DDL de ``upgrade()`` hasta el marcador ``end Alembic commands`` es
@@ -196,34 +196,6 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_instruments")),
         comment="Control plane (global, sin RLS): securities master. Identidad externa en instrument_identifiers; symbol/atributos last-seen del XML IBKR. Escrito solo por el persister (T1-D9).",
-    )
-    op.create_table(
-        "instrument_identifiers",
-        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
-        sa.Column("instrument_id", sa.BigInteger(), nullable=False),
-        sa.Column("id_type", sa.String(), nullable=False),
-        sa.Column("id_value", sa.String(), nullable=False),
-        sa.CheckConstraint(
-            "id_type IN ('conid', 'isin', 'cusip', 'figi')",
-            name=op.f("ck_instrument_identifiers_id_type"),
-        ),
-        sa.ForeignKeyConstraint(
-            ["instrument_id"],
-            ["instruments.id"],
-            name=op.f("fk_instrument_identifiers_instrument_id_instruments"),
-            ondelete="CASCADE",
-        ),
-        sa.PrimaryKeyConstraint("id", name=op.f("pk_instrument_identifiers")),
-        sa.UniqueConstraint(
-            "id_type", "id_value", name="uq_instrument_identifiers_id_type_id_value"
-        ),
-        comment="Identidad externa del instrumento, una fila por (tipo, valor). Multi-provider day-1 (T1-D7): conid IBKR hoy; isin cuando el XML lo trae; cusip/figi reservados.",
-    )
-    op.create_index(
-        op.f("ix_instrument_identifiers_instrument_id"),
-        "instrument_identifiers",
-        ["instrument_id"],
-        unique=False,
     )
     op.create_table(
         "organizations",
@@ -409,6 +381,34 @@ def upgrade() -> None:
         op.f("ix_counterparties_organization_id"),
         "counterparties",
         ["organization_id"],
+        unique=False,
+    )
+    op.create_table(
+        "instrument_identifiers",
+        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("instrument_id", sa.BigInteger(), nullable=False),
+        sa.Column("id_type", sa.String(), nullable=False),
+        sa.Column("id_value", sa.String(), nullable=False),
+        sa.CheckConstraint(
+            "id_type IN ('conid', 'isin', 'cusip', 'figi')",
+            name=op.f("ck_instrument_identifiers_id_type"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["instrument_id"],
+            ["instruments.id"],
+            name=op.f("fk_instrument_identifiers_instrument_id_instruments"),
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_instrument_identifiers")),
+        sa.UniqueConstraint(
+            "id_type", "id_value", name="uq_instrument_identifiers_id_type_id_value"
+        ),
+        comment="Identidad externa del instrumento, una fila por (tipo, valor). Multi-provider day-1 (T1-D7): conid IBKR hoy; isin cuando el XML lo trae; cusip/figi reservados.",
+    )
+    op.create_index(
+        op.f("ix_instrument_identifiers_instrument_id"),
+        "instrument_identifiers",
+        ["instrument_id"],
         unique=False,
     )
     op.create_table(
@@ -777,16 +777,16 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
-            ["instrument_id"],
-            ["instruments.id"],
-            name=op.f("fk_cash_transactions_instrument_id_instruments"),
-            ondelete="RESTRICT",
-        ),
-        sa.ForeignKeyConstraint(
             ["flex_import_id"],
             ["flex_imports.id"],
             name=op.f("fk_cash_transactions_flex_import_id_flex_imports"),
             ondelete="SET NULL",
+        ),
+        sa.ForeignKeyConstraint(
+            ["instrument_id"],
+            ["instruments.id"],
+            name=op.f("fk_cash_transactions_instrument_id_instruments"),
+            ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["organization_id"],
@@ -802,15 +802,15 @@ def upgrade() -> None:
     )
     op.create_index(op.f("ix_cash_transactions_date"), "cash_transactions", ["date"], unique=False)
     op.create_index(
-        op.f("ix_cash_transactions_instrument_id"),
-        "cash_transactions",
-        ["instrument_id"],
-        unique=False,
-    )
-    op.create_index(
         op.f("ix_cash_transactions_flex_import_id"),
         "cash_transactions",
         ["flex_import_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_cash_transactions_instrument_id"),
+        "cash_transactions",
+        ["instrument_id"],
         unique=False,
     )
     op.create_table(
@@ -859,16 +859,16 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
-            ["instrument_id"],
-            ["instruments.id"],
-            name=op.f("fk_change_in_dividend_accruals_instrument_id_instruments"),
-            ondelete="RESTRICT",
-        ),
-        sa.ForeignKeyConstraint(
             ["flex_import_id"],
             ["flex_imports.id"],
             name=op.f("fk_change_in_dividend_accruals_flex_import_id_flex_imports"),
             ondelete="SET NULL",
+        ),
+        sa.ForeignKeyConstraint(
+            ["instrument_id"],
+            ["instruments.id"],
+            name=op.f("fk_change_in_dividend_accruals_instrument_id_instruments"),
+            ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["organization_id"],
@@ -891,15 +891,15 @@ def upgrade() -> None:
         comment="Account-scoped. Visibilidad vía participations; sin user_id. Identidad por natural key compuesto (uq_change_in_dividend_accruals_natural_key); sin transaction_id.",
     )
     op.create_index(
-        op.f("ix_change_in_dividend_accruals_account_id_symbol"),
-        "change_in_dividend_accruals",
-        ["account_id", "symbol"],
-        unique=False,
-    )
-    op.create_index(
         op.f("ix_change_in_dividend_accruals_account_id_instrument_id"),
         "change_in_dividend_accruals",
         ["account_id", "instrument_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_change_in_dividend_accruals_account_id_symbol"),
+        "change_in_dividend_accruals",
+        ["account_id", "symbol"],
         unique=False,
     )
     op.create_index(
@@ -998,16 +998,16 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
-            ["instrument_id"],
-            ["instruments.id"],
-            name=op.f("fk_open_dividend_accruals_instrument_id_instruments"),
-            ondelete="RESTRICT",
-        ),
-        sa.ForeignKeyConstraint(
             ["flex_import_id"],
             ["flex_imports.id"],
             name=op.f("fk_open_dividend_accruals_flex_import_id_flex_imports"),
             ondelete="SET NULL",
+        ),
+        sa.ForeignKeyConstraint(
+            ["instrument_id"],
+            ["instruments.id"],
+            name=op.f("fk_open_dividend_accruals_instrument_id_instruments"),
+            ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["organization_id"],
@@ -1029,15 +1029,15 @@ def upgrade() -> None:
         comment="Account-scoped. Visibilidad vía participations; sin user_id. Identidad por natural key compuesto (uq_open_dividend_accruals_natural_key); sin transaction_id.",
     )
     op.create_index(
-        op.f("ix_open_dividend_accruals_account_id_symbol"),
-        "open_dividend_accruals",
-        ["account_id", "symbol"],
-        unique=False,
-    )
-    op.create_index(
         op.f("ix_open_dividend_accruals_account_id_instrument_id"),
         "open_dividend_accruals",
         ["account_id", "instrument_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_open_dividend_accruals_account_id_symbol"),
+        "open_dividend_accruals",
+        ["account_id", "symbol"],
         unique=False,
     )
     op.create_index(
@@ -1087,16 +1087,16 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
-            ["instrument_id"],
-            ["instruments.id"],
-            name=op.f("fk_open_position_lots_instrument_id_instruments"),
-            ondelete="RESTRICT",
-        ),
-        sa.ForeignKeyConstraint(
             ["flex_import_id"],
             ["flex_imports.id"],
             name=op.f("fk_open_position_lots_flex_import_id_flex_imports"),
             ondelete="SET NULL",
+        ),
+        sa.ForeignKeyConstraint(
+            ["instrument_id"],
+            ["instruments.id"],
+            name=op.f("fk_open_position_lots_instrument_id_instruments"),
+            ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["organization_id"],
@@ -1116,15 +1116,15 @@ def upgrade() -> None:
         comment="Account-scoped. Visibilidad vía participations; sin user_id. Identidad por natural key compuesto (uq_open_position_lots_natural_key); no hay transaction_id global, sí originating_transaction_id como discriminador.",
     )
     op.create_index(
-        op.f("ix_open_position_lots_account_id_symbol"),
-        "open_position_lots",
-        ["account_id", "symbol"],
-        unique=False,
-    )
-    op.create_index(
         op.f("ix_open_position_lots_account_id_instrument_id"),
         "open_position_lots",
         ["account_id", "instrument_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_open_position_lots_account_id_symbol"),
+        "open_position_lots",
+        ["account_id", "symbol"],
         unique=False,
     )
     op.create_index(
@@ -1137,6 +1137,54 @@ def upgrade() -> None:
         op.f("ix_open_position_lots_organization_id"),
         "open_position_lots",
         ["organization_id"],
+        unique=False,
+    )
+    op.create_table(
+        "restatement_log",
+        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("organization_id", sa.BigInteger(), nullable=False),
+        sa.Column("flex_import_id", sa.BigInteger(), nullable=True),
+        sa.Column("table_name", sa.String(), nullable=False),
+        sa.Column("natural_key", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("column_name", sa.String(), nullable=False),
+        sa.Column("old_value", sa.Text(), nullable=True),
+        sa.Column("new_value", sa.Text(), nullable=True),
+        sa.Column("kind", sa.String(), nullable=False),
+        sa.Column("sealed_year", sa.Boolean(), server_default=sa.text("false"), nullable=False),
+        sa.Column(
+            "detected_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("NOW()"),
+            nullable=False,
+        ),
+        sa.CheckConstraint(
+            "kind IN ('value_update', 'sibling_row')", name=op.f("ck_restatement_log_kind")
+        ),
+        sa.ForeignKeyConstraint(
+            ["flex_import_id"],
+            ["flex_imports.id"],
+            name=op.f("fk_restatement_log_flex_import_id_flex_imports"),
+            ondelete="SET NULL",
+        ),
+        sa.ForeignKeyConstraint(
+            ["organization_id"],
+            ["organizations.id"],
+            name=op.f("fk_restatement_log_organization_id_organizations"),
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_restatement_log")),
+        comment="Org-scoped (RLS). Señal de restatement: IBKR cambió un valor material de un hecho ya persistido (value_update, snapshot tables) o emitió un sibling con distinto fifo_pnl (sibling_row, closed_lots). Detection-only; nunca borra hechos.",
+    )
+    op.create_index(
+        op.f("ix_restatement_log_flex_import_id"),
+        "restatement_log",
+        ["flex_import_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_restatement_log_organization_id"),
+        "restatement_log",
+        ["organization_id", sa.literal_column("detected_at DESC")],
         unique=False,
     )
     op.create_table(
@@ -1174,16 +1222,16 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
-            ["instrument_id"],
-            ["instruments.id"],
-            name=op.f("fk_trades_instrument_id_instruments"),
-            ondelete="RESTRICT",
-        ),
-        sa.ForeignKeyConstraint(
             ["flex_import_id"],
             ["flex_imports.id"],
             name=op.f("fk_trades_flex_import_id_flex_imports"),
             ondelete="SET NULL",
+        ),
+        sa.ForeignKeyConstraint(
+            ["instrument_id"],
+            ["instruments.id"],
+            name=op.f("fk_trades_instrument_id_instruments"),
+            ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["organization_id"],
@@ -1198,13 +1246,13 @@ def upgrade() -> None:
         comment="Account-scoped. Visibilidad vía participations; sin user_id. transaction_id único POR TENANT (multi-home, spec 2026-06-10): la misma cuenta broker puede existir en N orgs, cada org tiene su copia de los hechos.",
     )
     op.create_index(
-        op.f("ix_trades_account_id_symbol"), "trades", ["account_id", "symbol"], unique=False
-    )
-    op.create_index(
         op.f("ix_trades_account_id_instrument_id"),
         "trades",
         ["account_id", "instrument_id"],
         unique=False,
+    )
+    op.create_index(
+        op.f("ix_trades_account_id_symbol"), "trades", ["account_id", "symbol"], unique=False
     )
     op.create_index(op.f("ix_trades_flex_import_id"), "trades", ["flex_import_id"], unique=False)
     op.create_index(op.f("ix_trades_trade_date"), "trades", ["trade_date"], unique=False)
@@ -1226,6 +1274,10 @@ def upgrade() -> None:
         sa.Column("symbol", sa.String(), nullable=False),
         sa.Column("qty", sa.Numeric(precision=20, scale=8), nullable=False),
         sa.Column("transfer_type", sa.String(), nullable=False),
+        sa.CheckConstraint(
+            "(asset_class = 'CASH') = (instrument_id IS NULL)",
+            name=op.f("ck_transfers_transfer_cash_iff_no_instrument"),
+        ),
         sa.CheckConstraint("direction IN ('IN', 'OUT')", name=op.f("ck_transfers_direction")),
         sa.CheckConstraint(
             "(dst_account_id IS NOT NULL) <> (dst_counterparty_id IS NOT NULL)",
@@ -1234,10 +1286,6 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "(src_account_id IS NOT NULL) <> (src_counterparty_id IS NOT NULL)",
             name=op.f("ck_transfers_src_arc"),
-        ),
-        sa.CheckConstraint(
-            "(asset_class = 'CASH') = (instrument_id IS NULL)",
-            name=op.f("ck_transfers_transfer_cash_iff_no_instrument"),
         ),
         sa.ForeignKeyConstraint(
             ["dst_account_id"],
@@ -1252,16 +1300,16 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
-            ["instrument_id"],
-            ["instruments.id"],
-            name=op.f("fk_transfers_instrument_id_instruments"),
-            ondelete="RESTRICT",
-        ),
-        sa.ForeignKeyConstraint(
             ["flex_import_id"],
             ["flex_imports.id"],
             name=op.f("fk_transfers_flex_import_id_flex_imports"),
             ondelete="SET NULL",
+        ),
+        sa.ForeignKeyConstraint(
+            ["instrument_id"],
+            ["instruments.id"],
+            name=op.f("fk_transfers_instrument_id_instruments"),
+            ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["organization_id"],
@@ -1341,16 +1389,16 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
-            ["instrument_id"],
-            ["instruments.id"],
-            name=op.f("fk_closed_lots_instrument_id_instruments"),
-            ondelete="RESTRICT",
-        ),
-        sa.ForeignKeyConstraint(
             ["flex_import_id"],
             ["flex_imports.id"],
             name=op.f("fk_closed_lots_flex_import_id_flex_imports"),
             ondelete="SET NULL",
+        ),
+        sa.ForeignKeyConstraint(
+            ["instrument_id"],
+            ["instruments.id"],
+            name=op.f("fk_closed_lots_instrument_id_instruments"),
+            ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["organization_id"],
@@ -1373,15 +1421,15 @@ def upgrade() -> None:
         comment="Account-scoped. Visibilidad vía participations; sin user_id. Identidad por natural key compuesto (uq_closed_lots_natural_key); transaction_id NO es único ni global ni per-org — múltiples ejecuciones de cierre lo comparten (amendment A3); la key es per-tenant (multi-home, spec 2026-06-10).",
     )
     op.create_index(
-        op.f("ix_closed_lots_account_id_symbol"),
-        "closed_lots",
-        ["account_id", "symbol"],
-        unique=False,
-    )
-    op.create_index(
         op.f("ix_closed_lots_account_id_instrument_id"),
         "closed_lots",
         ["account_id", "instrument_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_closed_lots_account_id_symbol"),
+        "closed_lots",
+        ["account_id", "symbol"],
         unique=False,
     )
     op.create_index(
@@ -1389,54 +1437,6 @@ def upgrade() -> None:
     )
     op.create_index(
         op.f("ix_closed_lots_source_trade_id"), "closed_lots", ["source_trade_id"], unique=False
-    )
-    op.create_table(
-        "restatement_log",
-        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
-        sa.Column("organization_id", sa.BigInteger(), nullable=False),
-        sa.Column("flex_import_id", sa.BigInteger(), nullable=True),
-        sa.Column("table_name", sa.String(), nullable=False),
-        sa.Column("natural_key", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
-        sa.Column("column_name", sa.String(), nullable=False),
-        sa.Column("old_value", sa.Text(), nullable=True),
-        sa.Column("new_value", sa.Text(), nullable=True),
-        sa.Column("kind", sa.String(), nullable=False),
-        sa.Column("sealed_year", sa.Boolean(), server_default=sa.text("false"), nullable=False),
-        sa.Column(
-            "detected_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.text("NOW()"),
-            nullable=False,
-        ),
-        sa.CheckConstraint(
-            "kind IN ('value_update', 'sibling_row')", name=op.f("ck_restatement_log_kind")
-        ),
-        sa.ForeignKeyConstraint(
-            ["flex_import_id"],
-            ["flex_imports.id"],
-            name=op.f("fk_restatement_log_flex_import_id_flex_imports"),
-            ondelete="SET NULL",
-        ),
-        sa.ForeignKeyConstraint(
-            ["organization_id"],
-            ["organizations.id"],
-            name=op.f("fk_restatement_log_organization_id_organizations"),
-            ondelete="CASCADE",
-        ),
-        sa.PrimaryKeyConstraint("id", name=op.f("pk_restatement_log")),
-        comment="Org-scoped (RLS). Señal de restatement: IBKR cambió un valor material de un hecho ya persistido (value_update, snapshot tables) o emitió un sibling con distinto fifo_pnl (sibling_row, closed_lots). Detection-only; nunca borra hechos.",
-    )
-    op.create_index(
-        op.f("ix_restatement_log_flex_import_id"),
-        "restatement_log",
-        ["flex_import_id"],
-        unique=False,
-    )
-    op.create_index(
-        op.f("ix_restatement_log_organization_id"),
-        "restatement_log",
-        ["organization_id", sa.literal_column("detected_at DESC")],
-        unique=False,
     )
     # ### end Alembic commands ###
 
@@ -1556,15 +1556,14 @@ def downgrade() -> None:
     op.execute("DROP TABLE IF EXISTS apscheduler_jobs")
 
     # ### commands auto generated by Alembic - please adjust! ###
-    op.drop_index(op.f("ix_restatement_log_organization_id"), table_name="restatement_log")
-    op.drop_index(op.f("ix_restatement_log_flex_import_id"), table_name="restatement_log")
-    op.drop_table("restatement_log")
     op.drop_index(op.f("ix_closed_lots_source_trade_id"), table_name="closed_lots")
     op.drop_index(op.f("ix_closed_lots_flex_import_id"), table_name="closed_lots")
     op.drop_index(op.f("ix_closed_lots_account_id_symbol"), table_name="closed_lots")
+    op.drop_index(op.f("ix_closed_lots_account_id_instrument_id"), table_name="closed_lots")
     op.drop_table("closed_lots")
     op.drop_index(op.f("ix_transfers_src_counterparty_id"), table_name="transfers")
     op.drop_index(op.f("ix_transfers_src_account_id"), table_name="transfers")
+    op.drop_index(op.f("ix_transfers_instrument_id"), table_name="transfers")
     op.drop_index(op.f("ix_transfers_flex_import_id"), table_name="transfers")
     op.drop_index(op.f("ix_transfers_dst_counterparty_id"), table_name="transfers")
     op.drop_index(op.f("ix_transfers_dst_account_id"), table_name="transfers")
@@ -1572,10 +1571,17 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_trades_trade_date"), table_name="trades")
     op.drop_index(op.f("ix_trades_flex_import_id"), table_name="trades")
     op.drop_index(op.f("ix_trades_account_id_symbol"), table_name="trades")
+    op.drop_index(op.f("ix_trades_account_id_instrument_id"), table_name="trades")
     op.drop_table("trades")
+    op.drop_index(op.f("ix_restatement_log_organization_id"), table_name="restatement_log")
+    op.drop_index(op.f("ix_restatement_log_flex_import_id"), table_name="restatement_log")
+    op.drop_table("restatement_log")
     op.drop_index(op.f("ix_open_position_lots_organization_id"), table_name="open_position_lots")
     op.drop_index(op.f("ix_open_position_lots_flex_import_id"), table_name="open_position_lots")
     op.drop_index(op.f("ix_open_position_lots_account_id_symbol"), table_name="open_position_lots")
+    op.drop_index(
+        op.f("ix_open_position_lots_account_id_instrument_id"), table_name="open_position_lots"
+    )
     op.drop_table("open_position_lots")
     op.drop_index(
         op.f("ix_open_dividend_accruals_report_date"), table_name="open_dividend_accruals"
@@ -1588,6 +1594,10 @@ def downgrade() -> None:
     )
     op.drop_index(
         op.f("ix_open_dividend_accruals_account_id_symbol"), table_name="open_dividend_accruals"
+    )
+    op.drop_index(
+        op.f("ix_open_dividend_accruals_account_id_instrument_id"),
+        table_name="open_dividend_accruals",
     )
     op.drop_table("open_dividend_accruals")
     op.drop_index(
@@ -1609,7 +1619,12 @@ def downgrade() -> None:
         op.f("ix_change_in_dividend_accruals_account_id_symbol"),
         table_name="change_in_dividend_accruals",
     )
+    op.drop_index(
+        op.f("ix_change_in_dividend_accruals_account_id_instrument_id"),
+        table_name="change_in_dividend_accruals",
+    )
     op.drop_table("change_in_dividend_accruals")
+    op.drop_index(op.f("ix_cash_transactions_instrument_id"), table_name="cash_transactions")
     op.drop_index(op.f("ix_cash_transactions_flex_import_id"), table_name="cash_transactions")
     op.drop_index(op.f("ix_cash_transactions_date"), table_name="cash_transactions")
     op.drop_table("cash_transactions")
@@ -1636,23 +1651,23 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_parties_organization_id"), table_name="parties")
     op.drop_table("parties")
     op.drop_table("memberships")
+    op.drop_index(
+        op.f("ix_instrument_identifiers_instrument_id"), table_name="instrument_identifiers"
+    )
+    op.drop_table("instrument_identifiers")
     op.drop_index(op.f("ix_counterparties_organization_id"), table_name="counterparties")
     op.drop_table("counterparties")
     op.drop_index(op.f("ix_connections_organization_id"), table_name="connections")
     op.drop_index(op.f("ix_connections_institution_id"), table_name="connections")
     op.drop_table("connections")
     op.drop_table("accounts")
-    op.drop_index(
-        op.f("ix_instrument_identifiers_instrument_id"), table_name="instrument_identifiers"
-    )
-    op.drop_table("instrument_identifiers")
-    op.drop_table("instruments")
     op.drop_index(op.f("ix_users_email"), table_name="users")
     op.drop_table("users")
     op.drop_table("trm_imports")
     op.drop_index(op.f("ix_trm_days_date"), table_name="trm_days")
     op.drop_table("trm_days")
     op.drop_table("organizations")
+    op.drop_table("instruments")
     op.drop_table("institutions")
     # ### end Alembic commands ###
 
