@@ -5,9 +5,10 @@ from decimal import Decimal
 from pathlib import Path
 import pytest
 
+from lxml import etree
 from lxml.etree import XMLSyntaxError
 
-from ibkr_control.ingest.flex.parser import parse
+from ibkr_control.ingest.flex.parser import _parse_transfers, parse
 from ibkr_control.ingest.flex._models import UnknownFlexTagError
 
 FIXTURE_DIR = Path(__file__).parent.parent.parent / "fixtures" / "xml"
@@ -248,8 +249,8 @@ def test_parse_transfer_captures_transaction_id():
                    fromDate="20250101" toDate="20251231">
       <AccountInformation accountId="U99999001" currency="USD"/>
       <Transfers>
-        <Transfer accountId="U99999001" date="20250301"
-                  direction="IN" symbol="MSFT" quantity="100"
+        <Transfer accountId="U99999001" date="20250301" assetCategory="STK"
+                  conid="272093" direction="IN" symbol="MSFT" quantity="100"
                   type="ACATS" transactionID="TXN-XFER-99"/>
       </Transfers>
     </FlexStatement>
@@ -358,20 +359,39 @@ def test_cash_transactions_conid_nullable_2024():
     assert all(ct.conid is None for ct in parsed.cash_transactions)
 
 
-def test_transfer_conid_is_resolver_only():
-    """Transfer is resolver-only (T1-D8): the parser reads conid through verbatim
-    (it may be present, like the sanitized FOP fixture's 160756766, or absent).
-    Because the instrument_id FK is nullable and the persister NEVER creates from a
-    resolver, the FOP transfer's instrument_id stays NULL whenever no creator
-    brought that conid — which is the case here (160756766 appears ONLY on
-    <Transfer>). CR-1 noted FOP STK conids may be absent; the sanitized fixture
-    carries one, but the nullable decision holds regardless."""
+def test_fop_fixture_transfer_carries_instrument_spec():
+    """TL-D1: el <Transfer> FOP real trae spec completo de instrumento."""
     xml = (FIXTURE_DIR / "ACTIVITY_2026_FOP_sanitized.xml").read_bytes()
     parsed = parse(xml)
-    assert parsed.transfers, "fixture must have transfers"
-    fop = next(t for t in parsed.transfers if t.transfer_type == "FOP")
-    # conid is read through verbatim from the XML attribute (resolver lookup later).
+    fop = next(t for t in parsed.transfers if t.transaction_id == "39584831194")
+    assert fop.asset_class == "STK"
     assert fop.conid == "160756766"
+    assert fop.isin == "LU0974299876"
+    assert fop.description == "GLOBANT SA"
+
+
+def test_security_transfer_without_conid_fails_loud():
+    """TL-D1: transfer de security sin conid = drift de IBKR -> error accionable."""
+    elem = etree.fromstring(
+        b'<Transfers><Transfer accountId="U99999001" assetCategory="STK" symbol="ZZZZ"'
+        b' conid="" date="20260430" type="FOP" direction="IN" account="CS-999999-99"'
+        b' quantity="10" transactionID="T1" /></Transfers>'
+    )
+    with pytest.raises(ValueError, match="<Transfer> missing required conid"):
+        _parse_transfers(elem)
+
+
+def test_cash_transfer_parses_with_null_conid():
+    """TL-D1: CASH interno (symbol='--') -> sin instrumento por diseño."""
+    elem = etree.fromstring(
+        b'<Transfers><Transfer accountId="U99999001" assetCategory="CASH" symbol="--"'
+        b' conid="" date="20260430" type="INTERNAL" direction="OUT" account="U99999002"'
+        b' quantity="0" cashTransfer="100" transactionID="T2" /></Transfers>'
+    )
+    (tr,) = _parse_transfers(elem)
+    assert tr.asset_class == "CASH"
+    assert tr.conid is None
+    assert tr.isin is None
 
 
 def test_trade_missing_conid_fails_loud():

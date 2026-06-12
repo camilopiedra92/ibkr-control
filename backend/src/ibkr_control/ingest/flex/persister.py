@@ -54,6 +54,7 @@ from ibkr_control.ingest.flex._upsert_helpers import (
     _MAX_BIND_PARAMS,
     _upsert_immutable,
     _upsert_immutable_returning_inserted,
+    _upsert_immutable_with_resolution,
     _upsert_snapshot_with_audit,
 )
 from ibkr_control.ingest.hash_dedup import xml_hash
@@ -220,10 +221,11 @@ async def persist(
         session, list(all_account_ids), organization_id=organization_id
     )
 
-    # W2: securities master. Creators (trades/lots/accruals) crean el instrument;
-    # cash/transfers son resolver-only (lookup por conid, nunca crean). Devuelve
-    # conid -> instrument_id para threadear en los row builders. Control plane
-    # (sin org scoping): AAPL es AAPL para todos los tenants (T1-D7).
+    # W2: securities master. Creators (trades/lots/accruals + transfers de
+    # securities, TL-D1) crean el instrument; cash es resolver-only (lookup por
+    # conid, nunca crea). Devuelve conid -> instrument_id para threadear en los
+    # row builders. Control plane (sin org scoping): AAPL es AAPL para todos los
+    # tenants (T1-D7).
     instruments_map = await _ensure_instruments(session, parsed)
 
     year_status = "sealed" if parsed.period_to >= date(parsed.anyo, 12, 31) else "rolling"
@@ -478,8 +480,11 @@ async def _upsert_all_children(
     restatements: "_RestatementCollector",
 ) -> dict[str, int]:
     """Hace UPSERT de todos los children. Devuelve n_new por entity type."""
-    # Resolver-only lookup para cash/transfers (W2): conid presente pero no en el
-    # map => NULL + un warning por conid (NUNCA crea instrument desde un resolver).
+    # Resolver-only lookup para cash (W2; los transfers de securities pasaron a
+    # creators en TL-D1). Post TL-D2 el map ya incluye los hits del MASTER (DB),
+    # así que el warning dispara SOLO para conids genuinamente irresolubles (sin
+    # instrument en el batch NI en el master). NUNCA crea instrument desde un
+    # resolver.
     _warned_missing_conids: set[str] = set()
 
     def _resolve_instrument(conid: str | None) -> int | None:
@@ -489,8 +494,9 @@ async def _upsert_all_children(
         if iid is None and conid not in _warned_missing_conids:
             _warned_missing_conids.add(conid)
             logger.warning(
-                "resolver conid %s has no instrument in this batch; "
-                "instrument_id left NULL (resolver never creates instruments)",
+                "resolver conid %s has no instrument in this batch nor in the "
+                "securities master; instrument_id left NULL (resolver never "
+                "creates instruments)",
                 conid,
             )
         return iid
@@ -581,9 +587,11 @@ async def _upsert_all_children(
         session, inserted_closed, organization_id=organization_id, collector=restatements
     )
 
-    # === CashTransactions (immutable) ===
-    # Usamos el returning helper para contar dividends en el mismo round-trip
-    # (sin un SELECT extra por type).
+    # === CashTransactions (immutable, resolución convergente TL-D3) ===
+    # Columnas de hecho first-seen inmutables; instrument_id converge NULL->valor
+    # cuando un re-ingest trae la resolución. El returning (xmax = 0) cuenta solo
+    # INSERTs estrictos: convergencia != fila nueva (n_new honesto), y de paso
+    # contamos dividends en el mismo round-trip (sin un SELECT extra por type).
     cash_rows = [
         {
             "flex_import_id": fi.id,
@@ -591,6 +599,7 @@ async def _upsert_all_children(
             "transaction_id": ct.transaction_id,
             "account_id": accounts_map[ct.ibkr_account_id],
             "instrument_id": _resolve_instrument(ct.conid),
+            "conid": ct.conid,
             "type": ct.type,
             "currency": ct.currency,
             "amount_usd": ct.amount_usd,
@@ -601,7 +610,7 @@ async def _upsert_all_children(
         for ct in parsed.cash_transactions
         if not _is_shadow_account(ct.ibkr_account_id)
     ]
-    inserted_cash = await _upsert_immutable_returning_inserted(
+    inserted_cash = await _upsert_immutable_with_resolution(
         session,
         CashTransaction.__table__,
         cash_rows,
@@ -646,7 +655,12 @@ async def _upsert_all_children(
                 "flex_import_id": fi.id,
                 "organization_id": organization_id,
                 "transaction_id": tr.transaction_id,
-                "instrument_id": _resolve_instrument(tr.conid),
+                # TL-D1: securities resuelven contra el map de creators (ellos
+                # mismos lo poblaron); KeyError = bug del persister, fail loud
+                # igual que trades. CASH -> NULL por diseño (CHECK TL-D5).
+                "instrument_id": (None if tr.asset_class == "CASH" else instruments_map[tr.conid]),
+                "asset_class": tr.asset_class,
+                "conid": tr.conid,
                 "transfer_date": tr.transfer_date,
                 "direction": tr.direction,
                 "src_account_id": src_acct,
@@ -930,10 +944,12 @@ def _collect_instrument_specs(parsed: ParsedXML) -> dict[str, dict]:
     """Recolecta specs de instrumento de los CREATORS (W2, T1-D7).
 
     Creators = trades, closed_lots, open_position_lots, accruals x2 (los 5 tags
-    que CR-1 confirmó con conid 100% presente). cash/transfers son resolvers — no
-    aportan specs. Last-seen gana dentro del batch (un trade tardío con el ticker
-    renombrado pisa al temprano). Devuelve conid -> {symbol, asset_class, name,
-    currency, multiplier}.
+    que CR-1 confirmó con conid 100% presente) + transfers de securities (TL-D1,
+    spec 2026-06-11: assetCategory != 'CASH' trae conid+isin+description 100% en
+    data real — el split creator/resolver va por calidad de evidencia, no por
+    tag). cash sigue resolver — no aporta specs. Last-seen gana dentro del batch
+    (un trade tardío con el ticker renombrado pisa al temprano). Devuelve
+    conid -> {symbol, asset_class, name, currency, multiplier}.
 
     Los accruals no traen description/currency/multiplier; usan asset_category
     (nullable en DB por fidelidad de fuente, aunque CR-1 lo verificó 100% presente
@@ -1009,6 +1025,15 @@ def _collect_instrument_specs(parsed: ParsedXML) -> dict[str, dict]:
         _merge(oda.conid, symbol=oda.symbol, asset_class=oda.asset_category, currency=oda.currency)
         _set_isin(oda.conid, oda.isin)
 
+    # TL-D1 (spec 2026-06-11): transfers de securities son CREATORS — traen
+    # spec completo (conid/isin/description/assetCategory 100% en data real).
+    # Los CASH (asset_class='CASH') no aportan: sin conid, sin instrumento.
+    for tr in parsed.transfers:
+        if tr.asset_class == "CASH":
+            continue
+        _merge(tr.conid, symbol=tr.symbol, asset_class=tr.asset_class, name=tr.description)
+        _set_isin(tr.conid, tr.isin)
+
     return specs
 
 
@@ -1017,7 +1042,8 @@ async def _ensure_instruments(
     parsed: ParsedXML,
 ) -> dict[str, int]:
     """Securities master: garantiza instruments + identifiers para cada conid de
-    los creators. Devuelve conid -> instrument_id (W2, T1-D7/D8/D9).
+    los creators y resuelve, SIN crear, los conids de los resolvers (cash) contra
+    el master en DB (TL-D2). Devuelve conid -> instrument_id (W2, T1-D7/D8/D9).
 
     Control plane (sin RLS, sin org scoping): AAPL es AAPL para todos los tenants.
     - Resuelve por identifier ('conid', value).
@@ -1030,10 +1056,17 @@ async def _ensure_instruments(
       churn de updated_at en cada ingest y deja el hook limpio para W3.
     """
     specs = _collect_instrument_specs(parsed)
-    if not specs:
+    # TL-D2: el lookup es contra el MASTER (DB), no solo el batch — los conids
+    # referenciados por resolvers (cash) se resuelven SELECT-only acá. NUNCA se
+    # crean: solo los specs de creators llegan al INSERT de abajo.
+    resolver_conids = {
+        ct.conid
+        for ct in parsed.cash_transactions
+        if ct.conid and not _is_shadow_account(ct.ibkr_account_id)
+    }
+    conids = list(specs.keys() | resolver_conids)
+    if not conids:
         return {}
-
-    conids = list(specs.keys())
 
     # Resolver conids -> instrument_id por identifiers existentes (chunked).
     conid_to_iid: dict[str, int] = {}
@@ -1047,7 +1080,7 @@ async def _ensure_instruments(
         for id_value, iid in rows.all():
             conid_to_iid[id_value] = iid
 
-    missing = [c for c in conids if c not in conid_to_iid]
+    missing = [c for c in conids if c not in conid_to_iid and c in specs]
     for conid in missing:
         spec = specs[conid]
         # Fail-loud (spec review W2): si el único creator de este conid fue un
@@ -1112,7 +1145,11 @@ async def _ensure_instruments(
         inst = existing_instruments.get(iid)
         if inst is None:
             continue
-        spec = specs[conid]
+        # Conids resolver-only (TL-D2) no traen spec: solo los creators
+        # actualizan atributos del instrument — el resolver es lookup puro.
+        spec = specs.get(conid)
+        if spec is None:
+            continue
         new_symbol = spec["symbol"]
         new_name = spec.get("name")
         new_currency = spec.get("currency")

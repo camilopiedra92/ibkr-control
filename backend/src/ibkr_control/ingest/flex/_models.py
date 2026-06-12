@@ -117,9 +117,17 @@ class ParsedTransfer:
     symbol: str
     qty: Decimal
     transfer_type: str
-    # W2 (T1-D8): resolver-only. conid nullable (CR-1: los FOP de GLOB y los
-    # CASH internos no traen conid) - lookup si está presente, NUNCA crea.
+    # TL-D1 (spec 2026-06-11, supersede T1-D8/CR-1): el split creator/resolver
+    # va por CALIDAD DE EVIDENCIA, no por tag. Censo contra los 30 <Transfer>
+    # reales: STK x12 -> conid+isin 100% presentes; CASH x18 -> 100% vacíos
+    # (symbol="--"). asset_class != 'CASH' -> creator fail-loud (conid REQUIRED
+    # via _require_conid); CASH -> conid None e instrument_id NULL por diseño.
+    # (El comentario anterior "los FOP de GLOB no traen conid" era un error del
+    # grep inicial que no vio attrs multi-línea.)
+    asset_class: str
     conid: str | None = None
+    isin: str | None = None
+    description: str | None = None
 
 
 @dataclass
