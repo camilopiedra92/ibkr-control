@@ -80,6 +80,7 @@ _PROVEN_PRECISION = {
     ("closed_lots", "cost_basis_usd"): 6,
     ("closed_lots", "fifo_pnl_usd"): 6,
     ("closed_lots", "proceeds_usd"): 6,
+    ("change_in_dividend_accruals", "gross_rate_per_share"): 6,
 }
 
 

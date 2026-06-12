@@ -17,7 +17,7 @@ Nota: el plan original pedía 3 fixtures (2024 + 2025 + 2026_ytd), pero solo hay
 × múltiples fixtures reales) está cubierta con los 2 disponibles.
 """
 
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -220,12 +220,9 @@ async def test_closed_lots_sum_matches_pool_2025(ephemeral_session_factory):
     # Only CLOSED_LOT rows are persisted; other levelOfDetail values (LOT, ORDER,
     # SYMBOL_SUMMARY, etc.) must be excluded to avoid double-counting.
     #
-    # Each XML value is quantized to 4 decimal places before summing because
-    # the DB column is Numeric(20, 4) — Postgres rounds each value to 4dp on
-    # INSERT (ROUND_HALF_UP).  Summing the full-precision XML values and then
-    # comparing to the DB sum would produce a false delta due to accumulated
-    # sub-cent truncation across 146 rows.
-    _FOUR_DP = Decimal("0.0001")
+    # Paridad EXACTA con la fuente (PD-1, spec 2026-06-12): la columna es
+    # NUMERIC unconstrained — Postgres almacena el valor del XML tal cual, así
+    # que la suma DB debe igualar la suma full-precision del XML sin cuantizar.
     tree = etree.fromstring(xml)
     xml_sum = Decimal("0")
     for el in tree.iter("Lot"):
@@ -233,7 +230,7 @@ async def test_closed_lots_sum_matches_pool_2025(ephemeral_session_factory):
             continue
         v = el.get("fifoPnlRealized")
         if v:
-            xml_sum += Decimal(v).quantize(_FOUR_DP, rounding=ROUND_HALF_UP)
+            xml_sum += Decimal(v)
 
     assert xml_sum != Decimal("0"), (
         "no CLOSED_LOT rows parsed from XML — fixture truncated or tag filter broke"

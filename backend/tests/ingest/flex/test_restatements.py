@@ -18,7 +18,7 @@ import pytest
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ibkr_control.db.models.flex_raw import ClosedLot, FlexImport
+from ibkr_control.db.models.flex_raw import ClosedLot, FlexImport, OpenPositionLot
 from ibkr_control.db.models.restatements import RestatementLog
 from ibkr_control.ingest.flex._models import (
     ParsedAccount,
@@ -204,29 +204,35 @@ async def test_mark_price_churn_not_a_restatement(db_session: AsyncSession, samp
 
 
 @pytest.mark.asyncio
-async def test_half_boundary_value_not_a_restatement(db_session: AsyncSession, sample_org):
-    """Regression (spec review W3): paridad de redondeo con PG NUMERIC.
+async def test_full_precision_value_roundtrips_and_is_not_a_restatement(
+    db_session: AsyncSession, sample_org
+):
+    """PD-1/PD-3 (spec 2026-06-12): storage exacto => re-ingest idéntico da cero
+    restatements POR CONSTRUCCIÓN, no por paridad de rounding-mode.
 
-    PG NUMERIC redondea HALF_UP (255.86945 a escala 4 -> guarda 255.8695); el
-    default de Decimal.quantize es HALF_EVEN (-> 255.8694). Sin rounding=HALF_UP
-    en _quantize_to_scale, un valor de fuente en el half-boundary exacto con
-    dígito precedente par produce un value_update espurio en cada re-ingest
-    idéntico. Este caso falla con HALF_EVEN y pasa con HALF_UP."""
-    boundary = Decimal("255.86945")  # escala 5 de fuente; columna Numeric(20,4)
+    Históricamente este test fijaba ROUND_HALF_UP vs HALF_EVEN contra la columna
+    Numeric(20,4) (el boundary 255.86945 divergía entre PG y el default de
+    Decimal.quantize). Con NUMERIC unconstrained la columna no redondea:
+    _quantize_to_scale es pass-through (scale=None) y la comparación de
+    _values_differ es exacta. Se preserva el valor boundary como input y se
+    agrega el assert de roundtrip exacto."""
+    value = Decimal("255.86945")
     await persist(
         db_session,
-        parsed=_xml_with_open_lots([_open_lot(cost_basis=boundary)]),
+        parsed=_xml_with_open_lots([_open_lot(cost_basis=value)]),
         organization_id=sample_org.id,
         xml_bytes=b"<v1/>",
         source="manual_upload",
     )
     await persist(
         db_session,
-        parsed=_xml_with_open_lots([_open_lot(cost_basis=boundary)]),
+        parsed=_xml_with_open_lots([_open_lot(cost_basis=value)]),
         organization_id=sample_org.id,
         xml_bytes=b"<v2/>",
         source="manual_upload",
     )
+    stored = await db_session.scalar(select(OpenPositionLot.cost_basis_usd))
+    assert stored == value, f"roundtrip no exacto: {stored} != {value}"
     assert await _count_restatements(db_session) == 0
 
 
