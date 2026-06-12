@@ -2,8 +2,8 @@
 
 Siembra una fila como owner (con contexto) y luego la consulta como app_rls SIN
 setear app.current_org -> debe devolver 0 filas (NULLIF('','')::bigint = NULL ->
-organization_id = NULL nunca es true). Prueba que olvidar el org_context FALLA
-ruidoso, no filtra. Ver spec (Verificacion 4) + memoria rls-runtime-vs-test-parity.
+organization_id = NULL nunca es true). Prueba que olvidar el contexto org (el
+que setea require_scope) FALLA ruidoso, no filtra. Ver spec (Verificacion 4) + memoria rls-runtime-vs-test-parity.
 """
 
 from sqlalchemy import text

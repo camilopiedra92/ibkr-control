@@ -66,7 +66,7 @@ async def test_restatements_empty_when_none(client: AsyncClient, auth_headers_wi
 
 
 async def test_restatements_requires_org(client: AsyncClient, auth_headers: dict):
-    """A user with no org membership cannot resolve org_context → 403."""
+    """A user with no org membership cannot resolve an authz context (require_scope) → 403."""
     resp = await client.get("/api/ingest/restatements", headers=auth_headers)
     assert resp.status_code == 403
 

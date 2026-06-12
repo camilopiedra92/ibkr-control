@@ -34,7 +34,7 @@ async def test_get_logs_empty_when_no_runs(client: AsyncClient, auth_headers_wit
 
 
 async def test_logs_requires_org(client: AsyncClient, auth_headers: dict):
-    """A user with no org membership cannot resolve org_context → 403."""
+    """A user with no org membership cannot resolve an authz context (require_scope) → 403."""
     resp = await client.get("/api/ingest/logs?limit=10", headers=auth_headers)
     assert resp.status_code == 403
 

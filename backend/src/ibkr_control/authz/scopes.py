@@ -49,7 +49,11 @@ def require_scope(scope: str):
     async def dependency(
         user: User = Depends(current_active_user),
         session: AsyncSession = Depends(get_async_session),
-        x_organization_id: int | None = Header(None, alias="X-Organization-Id"),
+        # Bounded a int64 positivo: sin ge/lt, un valor > 2**63-1 pasa la coercion
+        # de FastAPI, no matchea ninguna membership y explota como DataError de
+        # asyncpg dentro de authz_grant_party_ids(bigint) -> 500. Con el bound,
+        # out-of-range y no-positivos rebotan 422 en el boundary.
+        x_organization_id: int | None = Header(None, alias="X-Organization-Id", ge=1, lt=2**63),
     ) -> AuthzContext:
         ctx = await resolve_authz(session, user_id=user.id, requested_org_id=x_organization_id)
         if scope not in ROLE_SCOPES[ctx.role]:

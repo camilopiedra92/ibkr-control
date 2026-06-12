@@ -71,7 +71,7 @@ async def test_health_endpoint_returns_no_runs_when_log_empty(
 
 
 async def test_health_endpoint_requires_org(client: AsyncClient, auth_headers: dict):
-    """A user with no org membership cannot resolve org_context → 403."""
+    """A user with no org membership cannot resolve an authz context (require_scope) → 403."""
     resp = await client.get("/api/health/ingest", headers=auth_headers)
     assert resp.status_code == 403
 

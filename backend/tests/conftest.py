@@ -75,8 +75,9 @@ async def app_with_db(test_db, monkeypatch):  # noqa: F811 — parámetro de fix
 
     The app's ``get_async_session`` is overridden to yield sessions on an engine
     that authenticates as the non-bypass ``app_rls`` role. Each request's
-    ``org_context`` dependency ``SET LOCAL``s ``app.current_org`` / ``current_user``
-    on that session, so RLS scopes every org-scoped query to the request's org.
+    ``require_scope`` dependency (authz PEP) ``SET LOCAL``s ``app.current_org`` /
+    ``current_user`` on that session, so RLS scopes every org-scoped query to the
+    request's org.
     """
     owner_url = test_db
     app_dsn = swap_dsn_credentials(owner_url, "app_rls", app_rls_password())
@@ -348,7 +349,8 @@ async def auth_headers_with_org(client: AsyncClient, owner_engine) -> dict:
     party, y devuelve headers JWT.
 
     A diferencia de auth_headers (que solo registra), este deja al usuario con
-    una membership única para que org_context resuelva su contexto. NO usa
+    una membership única para que resolve_authz (vía require_scope) resuelva su
+    contexto. NO usa
     provision_org() (eso crearía un segundo usuario nuevo): registra primero
     via la API (dispara on_after_register → UserSettings) y luego inserta el
     org/membership/party PARA ese usuario ya registrado.

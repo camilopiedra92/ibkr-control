@@ -74,3 +74,20 @@ async def test_org_header_for_foreign_org_403(client, auth_headers_with_org):
     )
     assert r.status_code == 403
     assert r.json()["detail"] == "NO_ORG_ACCESS"
+
+
+async def test_out_of_range_org_header_422(client, auth_headers_with_org):
+    """Un id fuera de int64 (o no positivo) rebota 422 en el boundary — sin el
+    bound ge/lt pasaba la coercion de FastAPI y explotaba como DataError de
+    asyncpg dentro de authz_grant_party_ids(bigint) -> 500."""
+    r = await client.get(
+        "/api/connections",
+        headers={**auth_headers_with_org, "X-Organization-Id": "1000000000000000000000000000000"},
+    )
+    assert r.status_code == 422
+
+    r = await client.get(
+        "/api/connections",
+        headers={**auth_headers_with_org, "X-Organization-Id": "0"},
+    )
+    assert r.status_code == 422

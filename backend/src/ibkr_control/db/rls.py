@@ -89,9 +89,9 @@ def set_session_org_context(
     Writes to the underlying sync session's ``.info`` — the same dict the
     ``after_begin`` listener reads — so the GUC is re-applied on every new
     transaction of this session (surviving intra-request commits). Applying the
-    GUC to the *currently open* transaction is org_context's job (it awaits
-    apply_org_context right after this), because the membership lookup may have
-    already opened a transaction before org_id was known.
+    GUC to the *currently open* transaction is the ``require_scope`` PEP's job
+    (it awaits apply_org_context right after this), because the membership
+    lookup may have already opened a transaction before org_id was known.
 
     ``read_only`` (SP2-D6 barrier 2) is stashed too so the self-healing listener
     re-applies ``transaction_read_only=on`` on every new transaction of a grantee
