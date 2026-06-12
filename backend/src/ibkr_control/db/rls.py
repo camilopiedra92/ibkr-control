@@ -32,7 +32,12 @@ def _org_context_set_config(
     read-only is allowed mid-transaction (the resolver's SELECTs precede it); the
     reverse (off after on, post-query) is what Postgres rejects — never our path
     because each new transaction starts read-write and the listener applies the
-    stashed flag at after_begin (before any statement).
+    stashed flag at after_begin (before any statement). Stronger still (verified
+    empirically against Postgres): because the listener's set_config is the FIRST
+    statement of every transaction, any later attempt to loosen
+    transaction_read_only is rejected by Postgres (25001 "transaction read-write
+    mode must be set before any query") for the rest of the transaction —
+    loosening is structurally impossible, not merely avoided by convention.
     """
     return (
         "SELECT set_config('app.current_org', :o, true), "
