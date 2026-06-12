@@ -133,6 +133,34 @@ export interface ErrorModel {
   detail: ErrorModelDetail;
 }
 
+export interface GrantCreate {
+  grantor_party_id: number;
+  grantee_organization_id?: number | null;
+  grantee_user_id?: number | null;
+  valid_from?: string | null;
+  valid_to?: string | null;
+}
+
+export type GrantReadDirection = typeof GrantReadDirection[keyof typeof GrantReadDirection];
+
+
+export const GrantReadDirection = {
+  granted: 'granted',
+  received: 'received',
+} as const;
+
+export interface GrantRead {
+  id: number;
+  grantor_party_id: number;
+  grantee_organization_id: number | null;
+  grantee_user_id: number | null;
+  organization_id: number;
+  role: string;
+  valid_from: string;
+  valid_to: string | null;
+  direction: GrantReadDirection;
+}
+
 export type ValidationErrorCtx = { [key: string]: unknown };
 
 export interface ValidationError {
@@ -247,6 +275,7 @@ export const RestatementReadKind = {
 export interface RestatementRead {
   id: number;
   flex_import_id: number | null;
+  account_id: number;
   table_name: string;
   natural_key: RestatementReadNaturalKey;
   column_name: string;
@@ -1361,7 +1390,7 @@ export const listConnectionsApiConnectionsGet = (
 
 
 
-export const getListConnectionsApiConnectionsGetMutationOptions = <TError = unknown,
+export const getListConnectionsApiConnectionsGetMutationOptions = <TError = HTTPValidationError,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof listConnectionsApiConnectionsGet>>, TError,void, TContext>, }
 ): UseMutationOptions<Awaited<ReturnType<typeof listConnectionsApiConnectionsGet>>, TError,void, TContext> => {
 
@@ -1390,12 +1419,12 @@ const {mutation: mutationOptions} = options ?
 
     export type ListConnectionsApiConnectionsGetMutationResult = NonNullable<Awaited<ReturnType<typeof listConnectionsApiConnectionsGet>>>
 
-    export type ListConnectionsApiConnectionsGetMutationError = unknown
+    export type ListConnectionsApiConnectionsGetMutationError = HTTPValidationError
 
     /**
  * @summary List Connections
  */
-export const useListConnectionsApiConnectionsGet = <TError = unknown,
+export const useListConnectionsApiConnectionsGet = <TError = HTTPValidationError,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof listConnectionsApiConnectionsGet>>, TError,void, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof listConnectionsApiConnectionsGet>>,
@@ -2001,7 +2030,7 @@ export const getIngestHealthApiHealthIngestGet = (
 
 
 
-export const getGetIngestHealthApiHealthIngestGetMutationOptions = <TError = unknown,
+export const getGetIngestHealthApiHealthIngestGetMutationOptions = <TError = HTTPValidationError,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getIngestHealthApiHealthIngestGet>>, TError,void, TContext>, }
 ): UseMutationOptions<Awaited<ReturnType<typeof getIngestHealthApiHealthIngestGet>>, TError,void, TContext> => {
 
@@ -2030,12 +2059,12 @@ const {mutation: mutationOptions} = options ?
 
     export type GetIngestHealthApiHealthIngestGetMutationResult = NonNullable<Awaited<ReturnType<typeof getIngestHealthApiHealthIngestGet>>>
 
-    export type GetIngestHealthApiHealthIngestGetMutationError = unknown
+    export type GetIngestHealthApiHealthIngestGetMutationError = HTTPValidationError
 
     /**
  * @summary Get Ingest Health
  */
-export const useGetIngestHealthApiHealthIngestGet = <TError = unknown,
+export const useGetIngestHealthApiHealthIngestGet = <TError = HTTPValidationError,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getIngestHealthApiHealthIngestGet>>, TError,void, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof getIngestHealthApiHealthIngestGet>>,
@@ -2063,7 +2092,7 @@ export const getStateApiSetupStateGet = (
 
 
 
-export const getGetStateApiSetupStateGetMutationOptions = <TError = unknown,
+export const getGetStateApiSetupStateGetMutationOptions = <TError = HTTPValidationError,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getStateApiSetupStateGet>>, TError,void, TContext>, }
 ): UseMutationOptions<Awaited<ReturnType<typeof getStateApiSetupStateGet>>, TError,void, TContext> => {
 
@@ -2092,12 +2121,12 @@ const {mutation: mutationOptions} = options ?
 
     export type GetStateApiSetupStateGetMutationResult = NonNullable<Awaited<ReturnType<typeof getStateApiSetupStateGet>>>
 
-    export type GetStateApiSetupStateGetMutationError = unknown
+    export type GetStateApiSetupStateGetMutationError = HTTPValidationError
 
     /**
  * @summary Get State
  */
-export const useGetStateApiSetupStateGet = <TError = unknown,
+export const useGetStateApiSetupStateGet = <TError = HTTPValidationError,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getStateApiSetupStateGet>>, TError,void, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof getStateApiSetupStateGet>>,
@@ -2248,7 +2277,7 @@ export const getStep2DetectApiSetupStep2DetectPostQueryKey = () => {
     }
 
 
-export const getStep2DetectApiSetupStep2DetectPostQueryOptions = <TData = Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError, TData>>, }
+export const getStep2DetectApiSetupStep2DetectPostQueryOptions = <TData = Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError = HTTPValidationError>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError, TData>>, }
 ) => {
 
 const {query: queryOptions} = options ?? {};
@@ -2267,10 +2296,10 @@ const {query: queryOptions} = options ?? {};
 }
 
 export type Step2DetectApiSetupStep2DetectPostQueryResult = NonNullable<Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>>
-export type Step2DetectApiSetupStep2DetectPostQueryError = unknown
+export type Step2DetectApiSetupStep2DetectPostQueryError = HTTPValidationError
 
 
-export function useStep2DetectApiSetupStep2DetectPost<TData = Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError = unknown>(
+export function useStep2DetectApiSetupStep2DetectPost<TData = Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError = HTTPValidationError>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>,
@@ -2280,7 +2309,7 @@ export function useStep2DetectApiSetupStep2DetectPost<TData = Awaited<ReturnType
       >, }
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useStep2DetectApiSetupStep2DetectPost<TData = Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError = unknown>(
+export function useStep2DetectApiSetupStep2DetectPost<TData = Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError = HTTPValidationError>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>,
@@ -2290,7 +2319,7 @@ export function useStep2DetectApiSetupStep2DetectPost<TData = Awaited<ReturnType
       >, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useStep2DetectApiSetupStep2DetectPost<TData = Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError = unknown>(
+export function useStep2DetectApiSetupStep2DetectPost<TData = Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError = HTTPValidationError>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -2298,7 +2327,7 @@ export function useStep2DetectApiSetupStep2DetectPost<TData = Awaited<ReturnType
  * @summary Step2 Detect
  */
 
-export function useStep2DetectApiSetupStep2DetectPost<TData = Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError = unknown>(
+export function useStep2DetectApiSetupStep2DetectPost<TData = Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError = HTTPValidationError>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof step2DetectApiSetupStep2DetectPost>>, TError, TData>>, }
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -2831,7 +2860,7 @@ export const getFinishApiSetupFinishPostQueryKey = () => {
     }
 
 
-export const getFinishApiSetupFinishPostQueryOptions = <TData = Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError, TData>>, }
+export const getFinishApiSetupFinishPostQueryOptions = <TData = Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError = HTTPValidationError>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError, TData>>, }
 ) => {
 
 const {query: queryOptions} = options ?? {};
@@ -2850,10 +2879,10 @@ const {query: queryOptions} = options ?? {};
 }
 
 export type FinishApiSetupFinishPostQueryResult = NonNullable<Awaited<ReturnType<typeof finishApiSetupFinishPost>>>
-export type FinishApiSetupFinishPostQueryError = unknown
+export type FinishApiSetupFinishPostQueryError = HTTPValidationError
 
 
-export function useFinishApiSetupFinishPost<TData = Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError = unknown>(
+export function useFinishApiSetupFinishPost<TData = Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError = HTTPValidationError>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof finishApiSetupFinishPost>>,
@@ -2863,7 +2892,7 @@ export function useFinishApiSetupFinishPost<TData = Awaited<ReturnType<typeof fi
       >, }
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useFinishApiSetupFinishPost<TData = Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError = unknown>(
+export function useFinishApiSetupFinishPost<TData = Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError = HTTPValidationError>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof finishApiSetupFinishPost>>,
@@ -2873,7 +2902,7 @@ export function useFinishApiSetupFinishPost<TData = Awaited<ReturnType<typeof fi
       >, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useFinishApiSetupFinishPost<TData = Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError = unknown>(
+export function useFinishApiSetupFinishPost<TData = Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError = HTTPValidationError>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -2881,7 +2910,7 @@ export function useFinishApiSetupFinishPost<TData = Awaited<ReturnType<typeof fi
  * @summary Finish
  */
 
-export function useFinishApiSetupFinishPost<TData = Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError = unknown>(
+export function useFinishApiSetupFinishPost<TData = Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError = HTTPValidationError>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof finishApiSetupFinishPost>>, TError, TData>>, }
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -3292,3 +3321,247 @@ export const useListRestatementsApiIngestRestatementsGet = <TError = HTTPValidat
       > => {
       return useMutation(getListRestatementsApiIngestRestatementsGetMutationOptions(options), queryClient);
     }
+
+/**
+ * @summary List Grants
+ */
+export const listGrantsApiGrantsGet = (
+
+ signal?: AbortSignal
+) => {
+
+
+      return axiosMutator<GrantRead[]>(
+      {url: `/api/grants`, method: 'GET', signal
+    },
+      );
+    }
+
+
+
+export const getListGrantsApiGrantsGetMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof listGrantsApiGrantsGet>>, TError,void, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof listGrantsApiGrantsGet>>, TError,void, TContext> => {
+
+const mutationKey = ['listGrantsApiGrantsGet'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof listGrantsApiGrantsGet>>, void> = () => {
+
+
+          return  listGrantsApiGrantsGet()
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ListGrantsApiGrantsGetMutationResult = NonNullable<Awaited<ReturnType<typeof listGrantsApiGrantsGet>>>
+
+    export type ListGrantsApiGrantsGetMutationError = HTTPValidationError
+
+    /**
+ * @summary List Grants
+ */
+export const useListGrantsApiGrantsGet = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof listGrantsApiGrantsGet>>, TError,void, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof listGrantsApiGrantsGet>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getListGrantsApiGrantsGetMutationOptions(options), queryClient);
+    }
+
+/**
+ * @summary Create Grant
+ */
+export const createGrantApiGrantsPost = (
+    grantCreate: GrantCreate,
+ signal?: AbortSignal
+) => {
+
+
+      return axiosMutator<GrantRead>(
+      {url: `/api/grants`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: grantCreate, signal
+    },
+      );
+    }
+
+
+
+
+export const getCreateGrantApiGrantsPostQueryKey = (grantCreate?: GrantCreate,) => {
+    return [
+    'POST', `/api/grants`, grantCreate
+    ] as const;
+    }
+
+
+export const getCreateGrantApiGrantsPostQueryOptions = <TData = Awaited<ReturnType<typeof createGrantApiGrantsPost>>, TError = HTTPValidationError>(grantCreate: GrantCreate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof createGrantApiGrantsPost>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getCreateGrantApiGrantsPostQueryKey(grantCreate);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof createGrantApiGrantsPost>>> = ({ signal }) => createGrantApiGrantsPost(grantCreate, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof createGrantApiGrantsPost>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type CreateGrantApiGrantsPostQueryResult = NonNullable<Awaited<ReturnType<typeof createGrantApiGrantsPost>>>
+export type CreateGrantApiGrantsPostQueryError = HTTPValidationError
+
+
+export function useCreateGrantApiGrantsPost<TData = Awaited<ReturnType<typeof createGrantApiGrantsPost>>, TError = HTTPValidationError>(
+ grantCreate: GrantCreate, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof createGrantApiGrantsPost>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof createGrantApiGrantsPost>>,
+          TError,
+          Awaited<ReturnType<typeof createGrantApiGrantsPost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useCreateGrantApiGrantsPost<TData = Awaited<ReturnType<typeof createGrantApiGrantsPost>>, TError = HTTPValidationError>(
+ grantCreate: GrantCreate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof createGrantApiGrantsPost>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof createGrantApiGrantsPost>>,
+          TError,
+          Awaited<ReturnType<typeof createGrantApiGrantsPost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useCreateGrantApiGrantsPost<TData = Awaited<ReturnType<typeof createGrantApiGrantsPost>>, TError = HTTPValidationError>(
+ grantCreate: GrantCreate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof createGrantApiGrantsPost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Create Grant
+ */
+
+export function useCreateGrantApiGrantsPost<TData = Awaited<ReturnType<typeof createGrantApiGrantsPost>>, TError = HTTPValidationError>(
+ grantCreate: GrantCreate, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof createGrantApiGrantsPost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getCreateGrantApiGrantsPostQueryOptions(grantCreate,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+/**
+ * @summary Revoke Grant
+ */
+export const revokeGrantApiGrantsGrantIdRevokePost = (
+    grantId: number,
+ signal?: AbortSignal
+) => {
+
+
+      return axiosMutator<GrantRead>(
+      {url: `/api/grants/${grantId}/revoke`, method: 'POST', signal
+    },
+      );
+    }
+
+
+
+
+export const getRevokeGrantApiGrantsGrantIdRevokePostQueryKey = (grantId: number,) => {
+    return [
+    'POST', `/api/grants/${grantId}/revoke`
+    ] as const;
+    }
+
+
+export const getRevokeGrantApiGrantsGrantIdRevokePostQueryOptions = <TData = Awaited<ReturnType<typeof revokeGrantApiGrantsGrantIdRevokePost>>, TError = HTTPValidationError>(grantId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof revokeGrantApiGrantsGrantIdRevokePost>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getRevokeGrantApiGrantsGrantIdRevokePostQueryKey(grantId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof revokeGrantApiGrantsGrantIdRevokePost>>> = ({ signal }) => revokeGrantApiGrantsGrantIdRevokePost(grantId, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: grantId !== null && grantId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof revokeGrantApiGrantsGrantIdRevokePost>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type RevokeGrantApiGrantsGrantIdRevokePostQueryResult = NonNullable<Awaited<ReturnType<typeof revokeGrantApiGrantsGrantIdRevokePost>>>
+export type RevokeGrantApiGrantsGrantIdRevokePostQueryError = HTTPValidationError
+
+
+export function useRevokeGrantApiGrantsGrantIdRevokePost<TData = Awaited<ReturnType<typeof revokeGrantApiGrantsGrantIdRevokePost>>, TError = HTTPValidationError>(
+ grantId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof revokeGrantApiGrantsGrantIdRevokePost>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof revokeGrantApiGrantsGrantIdRevokePost>>,
+          TError,
+          Awaited<ReturnType<typeof revokeGrantApiGrantsGrantIdRevokePost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useRevokeGrantApiGrantsGrantIdRevokePost<TData = Awaited<ReturnType<typeof revokeGrantApiGrantsGrantIdRevokePost>>, TError = HTTPValidationError>(
+ grantId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof revokeGrantApiGrantsGrantIdRevokePost>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof revokeGrantApiGrantsGrantIdRevokePost>>,
+          TError,
+          Awaited<ReturnType<typeof revokeGrantApiGrantsGrantIdRevokePost>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useRevokeGrantApiGrantsGrantIdRevokePost<TData = Awaited<ReturnType<typeof revokeGrantApiGrantsGrantIdRevokePost>>, TError = HTTPValidationError>(
+ grantId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof revokeGrantApiGrantsGrantIdRevokePost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Revoke Grant
+ */
+
+export function useRevokeGrantApiGrantsGrantIdRevokePost<TData = Awaited<ReturnType<typeof revokeGrantApiGrantsGrantIdRevokePost>>, TError = HTTPValidationError>(
+ grantId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof revokeGrantApiGrantsGrantIdRevokePost>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getRevokeGrantApiGrantsGrantIdRevokePostQueryOptions(grantId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
