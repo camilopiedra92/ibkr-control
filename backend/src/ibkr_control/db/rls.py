@@ -188,6 +188,35 @@ def system_enum_function_sql() -> list[str]:
     ]
 
 
+def authz_grant_function_sql() -> list[str]:
+    """CONTROL-PLANE capability: resolución cross-org de grants (SP2-D3).
+
+    El resolver de autorización corre ANTES de setear contexto RLS — bajo
+    ``app_rls`` + FORCE, ``grant_visibility`` default-denia, y el arm
+    ``grantee_organization_id = current_org`` solo expone el grant del firm con
+    el GUC en el org del FIRM (que no es el org solicitado ni adivinable si el
+    user tiene N memberships). "¿Puede U entrar al org X?" es inherentemente
+    cross-org → misma envolvente de seguridad que system_credentialed_org_ids():
+    SECURITY DEFINER + search_path pinned + REVOKE PUBLIC + GRANT app_rls.
+    Vigencia half-open [valid_from, valid_to) evaluada con CURRENT_DATE (UTC).
+    """
+    return [
+        "CREATE OR REPLACE FUNCTION authz_grant_party_ids("
+        "p_user_id bigint, p_org_id bigint) "
+        "RETURNS SETOF bigint LANGUAGE sql STABLE SECURITY DEFINER "
+        "SET search_path = pg_catalog, public AS $$ "
+        "SELECT g.grantor_party_id FROM access_grants g "
+        "WHERE g.organization_id = p_org_id "
+        "AND (g.grantee_user_id = p_user_id "
+        "OR g.grantee_organization_id IN ("
+        "SELECT m.organization_id FROM memberships m WHERE m.user_id = p_user_id)) "
+        "AND g.valid_from <= CURRENT_DATE "
+        "AND (g.valid_to IS NULL OR g.valid_to > CURRENT_DATE) $$",
+        "REVOKE EXECUTE ON FUNCTION authz_grant_party_ids(bigint, bigint) FROM PUBLIC",
+        f"GRANT EXECUTE ON FUNCTION authz_grant_party_ids(bigint, bigint) TO {APP_ROLE}",
+    ]
+
+
 def app_rls_password() -> str:
     """The password for the ``app_rls`` login role — single source of truth.
 

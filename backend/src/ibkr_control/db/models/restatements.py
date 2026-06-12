@@ -33,6 +33,9 @@ class RestatementLog(Base):
         CheckConstraint("kind IN ('value_update', 'sibling_row')", name="kind"),
         Index(None, "organization_id", text("detected_at DESC")),
         Index(None, "flex_import_id"),
+        # SP2-D9: filtro party-scoped del grantee (visible_account_ids) — el
+        # access path es (org, account) bajo RLS.
+        Index(None, "organization_id", "account_id"),
         {
             "comment": (
                 "Org-scoped (RLS). Señal de restatement: IBKR cambió un valor "
@@ -49,6 +52,9 @@ class RestatementLog(Base):
     )
     flex_import_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("flex_imports.id", ondelete="SET NULL"), nullable=True
+    )
+    account_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False
     )
     table_name: Mapped[str] = mapped_column(String, nullable=False)
     natural_key: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
