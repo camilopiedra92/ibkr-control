@@ -48,6 +48,15 @@ def assert_single_process(env: Mapping[str, str] | None = None) -> None:
     Step3Stash del wizard es invisible entre workers (onboarding roto) — todo en
     SILENCIO. Hasta que SP5 extraiga el scheduler + cola durable, >1 worker está
     roto: fallar al arranque es correcto.
+
+    LÍMITE DE COBERTURA (importante): este guard solo detecta el conteo de
+    workers declarado por env-var (WEB_CONCURRENCY / UVICORN_WORKERS /
+    GUNICORN_WORKERS — el lever idiomático de uvicorn/gunicorn). NO detecta
+    (a) un `uvicorn ... --workers N` pasado directo por CLI/compose sin env-var,
+    ni (b) N réplicas del contenedor (cada una un proceso single-worker que pasa
+    el guard). Detectar réplicas desde adentro del proceso es imposible por
+    diseño (eso ES leader election = SP5). O sea: HD-7 es un backstop PARCIAL
+    del invariante 1-proceso, no total — la garantía completa llega con SP5.
     """
     env = os.environ if env is None else env
     for var in ("WEB_CONCURRENCY", "UVICORN_WORKERS", "GUNICORN_WORKERS"):
