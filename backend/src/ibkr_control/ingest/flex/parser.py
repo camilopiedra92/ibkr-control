@@ -487,6 +487,7 @@ def _parse_cash_transactions(elem) -> list[ParsedCashTransaction]:
         tx_date = _parse_date(tx.get("dateTime") or tx.get("settleDate"))
         if tx_date is None:
             continue
+        raw_attrs = {k: v for k, v in tx.attrib.items() if k not in _CASH_TYPED_ATTRS}
         out.append(
             ParsedCashTransaction(
                 transaction_id=tx.get("transactionID") or "",
@@ -498,9 +499,38 @@ def _parse_cash_transactions(elem) -> list[ParsedCashTransaction]:
                 date=tx_date,
                 symbol=tx.get("symbol") or None,
                 conid=_attr(tx, "conid"),  # resolver-only: lookup if present, never create
+                settle_date=_parse_date(tx.get("settleDate")),
+                report_date=_parse_date(tx.get("reportDate")),
+                ex_date=_parse_date(tx.get("exDate")),
+                issuer_country=_attr(tx, "issuerCountryCode"),
+                action_id=_attr(tx, "actionID"),
+                raw_attrs=raw_attrs,
             )
         )
     return out
+
+
+# Schema fijo de CashTransaction (atributos que mapean a columnas tipadas).
+# Cualquier otro atributo va a raw_attrs (IC-1, idem accruals).
+_CASH_TYPED_ATTRS: frozenset[str] = frozenset(
+    {
+        "transactionID",
+        "accountId",
+        "type",
+        "currency",
+        "amount",
+        "description",
+        "dateTime",
+        "settleDate",
+        "reportDate",
+        "exDate",
+        "issuerCountryCode",
+        "actionID",
+        "symbol",
+        "conid",
+        "levelOfDetail",
+    }
+)
 
 
 # Schema fijo de ChangeInDividendAccrual (atributos que mapean a columnas tipadas).

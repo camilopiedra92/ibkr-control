@@ -359,6 +359,26 @@ def test_cash_transactions_conid_nullable_2024():
     assert all(ct.conid is None for ct in parsed.cash_transactions)
 
 
+def test_cash_transaction_captures_fiscal_fields():
+    """IC-1: the parser must extract action_id/issuer_country/settle_date/
+    report_date/ex_date from real <CashTransaction> dividend rows, plus stash
+    the untyped remainder in raw_attrs (source-fidelity safety net, mirrors
+    the accrual pattern). Verified against ACTIVITY_2025_sanitized.xml, whose
+    19 Dividends DETAIL rows carry all 5 attributes 100% of the time."""
+    xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
+    parsed = parse(xml)
+    tx = next(t for t in parsed.cash_transactions if t.type == "Dividends")
+    assert tx.action_id is not None
+    assert tx.issuer_country == "US"
+    assert tx.settle_date is not None
+    assert tx.report_date is not None
+    assert tx.ex_date is not None
+    # raw_attrs captura atributos no tipados (red de seguridad, idem accruals)
+    assert isinstance(tx.raw_attrs, dict)
+    assert "description" not in tx.raw_attrs  # description es columna tipada
+    assert "dividendType" in tx.raw_attrs  # atributo real sin columna dedicada
+
+
 def test_fop_fixture_transfer_carries_instrument_spec():
     """TL-D1: el <Transfer> FOP real trae spec completo de instrumento."""
     xml = (FIXTURE_DIR / "ACTIVITY_2026_FOP_sanitized.xml").read_bytes()

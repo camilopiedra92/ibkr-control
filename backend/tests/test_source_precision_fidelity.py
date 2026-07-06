@@ -149,3 +149,42 @@ def test_proven_precision_columns_keep_teeth():
             f"{key}: max decimales en fixtures = {observed.get(key, 0)} < {required} "
             f"censado — el test de fidelidad perdió los dientes (¿fixture truncado?)"
         )
+
+
+@pytest.mark.asyncio
+async def test_cash_transactions_capture_fiscal_fields_roundtrip(
+    db_session: AsyncSession, sample_org
+):
+    """IC-1 roundtrip (spec 2026-06 ingest-completeness): tras ingestar un fixture
+    real con dividendos, action_id/issuer_country/settle_date/report_date/ex_date
+    aterrizan no-NULL en cash_transactions donde el XML fuente los trae.
+
+    ACTIVITY_2025_sanitized.xml tiene 19 filas Dividends DETAIL, las 5 attrs
+    presentes al 100% (verificado contra el fixture real, no asumido) — el
+    guard de non-vacuity protege contra un fixture futuro que las pierda.
+    """
+    xml = (FIXTURES_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
+    parsed = parse(xml)
+    await persist(
+        db_session,
+        parsed=parsed,
+        organization_id=sample_org.id,
+        xml_bytes=xml,
+        source="manual_upload",
+    )
+
+    result = await db_session.execute(
+        select(CashTransaction).where(CashTransaction.type == "Dividends")
+    )
+    rows = result.scalars().all()
+    assert rows, "non-vacuity: el fixture debe producir cash_transactions de dividendos"
+    for row in rows:
+        assert row.action_id is not None, f"action_id NULL en tx {row.transaction_id}"
+        assert row.issuer_country is not None, f"issuer_country NULL en tx {row.transaction_id}"
+        assert row.settle_date is not None, f"settle_date NULL en tx {row.transaction_id}"
+        assert row.report_date is not None, f"report_date NULL en tx {row.transaction_id}"
+        assert row.ex_date is not None, f"ex_date NULL en tx {row.transaction_id}"
+        assert isinstance(row.raw_attrs, dict)
+    # Non-vacuity adicional: al menos un dividendo de emisor US (el caso más
+    # común y el usado en el test unitario del parser).
+    assert any(row.issuer_country == "US" for row in rows)

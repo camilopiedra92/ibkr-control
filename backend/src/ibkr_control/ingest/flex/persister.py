@@ -621,6 +621,12 @@ async def _upsert_all_children(
             "description": ct.description,
             "date": ct.date,
             "symbol": ct.symbol,
+            "settle_date": ct.settle_date,
+            "report_date": ct.report_date,
+            "ex_date": ct.ex_date,
+            "issuer_country": ct.issuer_country,
+            "action_id": ct.action_id,
+            "raw_attrs": ct.raw_attrs,
         }
         for ct in parsed.cash_transactions
         if not _is_shadow_account(ct.ibkr_account_id)

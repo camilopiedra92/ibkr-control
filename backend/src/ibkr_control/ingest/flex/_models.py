@@ -1,6 +1,6 @@
 """Dataclasses que el parser produce a partir del XML (intermediarias, no DB)."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -105,6 +105,16 @@ class ParsedCashTransaction:
     # W2 (T1-D8): resolver-only. conid nullable (CR-1: 0/23 en 2024, 80/115 en
     # 2025) - el persister hace lookup si está presente, NUNCA crea instrument.
     conid: str | None = None
+    # IC-1 (spec 2026-06 ingest-completeness): fiscal fields el parser ya veía
+    # y descartaba. action_id linkea Dividend<->WHT (Art.254 tax credit);
+    # issuer_country sostiene tratado/Form 160; las 3 fechas soportan
+    # settlement/ex-date. raw_attrs preserva el resto (idem accruals).
+    settle_date: date | None = None
+    report_date: date | None = None
+    ex_date: date | None = None
+    issuer_country: str | None = None
+    action_id: str | None = None
+    raw_attrs: dict = field(default_factory=dict)
 
 
 @dataclass
