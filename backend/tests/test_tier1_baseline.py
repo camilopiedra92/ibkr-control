@@ -27,6 +27,7 @@ from sqlalchemy import create_engine, text
 from testcontainers.postgres import PostgresContainer
 
 _VERSIONS_DIR = Path(__file__).resolve().parents[1] / "alembic" / "versions"
+_PINNED_BASELINE_REVISION = "a9977ac077e5"
 
 
 def _revision_files() -> list[Path]:
@@ -301,6 +302,28 @@ def test_transfer_cash_iff_no_instrument_check(fresh_postgres, monkeypatch):
                 ).bindparams(o=org_id, a=acct_id, i=iid)
             )
     engine.dispose()
+
+
+def test_baseline_frozen_after_first_deploy():
+    """HD-4: la política T1-D14 (baseline mutable, regen + wipe dev por PR) EXPIRA al
+    primer deploy. A partir de ahí, regenerar el baseline = wipe de tenants en prod.
+    Con el sentinel backend/.baseline_frozen presente, este guard pinea el revision:
+    un regen accidental cambia el hash y rompe acá — no la DB. Pre-deploy (sin
+    sentinel) se skipea: la política mutable sigue viva.
+    """
+    sentinel = Path(__file__).resolve().parents[1] / ".baseline_frozen"
+    if not sentinel.exists():
+        pytest.skip(
+            "baseline aún mutable (pre-deploy, T1-D14) — creá backend/.baseline_frozen "
+            "al hacer el primer deploy para activar este guard"
+        )
+    files = _revision_files()
+    assert len(files) >= 1, "no hay revisiones — el baseline desapareció"
+    roots = [f for f in files if f.name.startswith(_PINNED_BASELINE_REVISION)]
+    assert roots, (
+        f"el baseline pineado {_PINNED_BASELINE_REVISION} ya no existe — "
+        "¿se regeneró el baseline POST-deploy? Eso destruiría datos de tenants."
+    )
 
 
 def test_instrument_identifiers_unique(fresh_postgres, monkeypatch):
