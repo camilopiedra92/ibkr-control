@@ -128,3 +128,67 @@ def test_all_tenant_tables_have_organization_id():
         assert not table.columns["organization_id"].nullable, (
             f"{table_name}.organization_id nullable"
         )
+
+
+def test_every_org_scoped_table_is_rls_covered():
+    """Guard inverso (HD-1): TODA tabla con organization_id debe tener régimen RLS
+    declarado — en ORG_SCOPED_TABLES (loop org_isolation), en el set policied-aparte
+    (access_grants con grant_visibility), o marcada info={'rls_exempt': ...} en el
+    modelo. Una tabla org-scoped nueva (p.ej. lot_classifications de Phase 3) que se
+    olvide de todo esto rompe acá — fail-closed, análogo tabla-nivel del boot guard
+    de roles (PR #7). Aserción pura sobre Base.metadata, no toca DB.
+    """
+    from ibkr_control.db.base import Base
+    from ibkr_control.db.rls import ORG_SCOPED_TABLES
+
+    policied = set(ORG_SCOPED_TABLES) | {"access_grants"}
+    uncovered = []
+    for table in Base.metadata.tables.values():
+        if "organization_id" not in table.columns:
+            continue
+        if table.name in policied:
+            continue
+        if table.info.get("rls_exempt"):
+            continue
+        uncovered.append(table.name)
+
+    assert not uncovered, (
+        "Tablas con organization_id SIN cobertura RLS declarada — agregalas a "
+        "ORG_SCOPED_TABLES, o marcá __table_args__ = (..., {'info': {'rls_exempt': "
+        f"'razón'}}) en el modelo: {uncovered}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_org_scoped_tables_actually_force_rls(owner_engine):
+    """HD-1 capa 2: cada tabla policied (ORG_SCOPED_TABLES + access_grants) tiene
+    ENABLE + FORCE RLS + >=1 policy en la DB real. Cierra el caso 'está en la lista
+    pero el baseline no le aplicó FORCE'. owner_engine (no app_rls) para leer
+    pg_class/pg_policies sin RLS de por medio.
+    """
+    from sqlalchemy import text
+    from ibkr_control.db.rls import ORG_SCOPED_TABLES
+
+    policied = list(ORG_SCOPED_TABLES) + ["access_grants"]
+    async with owner_engine.connect() as conn:
+        for t in policied:
+            flags = (
+                await conn.execute(
+                    text(
+                        "SELECT relrowsecurity, relforcerowsecurity "
+                        "FROM pg_class WHERE relname = :t"
+                    ),
+                    {"t": t},
+                )
+            ).one()
+            assert flags.relrowsecurity and flags.relforcerowsecurity, (
+                f"{t}: RLS no está ENABLE+FORCE (relrowsecurity={flags.relrowsecurity}, "
+                f"relforcerowsecurity={flags.relforcerowsecurity})"
+            )
+            npol = (
+                await conn.execute(
+                    text("SELECT count(*) FROM pg_policies WHERE tablename = :t"),
+                    {"t": t},
+                )
+            ).scalar()
+            assert npol >= 1, f"{t}: sin ninguna RLS policy"
