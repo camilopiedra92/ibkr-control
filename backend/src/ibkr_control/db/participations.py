@@ -39,6 +39,8 @@ async def upsert_participation(
     if existing is not None:
         if existing.pct == pct:
             return
+        # same-day correction (valid_from == at); >= also covers valid_from > at,
+        # unreachable with the current at=date.today() callers (monotonic).
         if existing.valid_from >= at:
             existing.pct = pct
             await session.flush()

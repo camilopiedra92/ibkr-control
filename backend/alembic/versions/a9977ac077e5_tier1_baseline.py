@@ -93,7 +93,7 @@ DB virgen, splice entre markers).
 **Amendment #9 (ingest-completeness hardening, IC-1/2/3 — spec 2026-07-06):**
 (a) IC-1 — columnas nullable de captura fiscal en ``cash_transactions``
 (``settle_date``/``report_date``/``ex_date``/``issuer_country``/``action_id`` +
-``raw_attrs`` JSONB server_default ``'{}'``): source data que el parser ya ve
+``raw_attrs`` JSONB server_default ``'{}'::jsonb``): source data que el parser ya ve
 (``action_id`` linkea dividendo↔WHT para el descuento Art. 254 ET); pobladas por
 el persister en un PR follow-up. (b) IC-2 — ``instruments.issuer_country``
 (nullable): país emisor canónico. (c) IC-3 — no-solapamiento de vigencias en

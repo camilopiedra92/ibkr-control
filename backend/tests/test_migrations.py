@@ -1,3 +1,4 @@
+import warnings
 from pathlib import Path
 
 import pytest
@@ -52,7 +53,21 @@ def test_migrations_apply_cleanly_and_match_metadata(fresh_postgres, monkeypatch
                 "target_metadata": Base.metadata,
             },
         )
-        diffs = compare_metadata(ctx, Base.metadata)
+        # `participations.validity` is a Postgres-maintained generated column
+        # (Computed). Its server-default is structurally immutable — Alembic cannot
+        # emit an ALTER for it, so under compare_server_default it emits an expected,
+        # un-actionable "cannot be modified" UserWarning. A user callable is not an
+        # option here: Alembic's callable path unconditionally reads `.arg.text` on the
+        # connection default, which Computed lacks (AttributeError). We silence ONLY
+        # that exact message (it names the specific table.column, so no other warning
+        # can hide behind this filter); the column's presence/type is still compared by
+        # compare_metadata, so no real drift detection is lost.
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="Computed default on participations.validity cannot be modified",
+            )
+            diffs = compare_metadata(ctx, Base.metadata)
     engine.dispose()
 
     def _is_ignorable(diff):
