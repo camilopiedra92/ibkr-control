@@ -10,6 +10,7 @@ from lxml.etree import XMLSyntaxError
 
 from ibkr_control.ingest.flex.parser import _parse_transfers, parse
 from ibkr_control.ingest.flex._models import UnknownFlexTagError
+from ibkr_control.ingest.flex.persister import _collect_instrument_specs
 
 FIXTURE_DIR = Path(__file__).parent.parent.parent / "fixtures" / "xml"
 
@@ -474,3 +475,39 @@ def test_open_accrual_missing_conid_fails_loud():
 </FlexQueryResponse>"""
     with pytest.raises(ValueError, match="OpenDividendAccrual.*conid"):
         parse(xml)
+
+
+# === IC-2: instruments.issuer_country canonical (censo, T1-D7/TL-D1 style) ===
+
+
+def test_census_which_creators_carry_issuer_country():
+    """IC-2 censo contra ACTIVITY_2025_sanitized.xml (fixture real): qué creators
+    traen issuerCountryCode y cuántos de los 29 conids-creator distintos del
+    fixture terminan con issuer_country resuelto en el spec de instrumento.
+
+    Censo por tag (xpath directo sobre el XML, verificado antes de implementar):
+    Trade 190/194, Lot CLOSED_LOT 144/146, OpenPosition LOT 115/115,
+    ChangeInDividendAccrual (DETAIL) 51/51, OpenDividendAccrual 1/1,
+    Transfer no-cash 6/6. Los huecos (4 trades, 2 closed lots) son instrumentos
+    que SÍ tienen el atributo en alguna otra fila creator del mismo conid — el
+    merge sticky-first-non-null de _collect_instrument_specs converge a
+    issuer_country resuelto para 28 de los 29 conids-creator del fixture.
+
+    El único que NUNCA lo trae es conid 711280067 (MESU5, FUT — micro-future
+    E-mini S&P 500): verificado contra las 4 filas <Trade> reales de ese conid,
+    issuerCountryCode="" en las 4. No es un gap del parser/persister — un
+    futuro es un derivado sin emisor corporativo, la fuente legítimamente no
+    tiene país que reportar. El piso real es 28/29, no 29/29."""
+    xml = (FIXTURE_DIR / "ACTIVITY_2025_sanitized.xml").read_bytes()
+    parsed = parse(xml)
+    specs = _collect_instrument_specs(parsed)
+    assert len(specs) == 29, "censo de conids-creator distintos cambió — revisar fixture/lógica"
+    specs_with_country = [s for s in specs.values() if s.get("issuer_country")]
+    assert len(specs_with_country) == 28, (
+        "censo cambió — el fallback por-hecho (fuera de alcance de este PR) sería "
+        "la única fuente de país si el merge de creators no convergiera para el "
+        "resto de instrumentos con evidencia real en el XML"
+    )
+    without_country = [conid for conid, s in specs.items() if not s.get("issuer_country")]
+    assert without_country == ["711280067"], "el único hueco esperado es el FUT MESU5 (sin emisor)"
+    assert specs["711280067"]["asset_class"] == "FUT"

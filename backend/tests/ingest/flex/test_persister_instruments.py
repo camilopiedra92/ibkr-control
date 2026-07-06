@@ -32,7 +32,14 @@ from ibkr_control.ingest.flex.persister import persist
 FIXTURE_DIR = Path(__file__).parent.parent.parent / "fixtures" / "xml"
 
 
-def _trade(conid: str, symbol: str, account_id: str = "U99999001", *, txn: str) -> ParsedTrade:
+def _trade(
+    conid: str,
+    symbol: str,
+    account_id: str = "U99999001",
+    *,
+    txn: str,
+    issuer_country: str | None = None,
+) -> ParsedTrade:
     return ParsedTrade(
         transaction_id=txn,
         ibkr_account_id=account_id,
@@ -52,6 +59,7 @@ def _trade(conid: str, symbol: str, account_id: str = "U99999001", *, txn: str) 
         open_close="O",
         buy_sell="BUY",
         raw_attrs={},
+        issuer_country=issuer_country,
     )
 
 
@@ -177,6 +185,101 @@ async def test_ticker_change_updates_symbol_last_seen(db_session: AsyncSession, 
     await db_session.refresh(inst)
     assert inst.symbol == "META"
     assert inst.updated_at > inst.created_at
+
+
+@pytest.mark.asyncio
+async def test_ensure_instruments_populates_and_no_churn_on_country(
+    db_session: AsyncSession, sample_org
+):
+    """IC-2 anti-churn (mirror de symbol): 1er ingest crea el instrument con
+    issuer_country="US"; reingest con el MISMO país no mueve updated_at (no
+    churn); reingest con país NUEVO desde None converge (completa) sin pisar
+    con None un valor ya resuelto (convergencia monótona, idem TL-D3 en cash)."""
+    from sqlalchemy import update
+
+    # 1st ingest: creator trae issuer_country="US" -> instrument creado con país.
+    p1 = _xml("U99999001", [_trade("265598", "AAPL", txn="TX-1", issuer_country="US")])
+    await persist(
+        db_session,
+        parsed=p1,
+        organization_id=sample_org.id,
+        xml_bytes=b"<v1/>",
+        source="manual_upload",
+    )
+    inst = await db_session.scalar(select(Instrument))
+    assert inst.issuer_country == "US"
+    # Force updated_at/created_at to a fixed past so a real bump is observable.
+    await db_session.execute(
+        update(Instrument)
+        .where(Instrument.id == inst.id)
+        .values(updated_at=datetime(2020, 1, 1), created_at=datetime(2020, 1, 1))
+    )
+    await db_session.flush()
+    await db_session.refresh(inst)
+    frozen_updated_at_1 = inst.updated_at
+
+    # 2nd ingest: MISMO conid, MISMO país -> no churn (updated_at intacto).
+    p2 = _xml("U99999001", [_trade("265598", "AAPL", txn="TX-2", issuer_country="US")])
+    await persist(
+        db_session,
+        parsed=p2,
+        organization_id=sample_org.id,
+        xml_bytes=b"<v2/>",
+        source="manual_upload",
+    )
+    await db_session.refresh(inst)
+    assert inst.issuer_country == "US"
+    assert inst.updated_at == frozen_updated_at_1  # sin avanzar: nada material cambió
+
+    # 3rd ingest: otro conid, arranca SIN país (None) -> instrument creado con
+    # issuer_country=None (convergencia monótona empieza en NULL).
+    p3 = _xml("U99999001", [_trade("999888", "GLOB2", txn="TX-3", issuer_country=None)])
+    await persist(
+        db_session,
+        parsed=p3,
+        organization_id=sample_org.id,
+        xml_bytes=b"<v3/>",
+        source="manual_upload",
+    )
+    inst2 = await db_session.scalar(select(Instrument).where(Instrument.symbol == "GLOB2"))
+    assert inst2.issuer_country is None
+    await db_session.execute(
+        update(Instrument)
+        .where(Instrument.id == inst2.id)
+        .values(updated_at=datetime(2020, 1, 1), created_at=datetime(2020, 1, 1))
+    )
+    await db_session.flush()
+
+    # 4th ingest: MISMO conid, ahora SÍ trae país -> converge NULL -> "NL",
+    # updated_at avanza (cambio material real).
+    p4 = _xml("U99999001", [_trade("999888", "GLOB2", txn="TX-4", issuer_country="NL")])
+    await persist(
+        db_session,
+        parsed=p4,
+        organization_id=sample_org.id,
+        xml_bytes=b"<v4/>",
+        source="manual_upload",
+    )
+    await db_session.refresh(inst2)
+    assert inst2.issuer_country == "NL"
+    assert inst2.updated_at > inst2.created_at
+
+    # 5th ingest: MISMO conid, este batch NO trae país (spec issuer_country=None,
+    # p.ej. un creator que esta vez no incluyó el atributo) -> NO pisa "NL" con
+    # None (guard `new_issuer_country is not None`), y como nada más cambió,
+    # tampoco churnea updated_at.
+    frozen_updated_at = inst2.updated_at
+    p5 = _xml("U99999001", [_trade("999888", "GLOB2", txn="TX-5", issuer_country=None)])
+    await persist(
+        db_session,
+        parsed=p5,
+        organization_id=sample_org.id,
+        xml_bytes=b"<v5/>",
+        source="manual_upload",
+    )
+    await db_session.refresh(inst2)
+    assert inst2.issuer_country == "NL"  # NUNCA pisado con None
+    assert inst2.updated_at == frozen_updated_at  # sin churn
 
 
 @pytest.mark.asyncio

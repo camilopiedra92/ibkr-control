@@ -36,6 +36,11 @@ class ParsedTrade:
     open_close: str | None  # 'O' | 'C' | None
     buy_sell: str  # 'BUY' | 'SELL'
     raw_attrs: dict
+    # IC-2 (spec 2026-06 ingest-completeness): país emisor canónico
+    # (issuerCountryCode). Contribuye al spec de instrumento en el persister
+    # (_collect_instrument_specs); creators-never-clobber, no columna propia
+    # en trades — el hecho fiscal per-fila ya vive en cash_transactions (IC-1).
+    issuer_country: str | None = None
 
 
 @dataclass
@@ -62,6 +67,8 @@ class ParsedClosedLot:
     proceeds_usd: Decimal
     fifo_pnl_usd: Decimal
     transaction_id: str | None  # Links to Trade via raw XML transactionID; None if not captured
+    # IC-2: país emisor canónico (issuerCountryCode) — idem ParsedTrade.
+    issuer_country: str | None = None
 
 
 @dataclass
@@ -90,6 +97,8 @@ class ParsedOpenPositionLot:
     # multiple LOT rows with the same (account, symbol, open_date, snapshot_date)
     # — only this txn id distinguishes them. LOT-level rows always have it
     # populated; SUMMARY rows (already filtered by the parser) do not.
+    # IC-2: país emisor canónico (issuerCountryCode) — idem ParsedTrade.
+    issuer_country: str | None = None
 
 
 @dataclass
@@ -138,6 +147,9 @@ class ParsedTransfer:
     conid: str | None = None
     isin: str | None = None
     description: str | None = None
+    # IC-2: país emisor canónico (issuerCountryCode). Solo relevante para
+    # transfers de securities (creators, TL-D1); los CASH nunca lo aportan.
+    issuer_country: str | None = None
 
 
 @dataclass

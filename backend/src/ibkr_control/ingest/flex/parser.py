@@ -290,6 +290,7 @@ def _parse_trade(elem, trades: list[ParsedTrade]) -> None:
             open_close=elem.get("openCloseIndicator") or None,
             buy_sell=elem.get("buySell") or "BUY",
             raw_attrs=raw_attrs,
+            issuer_country=_instrument_issuer_country(elem),
         )
     )
 
@@ -343,6 +344,12 @@ def _instrument_multiplier(elem) -> Decimal | None:
     return _dec(raw) if raw else None
 
 
+def _instrument_issuer_country(elem) -> str | None:
+    """IC-2: país emisor canónico (issuerCountryCode). Idem isin/currency —
+    atributo de instrumento que los creators aportan al spec en el persister."""
+    return _attr(elem, "issuerCountryCode")
+
+
 def _parse_lot_as_closed_lot(elem) -> ParsedClosedLot | None:
     """Convert a <Lot levelOfDetail="CLOSED_LOT"> into a ParsedClosedLot.
 
@@ -391,6 +398,7 @@ def _parse_lot_as_closed_lot(elem) -> ParsedClosedLot | None:
         proceeds_usd=proceeds,
         fifo_pnl_usd=fifo_pnl,
         transaction_id=elem.get("transactionID") or None,
+        issuer_country=_instrument_issuer_country(elem),
     )
 
 
@@ -433,6 +441,7 @@ def _parse_closed_lots_wrapper(elem) -> list[ParsedClosedLot]:
                 proceeds_usd=proceeds,
                 fifo_pnl_usd=fifo_pnl,
                 transaction_id=lot.get("transactionID") or None,
+                issuer_country=_instrument_issuer_country(lot),
             )
         )
     return out
@@ -469,6 +478,7 @@ def _parse_open_positions(elem) -> list[ParsedOpenPositionLot]:
                 mark_value_usd=_dec(pos.get("positionValue")) if pos.get("positionValue") else None,
                 snapshot_date=snapshot_date,
                 originating_transaction_id=pos.get("originatingTransactionID") or "",
+                issuer_country=_instrument_issuer_country(pos),
             )
         )
     return out
@@ -727,6 +737,7 @@ def _parse_transfers(elem) -> list[ParsedTransfer]:
             conid=conid,
             isin=_instrument_isin(tr),
             description=_instrument_description(tr),
+            issuer_country=_instrument_issuer_country(tr),
         )
         out.append(transfer)
     return out
