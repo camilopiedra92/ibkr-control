@@ -58,6 +58,7 @@ from ibkr_control.ingest.flex import crypto as flex_crypto_mod
 from ibkr_control.ingest.flex import parser as flex_parser_mod
 from ibkr_control.ingest.flex import persister as flex_persister_mod
 from ibkr_control.ingest.flex._models import ParsedAccount
+from ibkr_control.ingest.flex.persister import _ensure_accounts
 from ibkr_control.ingest.job_tracker import get_tracker
 
 logger = logging.getLogger(__name__)
@@ -695,22 +696,9 @@ async def step3_save_new_accounts(
                     "ibkr_account_id": item.ibkr_account_id,
                 },
             )
-        acc = await session.scalar(
-            select(Account).where(
-                Account.organization_id == ctx.org_id,
-                Account.ibkr_account_id == item.ibkr_account_id,
-            )
-        )
-        if acc is None:
-            acc = Account(
-                organization_id=ctx.org_id,
-                ibkr_account_id=item.ibkr_account_id,
-                alias=item.alias,
-                currency="USD",
-            )
-            session.add(acc)
-            await session.flush()
-        elif item.alias is not None:
+        ids = await _ensure_accounts(session, [item.ibkr_account_id], organization_id=ctx.org_id)
+        acc = await session.scalar(select(Account).where(Account.id == ids[item.ibkr_account_id]))
+        if item.alias is not None:
             acc.alias = item.alias
 
         await upsert_participation(
