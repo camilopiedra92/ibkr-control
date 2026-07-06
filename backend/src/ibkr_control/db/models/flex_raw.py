@@ -416,6 +416,19 @@ class CashTransaction(Base):
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     date: Mapped[date] = mapped_column(Date, nullable=False)
     symbol: Mapped[str | None] = mapped_column(String, nullable=True)
+    # IC-1: source data fiscal que el parser ya ve (poblado por Task 2). action_id
+    # linkea un dividendo con su Withholding Tax (descuento Art. 254 ET); las
+    # fechas de settle/report/ex y issuer_country sostienen tratado + Form 160.
+    # raw_attrs preserva el resto de atributos del <CashTransaction> sin perder
+    # fidelidad de fuente (idem accruals).
+    settle_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    report_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    ex_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    issuer_country: Mapped[str | None] = mapped_column(String, nullable=True)
+    action_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    raw_attrs: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'")
+    )
 
 
 class ChangeInDividendAccrual(Base):

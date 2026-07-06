@@ -87,7 +87,12 @@ async def test_participations_valid_range_check_constraint(
     db_session.add(acc)
     await db_session.commit()
 
-    # valid_to BEFORE valid_from -> CHECK should fail
+    # valid_to EQUAL to valid_from -> CHECK should fail. (A valid_to strictly
+    # BEFORE valid_from is now rejected even earlier, by the generated `validity`
+    # daterange itself — lower > upper is a DataError; the '[)' range with equal
+    # bounds is instead legal-but-empty, so it reaches the CHECK, which is exactly
+    # the boundary this test pins: valid_to must be STRICTLY greater than
+    # valid_from.)
     db_session.add(
         Participation(
             party_id=sample_party.id,
@@ -95,7 +100,7 @@ async def test_participations_valid_range_check_constraint(
             organization_id=sample_org.id,
             pct=Decimal("0.5"),
             valid_from=date(2026, 1, 1),
-            valid_to=date(2025, 12, 31),  # earlier than valid_from
+            valid_to=date(2026, 1, 1),  # equal to valid_from
         )
     )
     with pytest.raises(IntegrityError):
