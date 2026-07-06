@@ -937,12 +937,16 @@ async def _ensure_counterparties(
     )
     existing: dict[str, int] = {c.external_id: c.id for c in result.all()}
 
-    missing = set(external_ids) - set(existing.keys())
-    for ext_id in missing:
-        session.add(Counterparty(organization_id=organization_id, external_id=ext_id))
-
+    missing = sorted(set(external_ids) - set(existing))
     if missing:
-        await session.flush()
+        stmt = (
+            pg_insert(Counterparty.__table__)
+            .values(
+                [{"organization_id": organization_id, "external_id": ext_id} for ext_id in missing]
+            )
+            .on_conflict_do_nothing(index_elements=["organization_id", "external_id"])
+        )
+        await session.execute(stmt)
         result2 = await session.scalars(
             select(Counterparty).where(
                 Counterparty.organization_id == organization_id,
