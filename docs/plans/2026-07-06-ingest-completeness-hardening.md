@@ -38,6 +38,25 @@ Los tres cambios de schema van juntos porque comparten UN baseline amendment. IC
 - Produces (Task 3 consume): `Instrument.issuer_country: str|None`.
 - Produces: constraint `participations_no_overlap` (EXCLUDE gist) sobre `(organization_id, party_id, account_id, daterange(valid_from, valid_to, '[)'))`.
 
+- [ ] **Step 0: De-risk spike — idempotencia del EXCLUDE (retirar el riesgo primero)**
+
+Antes de escribir nada definitivo, validar que el approach de la columna generada
+round-trip-ea limpio contra el toolchain real (SQLAlchemy 2.0.36+ / Alembic 1.18.4).
+En una DB desechable dentro del container: crear la columna `validity` generada +
+el `ExcludeConstraint` column-based (Step 3), y correr autogenerate **dos veces**:
+
+```bash
+make dev
+docker compose exec backend uv run alembic revision --autogenerate -m "spike"   # 1er run
+docker compose exec backend uv run alembic revision --autogenerate -m "spike2"   # 2do run
+```
+
+**Criterio de aceptación: el SEGUNDO run produce un diff VACÍO** (bajo el env real
+`compare_server_default=True`). Si es vacío → el approach round-trip-ea, seguir con
+confianza. Si NO → iterar la definición del modelo acá (ciclo de segundos) antes de
+construir encima. Borrar los archivos de spike al terminar (`git clean`/rm).
+Fallback ladder si drift residual: ver spec §3 "Ladder de fallback".
+
 - [ ] **Step 1: Write the failing test (IC-3 overlap rejected)**
 
 `backend/tests/test_participations_no_overlap.py`:
@@ -112,21 +131,31 @@ En `instruments.py`, clase `Instrument`, tras `multiplier`:
     issuer_country: Mapped[str | None] = mapped_column(String, nullable=True)
 ```
 
-En `participations.py`, agregar el import y el constraint en `__table_args__`:
+En `participations.py`, agregar la **columna generada** (tipar el rango, no
+computarlo inline en el constraint — ver spec §3) + el constraint **column-based**:
 
 ```python
-from sqlalchemy import literal_column, text
-from sqlalchemy.dialects.postgresql import ExcludeConstraint
+from sqlalchemy import Computed
+from sqlalchemy.dialects.postgresql import DATERANGE, ExcludeConstraint
+# ... como columna (tras valid_to):
+    validity: Mapped[object] = mapped_column(
+        DATERANGE,
+        Computed("daterange(valid_from, valid_to, '[)')", persisted=True),
+        nullable=False,
+    )
 # ... dentro de __table_args__, ANTES del dict de comment:
         ExcludeConstraint(
             ("organization_id", "="),
             ("party_id", "="),
             ("account_id", "="),
-            (literal_column("daterange(valid_from, valid_to, '[)')"), "&&"),
+            ("validity", "&&"),          # columna plana, NO literal_column
             using="gist",
             name="participations_no_overlap",
         ),
 ```
+
+La columna `validity` la mantiene Postgres desde `valid_from`/`valid_to` (single
+source of truth); aditiva, no toca la PK ni el write-path del wizard.
 
 - [ ] **Step 4: Regenerate the baseline amendment canónicamente en container**
 
@@ -141,20 +170,32 @@ Esto emite un archivo nuevo. **Política Tier 1 = UN baseline canónico:** en ve
 
 - [ ] **Step 5: Add the manual DDL que autogenerate NO expresa**
 
-Autogenerate NO emite `CREATE EXTENSION` ni (confiablemente) el `EXCLUDE`. Agregar al `upgrade()` del baseline, y su reverso en `downgrade()`:
+Autogenerate emite la columna `validity` (como `sa.Computed(...)`) al regenerar la
+tabla, pero **NO** emite `CREATE EXTENSION`. Agregar al `upgrade()` del baseline el
+`CREATE EXTENSION` **antes** de la tabla `participations`, y su reverso en
+`downgrade()`:
 
 ```python
     op.execute("CREATE EXTENSION IF NOT EXISTS btree_gist")
-    # ... tras crear la tabla participations:
+```
+
+El `EXCLUDE` es **column-based** (sobre `validity`), así que SQLAlchemy/Alembic lo
+emiten confiablemente vía el dialect postgresql — verificar que el DDL de
+`participations` en el baseline incluya el `ExcludeConstraint` `participations_no_overlap`
+sobre `(organization_id =, party_id =, account_id =, validity &&) USING gist`. Si por
+alguna razón no lo emitió, agregarlo manual:
+
+```python
     op.execute(
         "ALTER TABLE participations ADD CONSTRAINT participations_no_overlap "
         "EXCLUDE USING gist ("
-        "organization_id WITH =, party_id WITH =, account_id WITH =, "
-        "daterange(valid_from, valid_to, '[)') WITH &&)"
+        "organization_id WITH =, party_id WITH =, account_id WITH =, validity WITH &&)"
     )
 ```
 
-Si autogenerate SÍ emitió el `ExcludeConstraint` (SQLAlchemy a veces lo hace vía el dialect postgresql), usar esa versión y NO duplicar. `CREATE EXTENSION` siempre es manual y debe ir antes del primer uso de `gist` en la tabla.
+`downgrade()`: drop constraint → drop columna `validity` → drop columnas IC-1/IC-2 →
+`DROP EXTENSION IF EXISTS btree_gist`. El **Step 0 spike ya validó** que el segundo
+autogenerate da diff vacío, así que este step no debería requerir iteración.
 
 - [ ] **Step 6: Wipe & reload dev + drift + boot smoke**
 
@@ -166,7 +207,7 @@ docker compose exec backend uv run alembic upgrade head
 Recargar los XMLs por el wizard (o el flujo de reload documentado). Correr el drift test:
 
 Run: `cd backend && uv run pytest -n0 tests/test_migrations.py -v`
-Expected: PASS — `compare_metadata` sin drift (los modelos matchean el baseline amendado). **Si el EXCLUDE genera drift espurio** (autogenerate no round-trip-ea la expresión daterange), ajustar la definición del `ExcludeConstraint` en el modelo hasta que `compare_metadata` quede limpio — NO excluir el constraint de la comparación (rompería la pureza del drift test). Este es el punto de mayor riesgo del task; iterar hasta verde.
+Expected: PASS — `compare_metadata` sin drift (los modelos matchean el baseline amendado). Con el `EXCLUDE` **column-based** sobre la columna generada `validity` (no una expresión inline), el round-trip es limpio y el Step 0 spike ya lo validó. Si aun así apareciera drift residual, aplicar el ladder de fallback del spec §3 — NUNCA excluir el constraint de la comparación (rompería la pureza del drift test).
 
 Boot smoke: confirmar en logs que `backend` arranca como `app_rls` (`rolsuper=f/rolbypassrls=f`).
 
@@ -355,6 +396,12 @@ git add backend/ && git commit -m "feat(ingest): IC-2 instruments.issuer_country
 - **Placeholders:** los `<archivo>` y nombres de fixtures (`sample_party`, `parsed.instrument_specs`, ruta del persister) son punteros a verificar contra el código real en cada task — cada step dice explícitamente qué buscar. No hay lógica sin código mostrado.
 - **Type consistency:** `action_id/issuer_country/settle_date/report_date/ex_date/raw_attrs` idénticos entre `CashTransaction` (Task 1), `ParsedCashTransaction` (Task 2) y parser. `issuer_country` idéntico entre `Instrument` (Task 1) y `_ensure_instruments` (Task 3).
 
-## Riesgo conocido
+## Riesgo conocido (mitigado por diseño)
 
-El punto más frágil es el **round-trip del `ExcludeConstraint` con la expresión `daterange` en el drift test** (Task 1 Step 6). Si `compare_metadata` reporta drift espurio, iterar la definición del constraint en el modelo hasta que matchee el DDL de la DB — nunca silenciar la comparación. Es el único step que puede requerir varias vueltas.
+El riesgo original era el round-trip del `EXCLUDE` con una expresión `daterange`
+inline en el drift test. **Diseñado-afuera:** IC-3 usa una columna generada
+`validity` (`Computed`, mantenida por Postgres) y el `ExcludeConstraint` opera
+sobre esa columna plana → SQLAlchemy/Alembic la comparan sin ambigüedad. Además el
+**Step 0 spike** retira el riesgo en el minuto 1 (criterio: segundo autogenerate =
+diff vacío). Residual mínimo cubierto por el ladder de fallback del spec §3. Ya no
+es un step que pueda requerir varias vueltas ciegas.

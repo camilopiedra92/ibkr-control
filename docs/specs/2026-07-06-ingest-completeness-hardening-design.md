@@ -141,15 +141,34 @@ RLS. **Nada impide dos participaciones con vigencia solapada** para el mismo
 
 ### Cambio
 
+**Diseño world-class: tipar el rango como columna generada, NO computarlo inline
+en el constraint.** El vector de fragilidad de un `EXCLUDE` es meter una expresión
+funcional (`daterange(valid_from, valid_to, '[)')`) *adentro* del constraint —
+Postgres la normaliza a su gusto (`'[)'::text`, reordenamientos) y el drift test
+(`compare_metadata` con `compare_server_default: True`) marca drift espurio. La
+mitigación es **eliminar la expresión del constraint**, no pinnearla: una columna
+`daterange` **generada** por Postgres, y el `EXCLUDE` operando sobre esa columna
+plana (que SQLAlchemy/Alembic representan y comparan sin ambigüedad). Es el mismo
+ethos que rechazar JSONB por detail tables tipadas: **tipá el invariante, no lo
+computes en el borde.** (Verificado: SQLAlchemy 2.0.36+ / Alembic 1.18.4 soportan
+`Computed(persisted=True)` + `DATERANGE` nativos; no se usan aún en el repo.)
+
+- **Columna generada** en `participations`:
+  ```
+  validity daterange GENERATED ALWAYS AS (daterange(valid_from, valid_to, '[)')) STORED
+  ```
+  La mantiene Postgres desde `valid_from`/`valid_to` (single source of truth, cero
+  desnormalización). Aditiva: `valid_from`/`valid_to` y la PK quedan intactos, no
+  toca el write-path del wizard. Queda consultable para el `apply_pct` de Phase 3.
 - **Migración:** `CREATE EXTENSION IF NOT EXISTS btree_gist` (no se usa en ningún
   lado hoy; corre como **owner** en el container one-shot `migrate`, no `app_rls`).
-- **`ExcludeConstraint`** sobre:
+- **`ExcludeConstraint` column-based** (NO `literal_column`):
   ```
   EXCLUDE USING gist (
       organization_id WITH =,
       party_id        WITH =,
       account_id      WITH =,
-      daterange(valid_from, valid_to, '[)') WITH &&
+      validity        WITH &&
   )
   ```
   → **imposible** tener dos participaciones con vigencia solapada para el mismo
@@ -158,6 +177,23 @@ RLS. **Nada impide dos participaciones con vigencia solapada** para el mismo
   los grants de SP2).
 - Convive con la PK y los CHECK existentes; compatible con FORCE RLS (los EXCLUDE
   funcionan bajo RLS).
+
+### Criterio de aceptación anti-drift (retirar el riesgo primero)
+
+Antes de escribir el constraint definitivo, un **spike de idempotencia** en el
+container: crear la columna + constraint en una DB desechable y correr
+`alembic revision --autogenerate` **dos veces** bajo el env real del repo
+(`compare_server_default=True`). **El segundo run DEBE producir un diff vacío** —
+esa es la verdad de fondo del drift, más fuerte que "el test pasó una vez". Si no
+es vacío, iterar la definición del modelo ahí (ciclo de segundos) antes de
+construir parser/persister encima.
+
+**Ladder de fallback** (si aun con la columna generada hubiera drift residual por
+`compare_server_default`): (1) fijar la expresión del `Computed` al texto que
+reporta `pg_get_expr` en PG16; (2) último recurso NO recomendado — `include_object`
+para saltar el constraint + aserción estructural dedicada vía `pg_constraint`
+(contradice "nunca silenciar la comparación" y debilita el drift-hardening H3;
+solo emergencia).
 
 ### Límite explícito: gaps NO los cubre este constraint
 
