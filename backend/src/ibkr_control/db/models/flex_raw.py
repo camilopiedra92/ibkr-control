@@ -427,7 +427,7 @@ class CashTransaction(Base):
     issuer_country: Mapped[str | None] = mapped_column(String, nullable=True)
     action_id: Mapped[str | None] = mapped_column(String, nullable=True)
     raw_attrs: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'")
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
 
 

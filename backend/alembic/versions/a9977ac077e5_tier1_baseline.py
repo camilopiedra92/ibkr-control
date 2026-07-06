@@ -823,7 +823,7 @@ def upgrade() -> None:
         sa.Column(
             "raw_attrs",
             postgresql.JSONB(astext_type=sa.Text()),
-            server_default=sa.text("'{}'"),
+            server_default=sa.text("'{}'::jsonb"),
             nullable=False,
         ),
         sa.ForeignKeyConstraint(
