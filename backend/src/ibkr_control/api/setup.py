@@ -50,6 +50,7 @@ from ibkr_control.db.models.institutions import Institution
 from ibkr_control.db.models.organizations import Organization
 from ibkr_control.db.models.parties import Party
 from ibkr_control.db.models.participations import Participation
+from ibkr_control.db.participations import upsert_participation
 from ibkr_control.db.session import get_async_session, get_engine
 from ibkr_control.ingest import connection_state
 from ibkr_control.ingest.flex import client as flex_client_mod
@@ -57,6 +58,7 @@ from ibkr_control.ingest.flex import crypto as flex_crypto_mod
 from ibkr_control.ingest.flex import parser as flex_parser_mod
 from ibkr_control.ingest.flex import persister as flex_persister_mod
 from ibkr_control.ingest.flex._models import ParsedAccount
+from ibkr_control.ingest.flex.persister import _ensure_accounts
 from ibkr_control.ingest.job_tracker import get_tracker
 
 logger = logging.getLogger(__name__)
@@ -566,27 +568,13 @@ async def step2_save(
         if item.alias is not None:
             acc.alias = item.alias
 
-        existing = await session.scalar(
-            select(Participation).where(
-                Participation.party_id == party_id,
-                Participation.account_id == acc.id,
-                Participation.valid_to.is_(None),
-            )
-        )
-        if existing is not None:
-            if existing.pct == item.pct:
-                continue
-            existing.valid_to = today
-            await session.flush()
-        session.add(
-            Participation(
-                party_id=party_id,
-                account_id=acc.id,
-                organization_id=ctx.org_id,
-                pct=item.pct,
-                valid_from=today,
-                valid_to=None,
-            )
+        await upsert_participation(
+            session,
+            party_id=party_id,
+            account_id=acc.id,
+            organization_id=ctx.org_id,
+            pct=item.pct,
+            at=today,
         )
 
     await session.commit()
@@ -708,45 +696,18 @@ async def step3_save_new_accounts(
                     "ibkr_account_id": item.ibkr_account_id,
                 },
             )
-        acc = await session.scalar(
-            select(Account).where(
-                Account.organization_id == ctx.org_id,
-                Account.ibkr_account_id == item.ibkr_account_id,
-            )
-        )
-        if acc is None:
-            acc = Account(
-                organization_id=ctx.org_id,
-                ibkr_account_id=item.ibkr_account_id,
-                alias=item.alias,
-                currency="USD",
-            )
-            session.add(acc)
-            await session.flush()
-        elif item.alias is not None:
+        ids = await _ensure_accounts(session, [item.ibkr_account_id], organization_id=ctx.org_id)
+        acc = await session.scalar(select(Account).where(Account.id == ids[item.ibkr_account_id]))
+        if item.alias is not None:
             acc.alias = item.alias
 
-        existing = await session.scalar(
-            select(Participation).where(
-                Participation.party_id == party_id,
-                Participation.account_id == acc.id,
-                Participation.valid_to.is_(None),
-            )
-        )
-        if existing is not None:
-            if existing.pct == item.pct:
-                continue
-            existing.valid_to = today
-            await session.flush()
-        session.add(
-            Participation(
-                party_id=party_id,
-                account_id=acc.id,
-                organization_id=ctx.org_id,
-                pct=item.pct,
-                valid_from=today,
-                valid_to=None,
-            )
+        await upsert_participation(
+            session,
+            party_id=party_id,
+            account_id=acc.id,
+            organization_id=ctx.org_id,
+            pct=item.pct,
+            at=today,
         )
     await session.commit()
     return {"ok": True}

@@ -436,6 +436,15 @@
 
 **Fix:** borrar la línea stale 133; el comentario D1 correcto de las líneas 135-137 ya documenta bien el behavior.
 
+### [ ] HD4 — Flip del baseline a inmutable al primer deploy (T1-D14 expira)
+
+- **Severidad:** HIGH (data-loss si se olvida) · **Tipo:** 🟢 core · **Effort:** S · **WS:** WS5
+- **Estado:** ⏳ Pendiente (guard fail-closed ya en `tests/test_tier1_baseline.py::test_baseline_frozen_after_first_deploy`)
+
+**Problema:** la política "baseline mutable (regen + `down -v` dev por PR)" EXPIRA al primer deploy. Un regen post-deploy = wipe de datos de tenants. Vivía solo como prosa.
+
+**Fix (checklist al primer deploy):** (1) crear `backend/.baseline_frozen` (activa el guard que pinea `a9977ac077e5`); (2) dejar de regenerar el baseline — pasar a migraciones inmutables + expand/contract; (3) documentar el corte en CLAUDE.md. El guard fail-closed ya está; este item es el recordatorio operacional + el paso de crear el sentinel.
+
 ### WS6 — Testing
 
 ### [ ] T1 — Cuerpos de los jobs del scheduler sin tests (fan-out multi-user + aislamiento de errores) — 30%
