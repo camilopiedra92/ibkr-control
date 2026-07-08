@@ -1,6 +1,6 @@
 """Dataclasses que el parser produce a partir del XML (intermediarias, no DB)."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -36,6 +36,11 @@ class ParsedTrade:
     open_close: str | None  # 'O' | 'C' | None
     buy_sell: str  # 'BUY' | 'SELL'
     raw_attrs: dict
+    # IC-2 (spec 2026-06 ingest-completeness): país emisor canónico
+    # (issuerCountryCode). Contribuye al spec de instrumento en el persister
+    # (_collect_instrument_specs); creators-never-clobber, no columna propia
+    # en trades — el hecho fiscal per-fila ya vive en cash_transactions (IC-1).
+    issuer_country: str | None = None
 
 
 @dataclass
@@ -62,6 +67,8 @@ class ParsedClosedLot:
     proceeds_usd: Decimal
     fifo_pnl_usd: Decimal
     transaction_id: str | None  # Links to Trade via raw XML transactionID; None if not captured
+    # IC-2: país emisor canónico (issuerCountryCode) — idem ParsedTrade.
+    issuer_country: str | None = None
 
 
 @dataclass
@@ -90,6 +97,8 @@ class ParsedOpenPositionLot:
     # multiple LOT rows with the same (account, symbol, open_date, snapshot_date)
     # — only this txn id distinguishes them. LOT-level rows always have it
     # populated; SUMMARY rows (already filtered by the parser) do not.
+    # IC-2: país emisor canónico (issuerCountryCode) — idem ParsedTrade.
+    issuer_country: str | None = None
 
 
 @dataclass
@@ -105,6 +114,16 @@ class ParsedCashTransaction:
     # W2 (T1-D8): resolver-only. conid nullable (CR-1: 0/23 en 2024, 80/115 en
     # 2025) - el persister hace lookup si está presente, NUNCA crea instrument.
     conid: str | None = None
+    # IC-1 (spec 2026-06 ingest-completeness): fiscal fields el parser ya veía
+    # y descartaba. action_id linkea Dividend<->WHT (Art.254 tax credit);
+    # issuer_country sostiene tratado/Form 160; las 3 fechas soportan
+    # settlement/ex-date. raw_attrs preserva el resto (idem accruals).
+    settle_date: date | None = None
+    report_date: date | None = None
+    ex_date: date | None = None
+    issuer_country: str | None = None
+    action_id: str | None = None
+    raw_attrs: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -128,6 +147,9 @@ class ParsedTransfer:
     conid: str | None = None
     isin: str | None = None
     description: str | None = None
+    # IC-2: país emisor canónico (issuerCountryCode). Solo relevante para
+    # transfers de securities (creators, TL-D1); los CASH nunca lo aportan.
+    issuer_country: str | None = None
 
 
 @dataclass

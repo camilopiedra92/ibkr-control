@@ -49,3 +49,32 @@ async def test_clone_app_rls_role_is_non_bypass(test_db):
         assert row.rolbypassrls is False
     finally:
         await engine.dispose()
+
+
+async def test_clone_has_participations_no_overlap_exclude(test_db):
+    """IC-3: el clon del template preserva el EXCLUDE gist y btree_gist.
+
+    Si el clonado (o el baseline amendment #9) dejara de copiar el constraint o
+    la extensión, el invariante de no-solapamiento de vigencias se cae en silencio
+    — este guard lo pone rojo. contype 'x' = exclusion constraint.
+    """
+    engine = create_async_engine(test_db)  # owner DSN del clon
+    try:
+        async with engine.connect() as conn:
+            # cast the "char" contype to text so the driver returns a plain str
+            # (asyncpg yields bytes for the raw "char" pg type).
+            contype = (
+                await conn.execute(
+                    text(
+                        "SELECT contype::text FROM pg_constraint "
+                        "WHERE conname = 'participations_no_overlap'"
+                    )
+                )
+            ).scalar_one_or_none()
+            has_ext = (
+                await conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'btree_gist'"))
+            ).scalar_one_or_none()
+        assert contype == "x", "participations_no_overlap EXCLUDE ausente en el clon"
+        assert has_ext == 1, "btree_gist ausente en el clon"
+    finally:
+        await engine.dispose()

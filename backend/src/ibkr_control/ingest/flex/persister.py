@@ -621,6 +621,12 @@ async def _upsert_all_children(
             "description": ct.description,
             "date": ct.date,
             "symbol": ct.symbol,
+            "settle_date": ct.settle_date,
+            "report_date": ct.report_date,
+            "ex_date": ct.ex_date,
+            "issuer_country": ct.issuer_country,
+            "action_id": ct.action_id,
+            "raw_attrs": ct.raw_attrs,
         }
         for ct in parsed.cash_transactions
         if not _is_shadow_account(ct.ibkr_account_id)
@@ -968,7 +974,7 @@ def _collect_instrument_specs(parsed: ParsedXML) -> dict[str, dict]:
     data real — el split creator/resolver va por calidad de evidencia, no por
     tag). cash sigue resolver — no aporta specs. Last-seen gana dentro del batch
     (un trade tardío con el ticker renombrado pisa al temprano). Devuelve
-    conid -> {symbol, asset_class, name, currency, multiplier}.
+    conid -> {symbol, asset_class, name, currency, multiplier, isin, issuer_country}.
 
     Los accruals no traen description/currency/multiplier; usan asset_category
     (nullable en DB por fidelidad de fuente, aunque CR-1 lo verificó 100% presente
@@ -977,6 +983,14 @@ def _collect_instrument_specs(parsed: ParsedXML) -> dict[str, dict]:
     el ÚNICO creator de un conid y carece de assetCategory, _ensure_instruments
     falla loud (asset_class es NOT NULL en instruments) en vez de dejar que el
     INSERT reviente con un IntegrityError opaco.
+
+    issuer_country (IC-2, spec 2026-06 ingest-completeness): idem isin — sticky
+    first-non-null dentro del batch vía _set_issuer_country, NO last-seen como
+    symbol/name (es identidad del emisor, no metadata que cambia). Censo real
+    (fixture 2025): Trade 190/194, Lot CLOSED_LOT 144/146, OpenPosition LOT
+    115/115, ChangeInDividendAccrual 51/51, OpenDividendAccrual 1/1, Transfer
+    no-cash 6/6 — los 29 conids-creator distintos del fixture convergen a
+    issuer_country resuelto (test_census_which_creators_carry_issuer_country).
     """
     specs: dict[str, dict] = {}
 
@@ -999,11 +1013,20 @@ def _collect_instrument_specs(parsed: ParsedXML) -> dict[str, dict]:
             "currency": currency if currency is not None else prev.get("currency"),
             "multiplier": multiplier if multiplier is not None else prev.get("multiplier"),
             "isin": prev.get("isin"),
+            # IC-2: idem isin — carry-forward explícito porque _merge reescribe
+            # todo el dict del conid en cada llamada.
+            "issuer_country": prev.get("issuer_country"),
         }
 
     def _set_isin(conid: str, isin: str | None) -> None:
         if isin and specs.get(conid, {}).get("isin") is None:
             specs.setdefault(conid, {})["isin"] = isin
+
+    def _set_issuer_country(conid: str, issuer_country: str | None) -> None:
+        # IC-2: sticky first-non-null dentro del batch, mismo criterio que isin
+        # (identidad del instrumento, no metadata last-seen como symbol/name).
+        if issuer_country and specs.get(conid, {}).get("issuer_country") is None:
+            specs.setdefault(conid, {})["issuer_country"] = issuer_country
 
     for t in parsed.trades:
         _merge(
@@ -1015,6 +1038,7 @@ def _collect_instrument_specs(parsed: ParsedXML) -> dict[str, dict]:
             multiplier=t.multiplier,
         )
         _set_isin(t.conid, t.isin)
+        _set_issuer_country(t.conid, t.issuer_country)
     for cl in parsed.closed_lots:
         _merge(
             cl.conid,
@@ -1025,6 +1049,7 @@ def _collect_instrument_specs(parsed: ParsedXML) -> dict[str, dict]:
             multiplier=cl.multiplier,
         )
         _set_isin(cl.conid, cl.isin)
+        _set_issuer_country(cl.conid, cl.issuer_country)
     for op_lot in parsed.open_position_lots:
         _merge(
             op_lot.conid,
@@ -1035,14 +1060,17 @@ def _collect_instrument_specs(parsed: ParsedXML) -> dict[str, dict]:
             multiplier=op_lot.multiplier,
         )
         _set_isin(op_lot.conid, op_lot.isin)
+        _set_issuer_country(op_lot.conid, op_lot.issuer_country)
     # conid es REQUIRED en los accruals (parser _require_conid, spec review W2):
     # sin guard de None — un accrual sin conid ya falló loud en parse-time.
     for da in parsed.change_in_dividend_accruals:
         _merge(da.conid, symbol=da.symbol, asset_class=da.asset_category, currency=da.currency)
         _set_isin(da.conid, da.isin)
+        _set_issuer_country(da.conid, da.issuer_country)
     for oda in parsed.open_dividend_accruals:
         _merge(oda.conid, symbol=oda.symbol, asset_class=oda.asset_category, currency=oda.currency)
         _set_isin(oda.conid, oda.isin)
+        _set_issuer_country(oda.conid, oda.issuer_country)
 
     # TL-D1 (spec 2026-06-11): transfers de securities son CREATORS — traen
     # spec completo (conid/isin/description/assetCategory 100% en data real).
@@ -1052,6 +1080,7 @@ def _collect_instrument_specs(parsed: ParsedXML) -> dict[str, dict]:
             continue
         _merge(tr.conid, symbol=tr.symbol, asset_class=tr.asset_class, name=tr.description)
         _set_isin(tr.conid, tr.isin)
+        _set_issuer_country(tr.conid, tr.issuer_country)
 
     return specs
 
@@ -1119,6 +1148,7 @@ async def _ensure_instruments(
             asset_class=spec["asset_class"],
             currency=spec.get("currency"),
             multiplier=spec.get("multiplier"),
+            issuer_country=spec.get("issuer_country"),
         )
         session.add(instrument)
         await session.flush()  # para tener instrument.id
@@ -1173,11 +1203,13 @@ async def _ensure_instruments(
         new_name = spec.get("name")
         new_currency = spec.get("currency")
         new_multiplier = spec.get("multiplier")
+        new_issuer_country = spec.get("issuer_country")
         changed = (
             (new_symbol and new_symbol != inst.symbol)
             or (new_name is not None and new_name != inst.name)
             or (new_currency is not None and new_currency != inst.currency)
             or (new_multiplier is not None and new_multiplier != inst.multiplier)
+            or (new_issuer_country is not None and new_issuer_country != inst.issuer_country)
         )
         if changed:
             if new_symbol:
@@ -1188,6 +1220,10 @@ async def _ensure_instruments(
                 inst.currency = new_currency
             if new_multiplier is not None:
                 inst.multiplier = new_multiplier
+            # IC-2: convergencia monótona NULL->valor, nunca pisa con None
+            # (idem el resto de columnas de esta rama — mismo mecanismo).
+            if new_issuer_country is not None:
+                inst.issuer_country = new_issuer_country
             inst.updated_at = func.now()
 
     return conid_to_iid

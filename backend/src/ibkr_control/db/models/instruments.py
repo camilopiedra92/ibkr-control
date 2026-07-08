@@ -50,6 +50,9 @@ class Instrument(Base):
     asset_class: Mapped[str] = mapped_column(String, nullable=False)
     currency: Mapped[str | None] = mapped_column(String, nullable=True)
     multiplier: Mapped[Decimal | None] = mapped_column(Numeric(), nullable=True)
+    # IC-2: país emisor canónico (issuerCountryCode del XML). Poblado por el
+    # persister (Task 3); nullable — no toda fuente lo trae.
+    issuer_country: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("NOW()")
     )

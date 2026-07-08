@@ -90,6 +90,23 @@ autorización — frozen idéntico a ``db/rls.py::authz_grant_function_sql()``,
 SP2-D3). Regenerado canónicamente en container (autogenerate temporal contra
 DB virgen, splice entre markers).
 
+**Amendment #9 (ingest-completeness hardening, IC-1/2/3 — spec 2026-07-06):**
+(a) IC-1 — columnas nullable de captura fiscal en ``cash_transactions``
+(``settle_date``/``report_date``/``ex_date``/``issuer_country``/``action_id`` +
+``raw_attrs`` JSONB server_default ``'{}'::jsonb``): source data que el parser ya ve
+(``action_id`` linkea dividendo↔WHT para el descuento Art. 254 ET); pobladas por
+el persister en un PR follow-up. (b) IC-2 — ``instruments.issuer_country``
+(nullable): país emisor canónico. (c) IC-3 — no-solapamiento de vigencias en
+``participations`` vía columna generada ``validity``
+(``daterange(valid_from, valid_to, '[)')`` STORED, single source of truth) + un
+``EXCLUDE USING gist`` column-based ``participations_no_overlap`` sobre
+``(organization_id =, party_id =, account_id =, validity &&)``. La columna la
+detecta autogenerate; el ``CREATE EXTENSION IF NOT EXISTS btree_gist`` (owner, no
+app_rls) y el ``EXCLUDE`` se aplican inline (autogenerate no los expresa). Spike
+de idempotencia previo: segundo autogenerate con diff vacío (solo el falso
+positivo apscheduler que el drift test filtra). Regenerado canónicamente en
+container. SIN cambios RLS (``_ORG_SCOPED_TABLES`` intacto).
+
 El DDL de ``upgrade()`` hasta el marcador ``end Alembic commands`` es
 autogenerado canónicamente (container, DB virgen, ``alembic revision
 --autogenerate``). Las SECCIONES HAND-WRITTEN que autogenerate NO captura
@@ -203,6 +220,7 @@ def upgrade() -> None:
         sa.Column("asset_class", sa.String(), nullable=False),
         sa.Column("currency", sa.String(), nullable=True),
         sa.Column("multiplier", sa.Numeric(), nullable=True),
+        sa.Column("issuer_country", sa.String(), nullable=True),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -743,6 +761,12 @@ def upgrade() -> None:
         sa.Column("pct", sa.Numeric(precision=5, scale=4), nullable=False),
         sa.Column("valid_from", sa.Date(), nullable=False),
         sa.Column("valid_to", sa.Date(), nullable=True),
+        sa.Column(
+            "validity",
+            postgresql.DATERANGE(),
+            sa.Computed("daterange(valid_from, valid_to, '[)')", persisted=True),
+            nullable=False,
+        ),
         sa.CheckConstraint("pct >= 0 AND pct <= 1", name=op.f("ck_participations_pct_range")),
         sa.CheckConstraint(
             "valid_to IS NULL OR valid_to > valid_from", name=op.f("ck_participations_valid_range")
@@ -791,6 +815,17 @@ def upgrade() -> None:
         sa.Column("description", sa.String(), nullable=True),
         sa.Column("date", sa.Date(), nullable=False),
         sa.Column("symbol", sa.String(), nullable=True),
+        sa.Column("settle_date", sa.Date(), nullable=True),
+        sa.Column("report_date", sa.Date(), nullable=True),
+        sa.Column("ex_date", sa.Date(), nullable=True),
+        sa.Column("issuer_country", sa.String(), nullable=True),
+        sa.Column("action_id", sa.String(), nullable=True),
+        sa.Column(
+            "raw_attrs",
+            postgresql.JSONB(astext_type=sa.Text()),
+            server_default=sa.text("'{}'::jsonb"),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(
             ["account_id"],
             ["accounts.id"],
@@ -1474,6 +1509,21 @@ def upgrade() -> None:
     )
     # ### end Alembic commands ###
 
+    # --- IC-3: participations non-overlap EXCLUDE (amendment #9) ------------
+    # btree_gist provides the '=' operator class the gist EXCLUDE needs for the
+    # scalar equality columns; not used anywhere else today. Runs as the migrate
+    # owner (app_rls has no CREATE). The `validity` generated column is emitted by
+    # autogenerate (above); the EXCLUDE itself is hand-written because
+    # autogenerate does not express ExcludeConstraint. Column-based (over the flat
+    # `validity` daterange, not an inline expression) so it round-trips clean —
+    # the pre-build idempotency spike confirmed an empty second autogenerate diff.
+    op.execute("CREATE EXTENSION IF NOT EXISTS btree_gist")
+    op.execute(
+        "ALTER TABLE participations ADD CONSTRAINT participations_no_overlap "
+        "EXCLUDE USING gist ("
+        "organization_id WITH =, party_id WITH =, account_id WITH =, validity WITH &&)"
+    )
+
     # --- (0) seed the global institutions catalog (control plane) -----------
     # institutions is control-plane data (no RLS, like trm_days): the catalog is
     # not user input — it is seeded here so connections.institution_id has a row
@@ -1614,6 +1664,9 @@ def downgrade() -> None:
     op.execute("DROP FUNCTION IF EXISTS system_credentialed_org_ids()")
     op.execute("DROP INDEX IF EXISTS ix_apscheduler_jobs_next_run_time")
     op.execute("DROP TABLE IF EXISTS apscheduler_jobs")
+    # IC-3 (amendment #9): drop the EXCLUDE before its table, then the extension.
+    op.execute("ALTER TABLE participations DROP CONSTRAINT IF EXISTS participations_no_overlap")
+    op.execute("DROP EXTENSION IF EXISTS btree_gist")
 
     # ### commands auto generated by Alembic - please adjust! ###
     op.drop_index(op.f("ix_closed_lots_source_trade_id"), table_name="closed_lots")
