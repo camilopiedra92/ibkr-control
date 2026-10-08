@@ -36,7 +36,6 @@ _Phase 2.x (pre-pivot, contexto histórico): completa, tags `v0.2.0`→`v0.2.7`.
 ### Convenciones (heredadas)
 
 - **La sección "⏯ Cómo continuar" puede quedar stale** — se redacta durante la sesión anterior, a veces ANTES del merge/tag/push final. Verificá el estado real contra git/tests antes de confiar en ella: `git status`, `git log --oneline -5`, `git ls-remote --tags origin` (no solo `git tag -l`, que es local), `uv run pytest -q`, `pnpm build`. Caso 2026-06-02: el doc decía "phase26 local, pending merge" cuando ya estaba mergeada (PR #2), tageada y pusheada.
-- TDD: failing test → minimal impl → passing test → commit
 - Frequent commits: cada step del plan termina en commit
 - **No commitear shortcuts sin canonicalizar** — atajos en exploración/debugging OK; antes de `git commit` reemplazar por el flujo canónico documentado **O** pedir aprobación explícita al usuario surface-eando el trade-off (ver §Convenciones de código → "Shortcuts y flujos canónicos")
 - No emojis en código (Unicode arrows ✓ ⚠ ✗ → como content UI sí)
@@ -344,7 +343,6 @@ El plan fue escrito asumiendo Next 14 / Tailwind v3 / shadcn Slate. `pnpm create
 
 ## Convenciones de código
 
-- **TDD**: failing test → minimal impl → passing test → commit
 - **Frequent commits**: cada step del plan termina en commit
 - **DRY, YAGNI**: no over-engineering
 - **No emojis en código** salvo iconografía UI explícita
